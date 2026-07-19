@@ -1,0 +1,9 @@
+{
+  "framework": "react-router",
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}

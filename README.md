@@ -1,87 +1,47 @@
-# Welcome to React Router!
+# TrackTale
 
-A modern, production-ready template for building full-stack React applications using React Router.
+A private, invite-only trip journal. Travelers feed it through a **Telegram bot** each evening;
+family follows along on a **secret no-login link** — a map with day-colored routes, photos,
+notes, stats and weather.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## How it works
 
-## Features
+- Send the bot a **Komoot share link** → the tour (track + official stats) is imported.
+- Send a **GPX/FIT file** → parsed directly; several uploads merge into one day.
+- Send **photos** (with captions) and **text** → the day's journal; photos are pinned to the
+  route by timestamp (Telegram strips GPS EXIF).
+- `/day 3` sets which day uploads go to; a silent 3 AM reminder pings you if a day has no track.
+- A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
+- A Garmin LiveTrack link shows a "Live now" banner for 24 h.
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+## Setup
 
-## Getting Started
+1. **Supabase**: create a project, run [supabase/schema.sql](supabase/schema.sql) in the SQL
+   editor (creates tables + public `photos` bucket).
+2. **Telegram**: create a bot via [@BotFather](https://t.me/BotFather); get your user id from
+   [@userinfobot](https://t.me/userinfobot).
+3. **Env**: copy [.env.example](.env.example) to `.env` and fill everything in.
+4. **Webhook** (after deploying):
+   ```sh
+   curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+     -d "url=$APP_ORIGIN/api/telegram" \
+     -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+   ```
+5. **Vercel**: deploy; set the env vars; `vercel.json` schedules the daily cron (01:00 UTC —
+   the reminder + plan refresh + live-link expiry).
 
-### Installation
+## Development
 
-Install the dependencies:
-
-```bash
-npm install
+```sh
+npm run dev        # http://localhost:5173
+npm run typecheck
 ```
 
-### Development
+`/preview` renders the family page with fixture data (dev only, no database needed).
 
-Start the development server with HMR:
+## Notes
 
-```bash
-npm run dev
-```
-
-Your application will be available at `http://localhost:5173`.
-
-## Building for Production
-
-Create a production build:
-
-```bash
-npm run build
-```
-
-## Deployment
-
-### Docker Deployment
-
-To build and run using Docker:
-
-```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
-```
-
-The containerized application can be deployed to any platform that supports Docker, including:
-
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
-```
-
-## Styling
-
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
-
----
-
-Built with ❤️ using React Router.
+- Komoot ingestion uses Komoot's internal API via the share token. It is unofficial and can
+  break at any time — GPX upload is the always-works fallback, by design.
+- The bot only answers Telegram users on the allowlist (owner id from env, friends via
+  `/invite` codes).

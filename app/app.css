@@ -1,15 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+  --font-sans: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display: "Fraunces", Georgia, serif;
+
+  /* Topographic-logbook palette: quiet greens and paper so day colors carry the page */
+  --color-pine: #1e3a2f;
+  --color-pine-soft: #2e5243;
+  --color-paper: #fbfaf7;
+  --color-ink: #24312b;
+  --color-faint: #6b7a72;
+  --color-trail: #e3e0d8;
+  --color-live: #d64533;
 }
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
+  @apply bg-paper text-ink;
+}
 
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
+::selection {
+  background: var(--color-pine);
+  color: var(--color-paper);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
