@@ -144,6 +144,62 @@ export function decimate(points: TrackPoint[], maxPoints = 2000): TrackPoint[] {
   return out;
 }
 
+export interface ProfilePoint {
+  /** cumulative metres from the start of the day */
+  d: number;
+  /** smoothed elevation in metres */
+  e: number;
+  lng: number;
+  lat: number;
+}
+
+/**
+ * Cumulative distance/elevation series for a day's chart.
+ *
+ * Raw GPS altitude is noisy enough to look like a seismograph, so the line is
+ * smoothed with a moving average — the headline climb figure still comes from
+ * the authoritative stats, not from this.
+ */
+export function buildProfile(points: TrackPoint[], maxPoints = 240): ProfilePoint[] {
+  const withAlt = points.filter((p) => p.alt !== undefined);
+  if (withAlt.length < 2) return [];
+
+  const cumulative: number[] = [0];
+  for (let i = 1; i < withAlt.length; i++) {
+    cumulative.push(cumulative[i - 1] + haversineM(withAlt[i - 1], withAlt[i]));
+  }
+
+  const window = Math.max(1, Math.round(withAlt.length / 120));
+  const smoothed = withAlt.map((_, i) => {
+    const from = Math.max(0, i - window);
+    const to = Math.min(withAlt.length - 1, i + window);
+    let sum = 0;
+    for (let j = from; j <= to; j++) sum += withAlt[j].alt as number;
+    return sum / (to - from + 1);
+  });
+
+  const step = Math.max(1, Math.ceil(withAlt.length / maxPoints));
+  const out: ProfilePoint[] = [];
+  for (let i = 0; i < withAlt.length; i += step) {
+    out.push({
+      d: Math.round(cumulative[i]),
+      e: Math.round(smoothed[i] * 10) / 10,
+      lng: Math.round(withAlt[i].lng * 1e5) / 1e5,
+      lat: Math.round(withAlt[i].lat * 1e5) / 1e5,
+    });
+  }
+  const lastIdx = withAlt.length - 1;
+  if (out[out.length - 1]?.d !== Math.round(cumulative[lastIdx])) {
+    out.push({
+      d: Math.round(cumulative[lastIdx]),
+      e: Math.round(smoothed[lastIdx] * 10) / 10,
+      lng: Math.round(withAlt[lastIdx].lng * 1e5) / 1e5,
+      lat: Math.round(withAlt[lastIdx].lat * 1e5) / 1e5,
+    });
+  }
+  return out;
+}
+
 export const DAY_COLORS = [
   "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
   "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",

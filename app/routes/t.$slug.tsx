@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { data } from "react-router";
+import { data, Form, useNavigation } from "react-router";
 import type { Route } from "./+types/t.$slug";
 import { getTripBySlug } from "../lib/db.server";
+import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
-import { fromGeoJson, type TrackGeoJson } from "../lib/track";
+import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { weatherIcon, type DayWeather } from "../lib/weather";
+import { ElevationProfile } from "../components/ElevationProfile";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 export interface ViewerPhoto {
@@ -21,6 +23,12 @@ export interface ViewerNote {
   author: string | null;
 }
 
+export interface ViewerComment {
+  author: string;
+  text: string;
+  at: string;
+}
+
 export interface ViewerDay {
   dayNumber: number;
   date: string;
@@ -30,9 +38,24 @@ export interface ViewerDay {
   movingS: number;
   sports: string[];
   tracks: TrackGeoJson[];
+  profile: ProfilePoint[];
   photos: ViewerPhoto[];
   notes: ViewerNote[];
+  comments: ViewerComment[];
   weather: DayWeather | null;
+}
+
+export async function action({ request, params }: Route.ActionArgs) {
+  const form = await request.formData();
+  const result = await postComment({
+    slug: params.slug,
+    dayNumber: Number(form.get("dayNumber")),
+    authorName: String(form.get("authorName") ?? ""),
+    text: String(form.get("text") ?? ""),
+  });
+  return result.ok
+    ? { ok: true as const, error: null, dayNumber: Number(form.get("dayNumber")) }
+    : { ok: false as const, error: result.error, dayNumber: Number(form.get("dayNumber")) };
 }
 
 export async function loader({ params }: Route.LoaderArgs) {
@@ -43,7 +66,7 @@ export async function loader({ params }: Route.LoaderArgs) {
     supabase()
       .from("days")
       .select(
-        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, caption, matched_lat, matched_lng, telegram_date, author_name), notes(text, created_at, author_name), weather_cache(data)",
+        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, caption, matched_lat, matched_lng, telegram_date, author_name), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
       )
       .eq("trip_id", trip.id)
       .order("day_number"),
@@ -69,6 +92,10 @@ export async function loader({ params }: Route.LoaderArgs) {
         movingS: segments.reduce((s, seg) => s + seg.moving_s, 0),
         sports: [...new Set(segments.map((s) => s.sport).filter(Boolean))] as string[],
         tracks: segments.map((s) => s.geojson as TrackGeoJson),
+        // Segments of a split day read as one continuous climb.
+        profile: buildProfile(
+          segments.flatMap((s) => fromGeoJson(s.geojson as TrackGeoJson)),
+        ),
         photos: [...d.media]
           .sort((a, b) => Date.parse(a.telegram_date) - Date.parse(b.telegram_date))
           .map((m) => ({
@@ -82,6 +109,16 @@ export async function loader({ params }: Route.LoaderArgs) {
         notes: [...d.notes]
           .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
           .map((n) => ({ text: n.text, author: n.author_name })),
+        comments: [...d.comments]
+          .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+          .map((c) => ({
+            author: c.author_name,
+            text: c.text,
+            at: new Date(c.created_at).toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "short",
+            }),
+          })),
         weather: (d.weather_cache as unknown as { data: DayWeather } | null)?.data ?? null,
       };
     })
@@ -104,6 +141,9 @@ export async function loader({ params }: Route.LoaderArgs) {
 
   return {
     showAuthors: contributors.size > 1,
+    ogUrl: trip.og_path
+      ? `${storage.getPublicUrl(trip.og_path).data.publicUrl}?v=${Date.parse(trip.og_updated_at ?? "") || 0}`
+      : null,
     name: trip.name,
     startDate: trip.start_date,
     endDate: trip.end_date,
@@ -118,9 +158,29 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export function meta({ loaderData: trip }: Route.MetaArgs) {
+  if (!trip) return [{ title: "TrackTale" }, { name: "robots", content: "noindex, nofollow" }];
+
+  const summary = [
+    `${trip.totalKm.toFixed(0)} km`,
+    `${Math.round(trip.totalUp)} m climbed`,
+    `${trip.days.length} ${trip.days.length === 1 ? "day" : "days"}`,
+  ].join(" · ");
+
   return [
-    { title: trip ? `${trip.name} — TrackTale` : "TrackTale" },
+    { title: `${trip.name} — TrackTale` },
     { name: "robots", content: "noindex, nofollow" },
+    { name: "description", content: summary },
+    { property: "og:type", content: "website" },
+    { property: "og:title", content: trip.name },
+    { property: "og:description", content: summary },
+    ...(trip.ogUrl
+      ? [
+          { property: "og:image", content: trip.ogUrl },
+          { property: "og:image:width", content: "1200" },
+          { property: "og:image:height", content: "630" },
+          { name: "twitter:card", content: "summary_large_image" },
+        ]
+      : []),
   ];
 }
 
@@ -138,7 +198,10 @@ function formatHours(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-type MapHandle = { flyToDay: (dayNumber: number) => void };
+type MapHandle = {
+  flyToDay: (dayNumber: number) => void;
+  showScrub: (lngLat: [number, number] | null, color: string) => void;
+};
 
 function TripMap({
   days,
@@ -223,7 +286,30 @@ function TripMap({
         }
       });
 
+      // One reusable marker follows the elevation chart as it's scrubbed.
+      const scrubEl = document.createElement("div");
+      scrubEl.style.cssText =
+        "width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45);transition:background .15s";
+      const scrubMarker = new maplibregl.Marker({ element: scrubEl });
+      let scrubAttached = false;
+
       handleRef.current = {
+        showScrub(lngLat, color) {
+          if (!map) return;
+          if (!lngLat) {
+            if (scrubAttached) {
+              scrubMarker.remove();
+              scrubAttached = false;
+            }
+            return;
+          }
+          scrubEl.style.background = color;
+          scrubMarker.setLngLat(lngLat);
+          if (!scrubAttached) {
+            scrubMarker.addTo(map);
+            scrubAttached = true;
+          }
+        },
         flyToDay(dayNumber) {
           const day = days.find((d) => d.dayNumber === dayNumber);
           if (!day || !map) return;
@@ -254,6 +340,7 @@ export interface ViewerTrip {
   endDate: string;
   liveUrl: string | null;
   showAuthors: boolean;
+  ogUrl: string | null;
   days: ViewerDay[];
   plan: TrackGeoJson[];
   planKm: number;
@@ -262,11 +349,99 @@ export interface ViewerTrip {
   movingS: number;
 }
 
-export default function TripPage({ loaderData: trip }: Route.ComponentProps) {
-  return <TripView trip={trip} />;
+interface CommentResult {
+  ok: boolean;
+  error: string | null;
+  dayNumber: number;
 }
 
-export function TripView({ trip }: { trip: ViewerTrip }) {
+function DayGuestbook({
+  dayNumber,
+  comments,
+  color,
+  result,
+}: {
+  dayNumber: number;
+  comments: ViewerComment[];
+  color: string;
+  result?: CommentResult;
+}) {
+  const navigation = useNavigation();
+  const sending =
+    navigation.state === "submitting" &&
+    Number(navigation.formData?.get("dayNumber")) === dayNumber;
+  const [open, setOpen] = useState(false);
+  const showForm = open || comments.length > 0 || result !== undefined;
+
+  return (
+    <section className="mt-5">
+      {comments.length > 0 && (
+        <ul className="mb-3 space-y-2">
+          {comments.map((c, i) => (
+            <li key={i} className="rounded-lg bg-trail/30 px-3 py-2 text-sm">
+              <span className="font-bold" style={{ color }}>
+                {c.author}
+              </span>
+              <span className="text-faint"> · {c.at}</span>
+              <p className="mt-0.5 whitespace-pre-wrap">{c.text}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {showForm ? (
+        <Form method="post" className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <input type="hidden" name="dayNumber" value={dayNumber} />
+          <input
+            name="authorName"
+            required
+            maxLength={40}
+            placeholder="Your name"
+            aria-label={`Your name, day ${dayNumber}`}
+            className="rounded-lg border border-trail bg-paper px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-pine sm:w-40"
+          />
+          <input
+            name="text"
+            required
+            maxLength={800}
+            placeholder={`Say something about day ${dayNumber}…`}
+            aria-label={`Message for day ${dayNumber}`}
+            className="flex-1 rounded-lg border border-trail bg-paper px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-pine"
+          />
+          <button
+            type="submit"
+            disabled={sending}
+            className="rounded-lg bg-pine px-4 py-2 text-sm font-bold text-paper disabled:opacity-60"
+          >
+            {sending ? "Sending…" : "Send"}
+          </button>
+        </Form>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-sm text-faint underline underline-offset-2 hover:text-pine"
+        >
+          Leave a message for day {dayNumber}
+        </button>
+      )}
+
+      {result?.error && <p className="mt-2 text-sm text-live">{result.error}</p>}
+      {result?.ok && <p className="mt-2 text-sm text-pine-soft">Sent — they'll see it on the road.</p>}
+    </section>
+  );
+}
+
+export default function TripPage({ loaderData: trip, actionData }: Route.ComponentProps) {
+  return <TripView trip={trip} actionData={actionData} />;
+}
+
+export function TripView({
+  trip,
+  actionData,
+}: {
+  trip: ViewerTrip;
+  actionData?: CommentResult;
+}) {
   const mapHandle = useRef<MapHandle | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -316,36 +491,41 @@ export function TripView({ trip }: { trip: ViewerTrip }) {
         )}
       </header>
 
-      <div className="h-[58vh] min-h-[320px] w-full bg-trail/40">
-        {mounted && trip.days.length > 0 ? (
-          <TripMap days={trip.days} plan={trip.plan} handleRef={mapHandle} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-faint">
-            {trip.days.length === 0 ? "The journey hasn't started yet — check back soon." : "Loading map…"}
-          </div>
+      {/* Map stays pinned so scrubbing a day's elevation chart is visible on it. */}
+      <div className="sticky top-0 z-10 bg-paper">
+        <div className="h-[42vh] min-h-[240px] w-full bg-trail/40 sm:h-[48vh]">
+          {mounted && trip.days.length > 0 ? (
+            <TripMap days={trip.days} plan={trip.plan} handleRef={mapHandle} />
+          ) : (
+            <div className="flex h-full items-center justify-center text-faint">
+              {trip.days.length === 0
+                ? "The journey hasn't started yet — check back soon."
+                : "Loading map…"}
+            </div>
+          )}
+        </div>
+
+        {/* Stage ribbon: legend + navigation in one */}
+        {trip.days.length > 0 && (
+          <nav className="border-b border-trail bg-paper/95 backdrop-blur">
+            <div className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 py-2">
+              {trip.days.map((day) => (
+                <button
+                  key={day.dayNumber}
+                  onClick={() => scrollToDay(day.dayNumber)}
+                  className="flex shrink-0 items-center gap-2 rounded-full border border-trail px-3 py-1 text-sm hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
+                >
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: day.color }} />
+                  <span className="font-bold text-pine">Day {day.dayNumber}</span>
+                  {day.distanceM > 0 && (
+                    <span className="text-faint">{(day.distanceM / 1000).toFixed(0)} km</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </nav>
         )}
       </div>
-
-      {/* Stage ribbon: legend + navigation in one */}
-      {trip.days.length > 0 && (
-        <nav className="sticky top-0 z-10 border-b border-trail bg-paper/95 backdrop-blur">
-          <div className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 py-2">
-            {trip.days.map((day) => (
-              <button
-                key={day.dayNumber}
-                onClick={() => scrollToDay(day.dayNumber)}
-                className="flex shrink-0 items-center gap-2 rounded-full border border-trail px-3 py-1 text-sm hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: day.color }} />
-                <span className="font-bold text-pine">Day {day.dayNumber}</span>
-                {day.distanceM > 0 && (
-                  <span className="text-faint">{(day.distanceM / 1000).toFixed(0)} km</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </nav>
-      )}
 
       <main className="mx-auto max-w-5xl px-4 py-8">
         {trip.days.length > 0 && (
@@ -364,7 +544,7 @@ export function TripView({ trip }: { trip: ViewerTrip }) {
               <article
                 key={day.dayNumber}
                 id={`day-${day.dayNumber}`}
-                className="scroll-mt-16 border-l-4 pl-4 sm:pl-6"
+                className="scroll-mt-[calc(42vh+3rem)] border-l-4 pl-4 sm:scroll-mt-[calc(48vh+3rem)] sm:pl-6"
                 style={{ borderColor: day.color }}
               >
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -391,6 +571,14 @@ export function TripView({ trip }: { trip: ViewerTrip }) {
                       {day.tracks.length > 1 && ` · ${day.tracks.length} segments`}
                     </span>
                   </p>
+                )}
+
+                {day.profile.length > 1 && (
+                  <ElevationProfile
+                    profile={day.profile}
+                    color={day.color}
+                    onScrub={(p) => mapHandle.current?.showScrub([p.lng, p.lat], day.color)}
+                  />
                 )}
 
                 {day.notes.map((note, i) => (
@@ -433,6 +621,12 @@ export function TripView({ trip }: { trip: ViewerTrip }) {
                     ))}
                   </div>
                 )}
+                <DayGuestbook
+                  dayNumber={day.dayNumber}
+                  comments={day.comments}
+                  color={day.color}
+                  result={actionData?.dayNumber === day.dayNumber ? actionData : undefined}
+                />
               </article>
             );
           })}

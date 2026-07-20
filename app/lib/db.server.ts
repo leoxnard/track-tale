@@ -26,6 +26,8 @@ export interface DbTrip {
   current_day_number: number | null;
   live_url: string | null;
   live_expires_at: string | null;
+  og_path: string | null;
+  og_updated_at: string | null;
 }
 
 export interface DbDay {

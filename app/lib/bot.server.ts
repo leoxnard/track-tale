@@ -25,6 +25,57 @@ import { parseFit, parseGpx } from "./gpx";
 import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson } from "./track";
 import { matchPhotoToTrack } from "./photo-match";
 import { fetchDayWeather } from "./weather";
+import { renderOgCard } from "./og.server";
+
+type EntityType = "note" | "media" | "track_segment" | "plan_segment" | "comment";
+
+/**
+ * Remember which row a confirmation message created, so replying /delete to it
+ * removes exactly that thing — and /undo can walk back the most recent one.
+ */
+async function recordAction(
+  ctx: Context,
+  sent: { message_id: number } | undefined,
+  entityType: EntityType,
+  entityId: string,
+) {
+  if (!sent || !ctx.chat) return;
+  await supabase().from("bot_actions").insert({
+    chat_id: ctx.chat.id,
+    message_id: sent.message_id,
+    entity_type: entityType,
+    entity_id: entityId,
+  });
+}
+
+const ENTITY_TABLE: Record<EntityType, string> = {
+  note: "notes",
+  media: "media",
+  track_segment: "track_segments",
+  plan_segment: "plan_segments",
+  comment: "comments",
+};
+
+const ENTITY_LABEL: Record<EntityType, string> = {
+  note: "Note",
+  media: "Photo",
+  track_segment: "Track",
+  plan_segment: "Plan segment",
+  comment: "Comment",
+};
+
+async function deleteAction(action: { entity_type: EntityType; entity_id: string }): Promise<void> {
+  if (action.entity_type === "media") {
+    const { data } = await supabase()
+      .from("media")
+      .select("storage_path, thumb_path")
+      .eq("id", action.entity_id)
+      .maybeSingle();
+    const paths = [data?.storage_path, data?.thumb_path].filter(Boolean) as string[];
+    if (paths.length > 0) await supabase().storage.from("photos").remove(paths);
+  }
+  await supabase().from(ENTITY_TABLE[action.entity_type]).delete().eq("id", action.entity_id);
+}
 
 const LIVETRACK_RE = /https?:\/\/(?:livetrack\.garmin\.com|[a-z]+\.garmin\.com\/livetrack)[^\s]*/i;
 
@@ -50,8 +101,12 @@ const HELP = `🚴 *TrackTale* — your trip journal
 • Komoot share link → route imported
 • GPX or FIT file → route imported (several merge into one day)
 • Photos with captions → day gallery, pinned on the map
-• /note Text → journal entry
+• Any other text → journal entry
 • Garmin LiveTrack link → 🔴 live banner for 24h
+
+*Oops*
+/undo — remove the last thing added
+Reply /delete to one of my messages — removes that one
 
 *Plan*
 • A *planned* Komoot tour link → grey plan line + progress
@@ -60,7 +115,7 @@ const HELP = `🚴 *TrackTale* — your trip journal
 
 /invite — invite code for a friend
 
-_In a group, add me and everyone can contribute. Plain chat is ignored — use /note so your words land in the journal. In a private chat any text becomes a note._`;
+_Add me to a group and everyone travelling can contribute — photos and notes are credited by name._`;
 
 /**
  * Decide whether we may act on this update, and gather sender identity.
@@ -158,7 +213,7 @@ async function saveTrackSegment(
   if (!day) return;
 
   const points = decimate(track.points, 4000);
-  const { error } = await supabase().from("track_segments").insert({
+  const { data: inserted, error } = await supabase().from("track_segments").insert({
     day_id: day.id,
     geojson: toGeoJson(points),
     distance_m: track.stats.distanceM,
@@ -171,7 +226,9 @@ async function saveTrackSegment(
     source,
     source_url: sourceUrl ?? null,
     started_at: track.stats.startedAt ?? null,
-  });
+  })
+    .select("id")
+    .single();
   if (error) throw error;
 
   // Cache weather for the day at the track midpoint (best effort).
@@ -197,7 +254,15 @@ async function saveTrackSegment(
     `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
   ];
   if ((count ?? 1) > 1) parts.push(`🧩 ${count} segments merged for this day`);
-  await ctx.reply(parts.join("\n"), { parse_mode: "Markdown" }).catch(() => {});
+  const sent = await ctx.reply(parts.join("\n"), { parse_mode: "Markdown" }).catch(() => undefined);
+  await recordAction(ctx, sent, "track_segment", inserted.id);
+
+  // The share card shows progress, so it follows every new track.
+  try {
+    await renderOgCard(trip.id);
+  } catch {
+    // a stale card must never block an upload
+  }
 }
 
 async function savePlanSegment(ctx: Context, trip: DbTrip, track: NormalizedTrack, sourceUrl?: string) {
@@ -267,14 +332,21 @@ async function saveNote(ctx: Context, text: string) {
   if (!day) return;
 
   const { senderId, senderName } = ctx.state;
-  const { error } = await supabase().from("notes").insert({
-    day_id: day.id,
-    text,
-    author_telegram_id: senderId,
-    author_name: senderName,
-  });
+  const { data: inserted, error } = await supabase()
+    .from("notes")
+    .insert({
+      day_id: day.id,
+      text,
+      author_telegram_id: senderId,
+      author_name: senderName,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
-  await ctx.reply(`📝 Noted for day ${day.day_number}.`).catch(() => {});
+  const sent = await ctx
+    .reply(`📝 Noted for day ${day.day_number}. Reply /delete to remove.`)
+    .catch(() => undefined);
+  await recordAction(ctx, sent, "note", inserted.id);
 }
 
 export function createBot(): Bot {
@@ -370,6 +442,52 @@ export function createBot(): Bot {
       return;
     }
     await saveNote(ctx, text);
+  });
+
+  bot.command("delete", async (ctx) => {
+    const replyTo = ctx.message?.reply_to_message?.message_id;
+    if (!replyTo) {
+      await ctx.reply("Reply /delete to one of my confirmations, or use /undo for the last thing added.");
+      return;
+    }
+    const { data: action } = await supabase()
+      .from("bot_actions")
+      .select("entity_type, entity_id")
+      .eq("chat_id", ctx.chat!.id)
+      .eq("message_id", replyTo)
+      .maybeSingle();
+    if (!action) {
+      await ctx.reply("I don't have anything on record for that message.");
+      return;
+    }
+    await deleteAction(action);
+    await supabase()
+      .from("bot_actions")
+      .delete()
+      .eq("chat_id", ctx.chat!.id)
+      .eq("message_id", replyTo);
+    await ctx.reply(`🗑️ ${ENTITY_LABEL[action.entity_type as EntityType]} deleted.`);
+  });
+
+  bot.command("undo", async (ctx) => {
+    const { data: action } = await supabase()
+      .from("bot_actions")
+      .select("message_id, entity_type, entity_id")
+      .eq("chat_id", ctx.chat!.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!action) {
+      await ctx.reply("Nothing to undo here.");
+      return;
+    }
+    await deleteAction(action);
+    await supabase()
+      .from("bot_actions")
+      .delete()
+      .eq("chat_id", ctx.chat!.id)
+      .eq("message_id", action.message_id);
+    await ctx.reply(`↩️ ${ENTITY_LABEL[action.entity_type as EntityType]} removed.`);
   });
 
   bot.command("trip", async (ctx) => {
@@ -511,7 +629,7 @@ export function createBot(): Bot {
       }
 
       const { senderId, senderName } = ctx.state;
-      const { error } = await supabase().from("media").insert({
+      const { data: inserted, error } = await supabase().from("media").insert({
         day_id: day.id,
         storage_path: fullPath,
         thumb_path: thumbPath,
@@ -521,11 +639,14 @@ export function createBot(): Bot {
         matched_lng: matched?.lng ?? null,
         author_telegram_id: senderId,
         author_name: senderName,
-      });
+      })
+        .select("id")
+        .single();
       if (error) throw error;
-      await ctx
+      const sent = await ctx
         .reply(`📸 Added to day ${day.day_number}${matched ? " and pinned on the map" : ""}.`)
-        .catch(() => {});
+        .catch(() => undefined);
+      await recordAction(ctx, sent, "media", inserted.id);
     } catch (err) {
       await ctx.reply(`⚠️ Photo upload failed: ${err instanceof Error ? err.message : "unknown error"}`);
     }
@@ -556,9 +677,8 @@ export function createBot(): Bot {
       return;
     }
 
-    // In a group the bot sees ordinary conversation, which must not become
-    // journal entries — there, /note is the explicit way in.
-    if (ctx.state.isGroup) return;
+    // Trip chats exist for the journal, so plain text is a note everywhere.
+    // Coordination chatter that slips in is one /delete reply away.
     await saveNote(ctx, text);
   });
 
