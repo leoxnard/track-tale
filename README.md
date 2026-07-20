@@ -45,3 +45,26 @@ npm run typecheck
   break at any time — GPX upload is the always-works fallback, by design.
 - The bot only answers Telegram users on the allowlist (owner id from env, friends via
   `/invite` codes).
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/newtrip Name \| 2026-08-01 \| 2026-08-10` | create a trip in this chat |
+| `/trips`, `/usetrip 2` | list and switch trips |
+| `/day 3` | set the day uploads land on |
+| `/trip` | status and family link |
+| `/note …` | journal entry (plain text works too) |
+| `/undo`, reply `/delete` | remove the last / a specific item |
+| `/mypage`, `/newmypage` | permanent page with all trips; new link |
+| `/archive` | download the trip as a self-contained bundle |
+| `/refreshplan` | re-sync planned Komoot routes |
+| `/regeneratelink` | new family link for this trip |
+| `/invite` | one-time invite code for a friend |
+
+## Archives
+
+`/archive` produces a zip that needs neither network nor TrackTale: the map is
+inline SVG instead of tiles, elevation charts stay scrubbable via a small
+inlined script, photos are local files, and each day is written out as GPX.
+Drop the folder on any static host — including your own server — and it works.
