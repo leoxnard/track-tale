@@ -5,11 +5,18 @@ export interface DbUser {
   telegram_id: number;
   display_name: string;
   is_owner: boolean;
+}
+
+export interface DbChat {
+  chat_id: number;
+  type: string;
+  title: string | null;
   active_trip_id: string | null;
 }
 
 export interface DbTrip {
   id: string;
+  chat_id: number;
   owner_telegram_id: number;
   name: string;
   start_date: string;
@@ -68,7 +75,45 @@ export async function createInvite(code: string, createdBy: number): Promise<voi
   if (error) throw error;
 }
 
+/** Get or create the chat record for a Telegram chat (private or group). */
+export async function ensureChat(
+  chatId: number,
+  type: string,
+  title?: string,
+): Promise<DbChat> {
+  const existing = await supabase()
+    .from("chats")
+    .select("*")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (existing.data) {
+    // Group titles change; keep ours current without an extra round trip elsewhere.
+    if (title && title !== existing.data.title) {
+      await supabase().from("chats").update({ title }).eq("chat_id", chatId);
+      existing.data.title = title;
+    }
+    return existing.data;
+  }
+
+  const { data, error } = await supabase()
+    .from("chats")
+    .insert({ chat_id: chatId, type, title: title ?? null })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function chatHasTrips(chatId: number): Promise<boolean> {
+  const { count } = await supabase()
+    .from("trips")
+    .select("*", { count: "exact", head: true })
+    .eq("chat_id", chatId);
+  return (count ?? 0) > 0;
+}
+
 export async function createTrip(trip: {
+  chat_id: number;
   owner_telegram_id: number;
   name: string;
   start_date: string;
@@ -78,10 +123,7 @@ export async function createTrip(trip: {
 }): Promise<DbTrip> {
   const { data, error } = await supabase().from("trips").insert(trip).select().single();
   if (error) throw error;
-  await supabase()
-    .from("users")
-    .update({ active_trip_id: data.id })
-    .eq("telegram_id", trip.owner_telegram_id);
+  await setActiveTrip(trip.chat_id, data.id);
   return data;
 }
 
@@ -95,11 +137,17 @@ export async function getTripBySlug(slug: string): Promise<DbTrip | null> {
   return data;
 }
 
-export async function listTrips(ownerTelegramId: number): Promise<DbTrip[]> {
+/** The trip that uploads in this chat currently land on. */
+export async function getActiveTrip(chat: DbChat): Promise<DbTrip | null> {
+  if (!chat.active_trip_id) return null;
+  return getTrip(chat.active_trip_id);
+}
+
+export async function listTrips(chatId: number): Promise<DbTrip[]> {
   const { data } = await supabase()
     .from("trips")
     .select("*")
-    .eq("owner_telegram_id", ownerTelegramId)
+    .eq("chat_id", chatId)
     .order("start_date", { ascending: false });
   return data ?? [];
 }
@@ -109,11 +157,11 @@ export async function updateTrip(tripId: string, patch: Partial<DbTrip>): Promis
   if (error) throw error;
 }
 
-export async function setActiveTrip(telegramId: number, tripId: string): Promise<void> {
+export async function setActiveTrip(chatId: number, tripId: string): Promise<void> {
   const { error } = await supabase()
-    .from("users")
+    .from("chats")
     .update({ active_trip_id: tripId })
-    .eq("telegram_id", telegramId);
+    .eq("chat_id", chatId);
   if (error) throw error;
 }
 

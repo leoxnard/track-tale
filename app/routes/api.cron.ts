@@ -42,8 +42,10 @@ export async function loader({ request }: { request: Request }) {
         const dayNumber =
           Math.round((Date.parse(yesterday) - Date.parse(trip.start_date)) / 86400000) + 1;
         try {
+          // Reminders go to the chat that owns the trip, so a travelling group
+          // sees them together rather than only the person who created it.
           await bot.api.sendMessage(
-            trip.owner_telegram_id,
+            trip.chat_id,
             `🌙 Reminder: no track saved for ${yesterday} (day ${dayNumber}) of "${trip.name}" yet.\n` +
               `Send /day ${dayNumber} and then the Komoot link or GPX file when you get a chance.`,
             { disable_notification: true },

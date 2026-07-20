@@ -3,10 +3,13 @@ import { nanoid } from "nanoid";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
 import {
+  chatHasTrips,
   createInvite,
   createTrip,
   createUser,
+  ensureChat,
   ensureDay,
+  getActiveTrip,
   getTrip,
   getUser,
   listTrips,
@@ -14,8 +17,8 @@ import {
   setActiveTrip,
   tripDayCount,
   updateTrip,
+  type DbChat,
   type DbTrip,
-  type DbUser,
 } from "./db.server";
 import { fetchKomootTour, findKomootUrl, parseKomootUrl } from "./komoot";
 import { parseFit, parseGpx } from "./gpx";
@@ -25,59 +28,104 @@ import { fetchDayWeather } from "./weather";
 
 const LIVETRACK_RE = /https?:\/\/(?:livetrack\.garmin\.com|[a-z]+\.garmin\.com\/livetrack)[^\s]*/i;
 
+interface BotState {
+  chat: DbChat;
+  senderId: number;
+  senderName: string;
+  isGroup: boolean;
+  isRegistered: boolean;
+}
+
 const HELP = `🚴 *TrackTale* — your trip journal
 
 *Trip setup*
 /newtrip Name | 2026-08-01 | 2026-08-10
-/trips — list your trips
+/trips — list this chat's trips
 /usetrip 2 — switch active trip
 /day 3 — set the day uploads go to
 /trip — status + family link
 /regeneratelink — new family link
 
-*During the trip* (everything goes to the current /day)
-• Send a Komoot share link → route is imported
-• Send a GPX or FIT file → route is imported (several merge into one day)
-• Send photos (with captions) → day gallery, pinned on the map
-• Send text → journal note
-• Send a Garmin LiveTrack link → 🔴 live banner for 24h
+*During the trip* (everything lands on the current /day)
+• Komoot share link → route imported
+• GPX or FIT file → route imported (several merge into one day)
+• Photos with captions → day gallery, pinned on the map
+• /note Text → journal entry
+• Garmin LiveTrack link → 🔴 live banner for 24h
 
 *Plan*
-• Send a *planned* Komoot tour link → becomes the grey plan line
-• Attach GPX with caption "plan" → same
-/refreshplan — re-fetch plan links after editing in Komoot
+• A *planned* Komoot tour link → grey plan line + progress
+• GPX with caption "plan" → same
+/refreshplan — re-sync plan links after editing in Komoot
 
-/invite — create an invite code for a friend`;
+/invite — invite code for a friend
 
-async function resolveUser(ctx: Context): Promise<DbUser | null> {
+_In a group, add me and everyone can contribute. Plain chat is ignored — use /note so your words land in the journal. In a private chat any text becomes a note._`;
+
+/**
+ * Decide whether we may act on this update, and gather sender identity.
+ *
+ * Private chats require a registered user. Groups are trusted once they contain
+ * a trip — the person who created it was registered, and a private group's
+ * members are there by invitation.
+ */
+async function authorize(ctx: Context): Promise<BotState | null> {
   const from = ctx.from;
-  if (!from) return null;
-  const existing = await getUser(from.id);
-  if (existing) return existing;
+  const chat = ctx.chat;
+  if (!from || !chat) return null;
 
-  if (from.id === env.ownerTelegramId) {
-    return createUser(from.id, from.first_name ?? "Owner", true);
+  const isGroup = chat.type === "group" || chat.type === "supergroup";
+  const senderName = from.first_name ?? "Someone";
+
+  let user = await getUser(from.id);
+  if (!user && from.id === env.ownerTelegramId) {
+    user = await createUser(from.id, senderName, true);
   }
 
-  // Unknown user: only an invite code gets them in.
-  const text = ctx.message?.text?.trim() ?? "";
-  const codeMatch = text.match(/^(?:\/start\s+)?([A-Za-z0-9_-]{8,21})$/);
-  if (codeMatch && (await redeemInvite(codeMatch[1], from.id))) {
-    const user = await createUser(from.id, from.first_name ?? "Friend", false);
-    await ctx.reply("✅ Welcome to TrackTale! Send /help to see how it works.");
-    return user;
+  // An unregistered sender in a private chat can still redeem an invite code.
+  if (!user && !isGroup) {
+    const text = ctx.message?.text?.trim() ?? "";
+    const codeMatch = text.match(/^(?:\/start\s+)?([A-Za-z0-9_-]{8,21})$/);
+    if (codeMatch && (await redeemInvite(codeMatch[1], from.id))) {
+      user = await createUser(from.id, senderName, false);
+      await ctx.reply("✅ Welcome to TrackTale! Send /help to see how it works.").catch(() => {});
+    }
   }
-  return null;
-}
 
-async function requireTrip(ctx: Context, user: DbUser): Promise<DbTrip | null> {
-  if (!user.active_trip_id) {
-    await ctx.reply("No active trip. Create one first:\n/newtrip Name | 2026-08-01 | 2026-08-10");
+  // Check access before touching the database, so an unknown group that adds
+  // the bot cannot make us create rows for it.
+  const allowed = user !== null || (isGroup && (await chatHasTrips(chat.id)));
+  if (!allowed) {
+    if (ctx.message && !isGroup) {
+      await ctx
+        .reply("🔒 This is a private bot. Ask the owner for an invite code and send it here.")
+        .catch(() => {});
+    }
     return null;
   }
-  const trip = await getTrip(user.active_trip_id);
+
+  const dbChat = await ensureChat(
+    chat.id,
+    chat.type,
+    isGroup && "title" in chat ? chat.title : undefined,
+  );
+
+  return {
+    chat: dbChat,
+    senderId: from.id,
+    senderName,
+    isGroup,
+    isRegistered: user !== null,
+  };
+}
+
+async function requireTrip(ctx: Context): Promise<DbTrip | null> {
+  const { chat } = ctx.state;
+  const trip = await getActiveTrip(chat);
   if (!trip) {
-    await ctx.reply("Your active trip no longer exists. /newtrip to create one.");
+    await ctx.reply(
+      "No active trip here. Create one:\n/newtrip Name | 2026-08-01 | 2026-08-10",
+    );
     return null;
   }
   return trip;
@@ -149,7 +197,7 @@ async function saveTrackSegment(
     `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
   ];
   if ((count ?? 1) > 1) parts.push(`🧩 ${count} segments merged for this day`);
-  await ctx.reply(parts.join("\n"), { parse_mode: "Markdown" });
+  await ctx.reply(parts.join("\n"), { parse_mode: "Markdown" }).catch(() => {});
 }
 
 async function savePlanSegment(ctx: Context, trip: DbTrip, track: NormalizedTrack, sourceUrl?: string) {
@@ -172,10 +220,12 @@ async function savePlanSegment(ctx: Context, trip: DbTrip, track: NormalizedTrac
     sort_order: count ?? 0,
   });
   if (error) throw error;
-  await ctx.reply(
-    `🗺️ Plan segment saved${track.name ? ` — ${track.name}` : ""} (${km(track.stats.distanceM)} km).` +
-      (sourceUrl ? " It re-syncs daily; /refreshplan to sync now." : ""),
-  );
+  await ctx
+    .reply(
+      `🗺️ Plan segment saved${track.name ? ` — ${track.name}` : ""} (${km(track.stats.distanceM)} km).` +
+        (sourceUrl ? " It re-syncs daily; /refreshplan to sync now." : ""),
+    )
+    .catch(() => {});
 }
 
 async function ingestKomootUrl(ctx: Context, trip: DbTrip, url: string) {
@@ -210,19 +260,30 @@ async function downloadTelegramFile(bot: Bot, fileId: string): Promise<ArrayBuff
   return res.arrayBuffer();
 }
 
+async function saveNote(ctx: Context, text: string) {
+  const trip = await requireTrip(ctx);
+  if (!trip) return;
+  const day = await requireDay(ctx, trip);
+  if (!day) return;
+
+  const { senderId, senderName } = ctx.state;
+  const { error } = await supabase().from("notes").insert({
+    day_id: day.id,
+    text,
+    author_telegram_id: senderId,
+    author_name: senderName,
+  });
+  if (error) throw error;
+  await ctx.reply(`📝 Noted for day ${day.day_number}.`).catch(() => {});
+}
+
 export function createBot(): Bot {
   const bot = new Bot(env.telegramBotToken);
 
-  // Gate every update on the allowlist.
   bot.use(async (ctx, next) => {
-    const user = await resolveUser(ctx);
-    if (!user) {
-      if (ctx.message) {
-        await ctx.reply("🔒 This is a private bot. Ask the owner for an invite code and send it here.");
-      }
-      return;
-    }
-    ctx.state = { user };
+    const state = await authorize(ctx);
+    if (!state) return;
+    ctx.state = state;
     await next();
   });
 
@@ -230,7 +291,11 @@ export function createBot(): Bot {
   bot.command("help", (ctx) => ctx.reply(HELP, { parse_mode: "Markdown" }));
 
   bot.command("newtrip", async (ctx) => {
-    const user = ctx.state.user as DbUser;
+    const { chat, senderId, isRegistered } = ctx.state;
+    if (!isRegistered) {
+      await ctx.reply("Only invited travellers can create trips. Ask the owner for an invite code.");
+      return;
+    }
     const parts = (ctx.match as string).split("|").map((s) => s.trim());
     const [name, start, end] = parts;
     if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(start ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(end ?? "")) {
@@ -242,7 +307,8 @@ export function createBot(): Bot {
       return;
     }
     const trip = await createTrip({
-      owner_telegram_id: user.telegram_id,
+      chat_id: chat.chat_id,
+      owner_telegram_id: senderId,
       name,
       start_date: start,
       end_date: end,
@@ -257,35 +323,34 @@ export function createBot(): Bot {
   });
 
   bot.command("trips", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trips = await listTrips(user.telegram_id);
+    const { chat } = ctx.state;
+    const trips = await listTrips(chat.chat_id);
     if (trips.length === 0) {
-      await ctx.reply("No trips yet. /newtrip Name | 2026-08-01 | 2026-08-10");
+      await ctx.reply("No trips in this chat yet. /newtrip Name | 2026-08-01 | 2026-08-10");
       return;
     }
     const lines = trips.map(
       (t, i) =>
-        `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date})${t.id === user.active_trip_id ? " ✅ active" : ""}`,
+        `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date})${t.id === chat.active_trip_id ? " ✅ active" : ""}`,
     );
     await ctx.reply(lines.join("\n") + "\n\nSwitch with /usetrip <number>");
   });
 
   bot.command("usetrip", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trips = await listTrips(user.telegram_id);
+    const { chat } = ctx.state;
+    const trips = await listTrips(chat.chat_id);
     const idx = parseInt((ctx.match as string).trim(), 10) - 1;
     const trip = trips[idx];
     if (!trip) {
       await ctx.reply("Usage: /usetrip <number from /trips>");
       return;
     }
-    await setActiveTrip(user.telegram_id, trip.id);
+    await setActiveTrip(chat.chat_id, trip.id);
     await ctx.reply(`✅ Active trip: ${trip.name}`);
   });
 
   bot.command("day", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trip = await requireTrip(ctx, user);
+    const trip = await requireTrip(ctx);
     if (!trip) return;
     const n = parseInt((ctx.match as string).trim(), 10);
     const max = tripDayCount(trip);
@@ -298,9 +363,17 @@ export function createBot(): Bot {
     await ctx.reply(`📅 Day ${n} (${day.date}) is now current — uploads land here.`);
   });
 
+  bot.command("note", async (ctx) => {
+    const text = (ctx.match as string).trim();
+    if (!text) {
+      await ctx.reply("Usage: /note What happened today");
+      return;
+    }
+    await saveNote(ctx, text);
+  });
+
   bot.command("trip", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trip = await requireTrip(ctx, user);
+    const trip = await requireTrip(ctx);
     if (!trip) return;
     const { data: days } = await supabase()
       .from("days")
@@ -334,8 +407,7 @@ export function createBot(): Bot {
   });
 
   bot.command("regeneratelink", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trip = await requireTrip(ctx, user);
+    const trip = await requireTrip(ctx);
     if (!trip) return;
     await updateTrip(trip.id, { share_slug: nanoid(16) });
     const updated = await getTrip(trip.id);
@@ -343,32 +415,38 @@ export function createBot(): Bot {
   });
 
   bot.command("invite", async (ctx) => {
-    const user = ctx.state.user as DbUser;
+    const { senderId, isRegistered } = ctx.state;
+    if (!isRegistered) {
+      await ctx.reply("Only invited travellers can create invite codes.");
+      return;
+    }
     const code = nanoid(10);
-    await createInvite(code, user.telegram_id);
-    await ctx.reply(`🎟️ One-time invite code (friend sends it to this bot):\n\`${code}\``, {
+    await createInvite(code, senderId);
+    await ctx.reply(`🎟️ One-time invite code (friend sends it to me in a private chat):\n\`${code}\``, {
       parse_mode: "Markdown",
     });
   });
 
   bot.command("refreshplan", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trip = await requireTrip(ctx, user);
+    const trip = await requireTrip(ctx);
     if (!trip) return;
     const updated = await refreshPlan(trip.id);
-    await ctx.reply(updated > 0 ? `🔄 Refreshed ${updated} plan segment(s) from Komoot.` : "No linked plan segments to refresh.");
+    await ctx.reply(
+      updated > 0
+        ? `🔄 Refreshed ${updated} plan segment(s) from Komoot.`
+        : "No linked plan segments to refresh.",
+    );
   });
 
   bot.on("message:document", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trip = await requireTrip(ctx, user);
+    const trip = await requireTrip(ctx);
     if (!trip) return;
     const doc = ctx.message.document;
     const name = (doc.file_name ?? "").toLowerCase();
     const isGpx = name.endsWith(".gpx");
     const isFit = name.endsWith(".fit");
     if (!isGpx && !isFit) {
-      await ctx.reply("I can only read .gpx and .fit files.");
+      if (!ctx.state.isGroup) await ctx.reply("I can only read .gpx and .fit files.");
       return;
     }
     if ((doc.file_size ?? 0) > 20 * 1024 * 1024) {
@@ -391,21 +469,34 @@ export function createBot(): Bot {
   });
 
   bot.on("message:photo", async (ctx) => {
-    const user = ctx.state.user as DbUser;
-    const trip = await requireTrip(ctx, user);
+    const trip = await requireTrip(ctx);
     if (!trip) return;
     const day = await requireDay(ctx, trip);
     if (!day) return;
 
-    const sizes = ctx.message.photo;
-    const best = sizes[sizes.length - 1];
+    // Telegram already ships several resolutions — use a small one for the grid
+    // so the family page stays cheap to load, and the largest for the lightbox.
+    const sizes = [...ctx.message.photo].sort((a, b) => a.width - b.width);
+    const full = sizes[sizes.length - 1];
+    const thumb = sizes.find((s) => s.width >= 320) ?? full;
+
     try {
-      const buffer = await downloadTelegramFile(bot, best.file_id);
-      const path = `${trip.id}/day-${day.day_number}/${nanoid(8)}.jpg`;
-      const { error: uploadError } = await supabase()
-        .storage.from("photos")
-        .upload(path, buffer, { contentType: "image/jpeg" });
-      if (uploadError) throw uploadError;
+      const id = nanoid(8);
+      const base = `${trip.id}/day-${day.day_number}/${id}`;
+      const store = supabase().storage.from("photos");
+
+      const fullBuf = await downloadTelegramFile(bot, full.file_id);
+      const fullPath = `${base}.jpg`;
+      const up = await store.upload(fullPath, fullBuf, { contentType: "image/jpeg" });
+      if (up.error) throw up.error;
+
+      let thumbPath: string | null = null;
+      if (thumb.file_id !== full.file_id) {
+        const thumbBuf = await downloadTelegramFile(bot, thumb.file_id);
+        thumbPath = `${base}-thumb.jpg`;
+        const upThumb = await store.upload(thumbPath, thumbBuf, { contentType: "image/jpeg" });
+        if (upThumb.error) thumbPath = null;
+      }
 
       // Pin the photo to the route by timestamp (Telegram strips EXIF/GPS).
       const photoTimeMs = ctx.message.date * 1000;
@@ -419,31 +510,38 @@ export function createBot(): Bot {
         if (matched) break;
       }
 
+      const { senderId, senderName } = ctx.state;
       const { error } = await supabase().from("media").insert({
         day_id: day.id,
-        storage_path: path,
+        storage_path: fullPath,
+        thumb_path: thumbPath,
         caption: ctx.message.caption ?? null,
         telegram_date: new Date(photoTimeMs).toISOString(),
         matched_lat: matched?.lat ?? null,
         matched_lng: matched?.lng ?? null,
+        author_telegram_id: senderId,
+        author_name: senderName,
       });
       if (error) throw error;
-      await ctx.reply(`📸 Added to day ${day.day_number}${matched ? " and pinned on the map" : ""}.`);
+      await ctx
+        .reply(`📸 Added to day ${day.day_number}${matched ? " and pinned on the map" : ""}.`)
+        .catch(() => {});
     } catch (err) {
       await ctx.reply(`⚠️ Photo upload failed: ${err instanceof Error ? err.message : "unknown error"}`);
     }
   });
 
   bot.on("message:text", async (ctx) => {
-    const user = ctx.state.user as DbUser;
     const text = ctx.message.text.trim();
     if (text.startsWith("/")) return; // unknown command, stay quiet
 
-    const trip = await requireTrip(ctx, user);
-    if (!trip) return;
-
     const liveMatch = text.match(LIVETRACK_RE);
+    const komootUrl = findKomootUrl(text);
+
+    // Links are unambiguous intent, so they work anywhere.
     if (liveMatch) {
+      const trip = await requireTrip(ctx);
+      if (!trip) return;
       await updateTrip(trip.id, {
         live_url: liveMatch[0],
         live_expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
@@ -451,19 +549,17 @@ export function createBot(): Bot {
       await ctx.reply("🔴 Live banner is on for 24h — family sees it at the top of the trip page.");
       return;
     }
-
-    const komootUrl = findKomootUrl(text);
     if (komootUrl) {
+      const trip = await requireTrip(ctx);
+      if (!trip) return;
       await ingestKomootUrl(ctx, trip, komootUrl);
       return;
     }
 
-    // Plain text → journal note for the current day.
-    const day = await requireDay(ctx, trip);
-    if (!day) return;
-    const { error } = await supabase().from("notes").insert({ day_id: day.id, text });
-    if (error) throw error;
-    await ctx.reply(`📝 Noted for day ${day.day_number}.`);
+    // In a group the bot sees ordinary conversation, which must not become
+    // journal entries — there, /note is the explicit way in.
+    if (ctx.state.isGroup) return;
+    await saveNote(ctx, text);
   });
 
   return bot;
@@ -502,6 +598,6 @@ export async function refreshPlan(tripId: string): Promise<number> {
 
 declare module "grammy" {
   interface Context {
-    state: { user: DbUser };
+    state: BotState;
   }
 }

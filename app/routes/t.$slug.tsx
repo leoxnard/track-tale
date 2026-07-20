@@ -9,9 +9,16 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 export interface ViewerPhoto {
   url: string;
+  thumbUrl: string;
   caption: string | null;
   lat: number | null;
   lng: number | null;
+  author: string | null;
+}
+
+export interface ViewerNote {
+  text: string;
+  author: string | null;
 }
 
 export interface ViewerDay {
@@ -24,7 +31,7 @@ export interface ViewerDay {
   sports: string[];
   tracks: TrackGeoJson[];
   photos: ViewerPhoto[];
-  notes: string[];
+  notes: ViewerNote[];
   weather: DayWeather | null;
 }
 
@@ -36,7 +43,7 @@ export async function loader({ params }: Route.LoaderArgs) {
     supabase()
       .from("days")
       .select(
-        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, caption, matched_lat, matched_lng, telegram_date), notes(text, created_at), weather_cache(data)",
+        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, caption, matched_lat, matched_lng, telegram_date, author_name), notes(text, created_at, author_name), weather_cache(data)",
       )
       .eq("trip_id", trip.id)
       .order("day_number"),
@@ -66,13 +73,15 @@ export async function loader({ params }: Route.LoaderArgs) {
           .sort((a, b) => Date.parse(a.telegram_date) - Date.parse(b.telegram_date))
           .map((m) => ({
             url: storage.getPublicUrl(m.storage_path).data.publicUrl,
+            thumbUrl: storage.getPublicUrl(m.thumb_path ?? m.storage_path).data.publicUrl,
             caption: m.caption,
             lat: m.matched_lat,
             lng: m.matched_lng,
+            author: m.author_name,
           })),
         notes: [...d.notes]
           .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
-          .map((n) => n.text),
+          .map((n) => ({ text: n.text, author: n.author_name })),
         weather: (d.weather_cache as unknown as { data: DayWeather } | null)?.data ?? null,
       };
     })
@@ -86,7 +95,15 @@ export async function loader({ params }: Route.LoaderArgs) {
     trip.live_expires_at !== null &&
     Date.parse(trip.live_expires_at) > Date.now();
 
+  // Naming who wrote what only helps when several people did.
+  const contributors = new Set<string>();
+  for (const day of days) {
+    for (const p of day.photos) if (p.author) contributors.add(p.author);
+    for (const n of day.notes) if (n.author) contributors.add(n.author);
+  }
+
   return {
+    showAuthors: contributors.size > 1,
     name: trip.name,
     startDate: trip.start_date,
     endDate: trip.end_date,
@@ -200,7 +217,7 @@ function TripMap({
             el.target = "_blank";
             el.rel = "noreferrer";
             el.title = photo.caption ?? "Photo";
-            el.style.cssText = `display:block;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);background:url(${JSON.stringify(photo.url)}) center/cover;`;
+            el.style.cssText = `display:block;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);background:url(${JSON.stringify(photo.thumbUrl)}) center/cover;`;
             new maplibregl.Marker({ element: el }).setLngLat([photo.lng, photo.lat]).addTo(map!);
           }
         }
@@ -236,6 +253,7 @@ export interface ViewerTrip {
   startDate: string;
   endDate: string;
   liveUrl: string | null;
+  showAuthors: boolean;
   days: ViewerDay[];
   plan: TrackGeoJson[];
   planKm: number;
@@ -377,7 +395,10 @@ export function TripView({ trip }: { trip: ViewerTrip }) {
 
                 {day.notes.map((note, i) => (
                   <p key={i} className="mt-3 max-w-prose whitespace-pre-wrap leading-relaxed">
-                    {note}
+                    {note.text}
+                    {trip.showAuthors && note.author && (
+                      <span className="text-faint"> — {note.author}</span>
+                    )}
                   </p>
                 ))}
 
@@ -392,14 +413,20 @@ export function TripView({ trip }: { trip: ViewerTrip }) {
                         className="group relative block overflow-hidden rounded-lg bg-trail/50"
                       >
                         <img
-                          src={photo.url}
+                          src={photo.thumbUrl}
                           alt={photo.caption ?? `Day ${day.dayNumber} photo`}
                           loading="lazy"
                           className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                         />
-                        {photo.caption && (
+                        {(photo.caption || (trip.showAuthors && photo.author)) && (
                           <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-6 text-xs text-white">
                             {photo.caption}
+                            {trip.showAuthors && photo.author && (
+                              <span className="opacity-75">
+                                {photo.caption ? " — " : ""}
+                                {photo.author}
+                              </span>
+                            )}
                           </span>
                         )}
                       </a>
