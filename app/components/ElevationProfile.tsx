@@ -9,6 +9,12 @@ const PAD_BOTTOM = 16;
 interface Props {
   profile: ProfilePoint[];
   color: string;
+  /**
+   * Metres covered by the chart's height, shared across every day so a given
+   * number of pixels means the same climb everywhere. Each day is centred on
+   * its own altitude, so charts shift vertically but never rescale.
+   */
+  span: number;
   /** Move the map marker to the scrubbed position. */
   onScrub?: (point: ProfilePoint) => void;
 }
@@ -17,19 +23,24 @@ interface Props {
  * Elevation chart for one day. Scrubbing with mouse or finger reports the
  * position back so the map can show where on the route you are.
  */
-export function ElevationProfile({ profile, color, onScrub }: Props) {
+export function ElevationProfile({ profile, color, span, onScrub }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [active, setActive] = useState<number | null>(null);
 
-  const { path, area, minE, maxE, totalD } = useMemo(() => {
+  const { path, area, minE, maxE, totalD, yOf } = useMemo(() => {
     const es = profile.map((p) => p.e);
     const lo = Math.min(...es);
     const hi = Math.max(...es);
-    const span = Math.max(hi - lo, 20); // a flat day shouldn't fill the whole box
     const total = profile[profile.length - 1]?.d || 1;
 
+    // The band is the shared span, positioned around this day's own altitude:
+    // charts slide up and down the axis but every pixel is the same climb.
+    const band = Math.max(span, hi - lo);
+    const base = (lo + hi) / 2 - band / 2;
+
     const x = (p: ProfilePoint) => (p.d / total) * W;
-    const y = (p: ProfilePoint) => PAD_TOP + (1 - (p.e - lo) / span) * (H - PAD_TOP - PAD_BOTTOM);
+    const y = (p: ProfilePoint) =>
+      PAD_TOP + (1 - (p.e - base) / band) * (H - PAD_TOP - PAD_BOTTOM);
 
     const line = profile.map((p, i) => `${i === 0 ? "M" : "L"}${x(p).toFixed(1)},${y(p).toFixed(1)}`).join("");
     return {
@@ -38,8 +49,9 @@ export function ElevationProfile({ profile, color, onScrub }: Props) {
       minE: lo,
       maxE: hi,
       totalD: total,
+      yOf: y,
     };
-  }, [profile]);
+  }, [profile, span]);
 
   const indexAt = useCallback(
     (clientX: number): number | null => {
@@ -76,10 +88,7 @@ export function ElevationProfile({ profile, color, onScrub }: Props) {
 
   const cur = active !== null ? profile[active] : null;
   const curX = cur ? (cur.d / totalD) * W : 0;
-  const curY =
-    cur !== null
-      ? PAD_TOP + (1 - (cur.e - minE) / Math.max(maxE - minE, 20)) * (H - PAD_TOP - PAD_BOTTOM)
-      : 0;
+  const curY = cur ? yOf(cur) : 0;
 
   return (
     <figure className="mt-3">

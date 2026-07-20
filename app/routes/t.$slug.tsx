@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { data, Form, useNavigation } from "react-router";
 import type { Route } from "./+types/t.$slug";
 import { getTripBySlug } from "../lib/db.server";
@@ -449,6 +449,18 @@ export function TripView({
   const progressPct =
     trip.planKm > 0 ? Math.min(100, Math.round((trip.totalKm / trip.planKm) * 100)) : null;
 
+  // Every day's chart is drawn to the same metres-per-pixel, so a hard stage
+  // visibly towers over an easy one instead of each filling its own box.
+  const elevationSpan = useMemo(() => {
+    const ranges = trip.days
+      .filter((d) => d.profile.length > 1)
+      .map((d) => {
+        const es = d.profile.map((p) => p.e);
+        return Math.max(...es) - Math.min(...es);
+      });
+    return Math.max(20, ...ranges);
+  }, [trip.days]);
+
   const scrollToDay = (dayNumber: number) => {
     mapHandle.current?.flyToDay(dayNumber);
     document.getElementById(`day-${dayNumber}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -577,6 +589,7 @@ export function TripView({
                   <ElevationProfile
                     profile={day.profile}
                     color={day.color}
+                    span={elevationSpan}
                     onScrub={(p) => mapHandle.current?.showScrub([p.lng, p.lat], day.color)}
                   />
                 )}
