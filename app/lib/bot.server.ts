@@ -1,5 +1,5 @@
 import { Bot, InputFile, type Context } from "grammy";
-import { nanoid } from "nanoid";
+import { customAlphabet, nanoid } from "nanoid";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
 import {
@@ -27,6 +27,20 @@ import { matchPhotoToTrack } from "./photo-match";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
+
+/**
+ * Alphanumeric only. nanoid's default alphabet includes "_" and "-", which
+ * Telegram's Markdown parser reads as formatting — a slug containing one breaks
+ * the entire message, and roughly 40% of 16-character ids contain one.
+ */
+const slugId = customAlphabet(
+  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+);
+
+/** Trip names are user-supplied, so they need neutralising before Markdown. */
+function escapeMd(s: string): string {
+  return s.replace(/([_*`\[\]])/g, "\\$1");
+}
 
 type EntityType = "note" | "media" | "track_segment" | "plan_segment" | "comment";
 
@@ -255,7 +269,7 @@ async function saveTrackSegment(
     .eq("day_id", day.id);
 
   const parts = [
-    `✅ Saved to *day ${day.day_number}*${track.name ? ` — ${track.name}` : ""}`,
+    `✅ Saved to *day ${day.day_number}*${track.name ? ` — ${escapeMd(track.name)}` : ""}`,
     `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
   ];
   if ((count ?? 1) > 1) parts.push(`🧩 ${count} segments merged for this day`);
@@ -389,10 +403,10 @@ export function createBot(): Bot {
       name,
       start_date: start,
       end_date: end,
-      share_slug: nanoid(16),
+      share_slug: slugId(16),
     });
     await ctx.reply(
-      `🎒 Trip *${name}* created (${tripDayCount(trip)} days) and set active.\n\n` +
+      `🎒 Trip *${escapeMd(name)}* created (${tripDayCount(trip)} days) and set active.\n\n` +
         `👨‍👩‍👧 Family link:\n${tripLink(trip)}\n\n` +
         `Next: /day 1, then send tracks. Optional: send planned Komoot links for the grey plan line.`,
       { parse_mode: "Markdown" },
@@ -509,7 +523,7 @@ export function createBot(): Bot {
 
     let slug = user?.traveler_slug as string | null | undefined;
     if (!slug) {
-      slug = nanoid(20);
+      slug = slugId(20);
       await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
     }
     await ctx.reply(
@@ -523,7 +537,7 @@ export function createBot(): Bot {
   bot.command("newmypage", async (ctx) => {
     const { senderId, isRegistered } = ctx.state;
     if (!isRegistered) return;
-    const slug = nanoid(20);
+    const slug = slugId(20);
     await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
     await ctx.reply(`🔗 Old page link is dead. New one:\n${env.appOrigin}/traveler/${slug}`);
   });
@@ -539,7 +553,7 @@ export function createBot(): Bot {
       if (mb < 45) {
         await ctx.replyWithDocument(new InputFile(Buffer.from(result.zip), result.filename), {
           caption:
-            `📦 *${trip.name}* — self-contained archive (${mb.toFixed(1)} MB).\n` +
+            `📦 *${escapeMd(trip.name)}* — self-contained archive (${mb.toFixed(1)} MB).\n` +
             `Open index.html; map, charts and photos all work offline.`,
           parse_mode: "Markdown",
         });
@@ -581,7 +595,7 @@ export function createBot(): Bot {
     const progress = planKm > 0 ? ` (${Math.min(100, Math.round((totalKm / planKm) * 100))}% of plan)` : "";
 
     await ctx.reply(
-      `🎒 *${trip.name}* — ${trip.start_date} → ${trip.end_date}\n` +
+      `🎒 *${escapeMd(trip.name)}* — ${trip.start_date} → ${trip.end_date}\n` +
         `📅 Current day: ${trip.current_day_number ?? "not set"}\n` +
         `📏 ${km(totalKm)} km over ${daysWithTracks} tracked days${progress}\n` +
         `👨‍👩‍👧 ${tripLink(trip)}`,
@@ -592,7 +606,7 @@ export function createBot(): Bot {
   bot.command("regeneratelink", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    await updateTrip(trip.id, { share_slug: nanoid(16) });
+    await updateTrip(trip.id, { share_slug: slugId(16) });
     const updated = await getTrip(trip.id);
     await ctx.reply(`🔗 Old link is dead. New family link:\n${tripLink(updated!)}`);
   });
@@ -603,7 +617,7 @@ export function createBot(): Bot {
       await ctx.reply("Only invited travellers can create invite codes.");
       return;
     }
-    const code = nanoid(10);
+    const code = slugId(10);
     await createInvite(code, senderId);
     await ctx.reply(`🎟️ One-time invite code (friend sends it to me in a private chat):\n\`${code}\``, {
       parse_mode: "Markdown",
