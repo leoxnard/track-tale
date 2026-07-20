@@ -1,4 +1,4 @@
-import { Bot, type Context } from "grammy";
+import { Bot, InputFile, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
@@ -26,6 +26,7 @@ import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJs
 import { matchPhotoToTrack } from "./photo-match";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
+import { buildArchive } from "./archive.server";
 
 type EntityType = "note" | "media" | "track_segment" | "plan_segment" | "comment";
 
@@ -112,6 +113,10 @@ Reply /delete to one of my messages — removes that one
 • A *planned* Komoot tour link → grey plan line + progress
 • GPX with caption "plan" → same
 /refreshplan — re-sync plan links after editing in Komoot
+
+*Looking back*
+/mypage — your permanent page with every trip on it
+/archive — download this trip as a self-contained file
 
 /invite — invite code for a friend
 
@@ -488,6 +493,66 @@ export function createBot(): Bot {
       .eq("chat_id", ctx.chat!.id)
       .eq("message_id", action.message_id);
     await ctx.reply(`↩️ ${ENTITY_LABEL[action.entity_type as EntityType]} removed.`);
+  });
+
+  bot.command("mypage", async (ctx) => {
+    const { senderId, senderName, isRegistered } = ctx.state;
+    if (!isRegistered) {
+      await ctx.reply("Only invited travellers have a page.");
+      return;
+    }
+    const { data: user } = await supabase()
+      .from("users")
+      .select("traveler_slug")
+      .eq("telegram_id", senderId)
+      .maybeSingle();
+
+    let slug = user?.traveler_slug as string | null | undefined;
+    if (!slug) {
+      slug = nanoid(20);
+      await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
+    }
+    await ctx.reply(
+      `🧭 ${senderName}'s permanent page — share it once and every future trip appears on it:\n` +
+        `${env.appOrigin}/traveler/${slug}\n\n` +
+        `_Anyone with this link sees all your trips. /newmypage makes a fresh link and kills this one._`,
+      { parse_mode: "Markdown" },
+    );
+  });
+
+  bot.command("newmypage", async (ctx) => {
+    const { senderId, isRegistered } = ctx.state;
+    if (!isRegistered) return;
+    const slug = nanoid(20);
+    await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
+    await ctx.reply(`🔗 Old page link is dead. New one:\n${env.appOrigin}/traveler/${slug}`);
+  });
+
+  bot.command("archive", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    await ctx.reply("📦 Building the archive — this can take a moment…").catch(() => {});
+    try {
+      const result = await buildArchive(trip.id, env.appOrigin);
+      const mb = result.zip.byteLength / 1024 / 1024;
+      // Telegram refuses bot uploads over 50 MB, so large bundles go by link.
+      if (mb < 45) {
+        await ctx.replyWithDocument(new InputFile(Buffer.from(result.zip), result.filename), {
+          caption:
+            `📦 *${trip.name}* — self-contained archive (${mb.toFixed(1)} MB).\n` +
+            `Open index.html; map, charts and photos all work offline.`,
+          parse_mode: "Markdown",
+        });
+      } else {
+        await ctx.reply(
+          `📦 Archive ready (${mb.toFixed(0)} MB — too big for Telegram, so here's a link):\n${result.publicUrl}`,
+        );
+      }
+    } catch (err) {
+      await ctx.reply(
+        `⚠️ Archive failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+    }
   });
 
   bot.command("trip", async (ctx) => {

@@ -16,6 +16,7 @@
     "@supabase/supabase-js": "^2.110.7",
     "@tmcw/togeojson": "^7.1.2",
     "@xmldom/xmldom": "^0.9.10",
+    "fflate": "^0.8.3",
     "fit-file-parser": "^3.0.2",
     "grammy": "^1.45.1",
     "isbot": "^5.1.36",
