@@ -152,7 +152,11 @@ function buildMapSvg(days: ArchiveDay[], plan: TrackPoint[][]): string {
   return `<svg class="map" viewBox="0 0 ${MAP_W} ${MAP_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Route map">${out}</svg>`;
 }
 
-function buildChart(day: ArchiveDay, proj: ReturnType<typeof makeProjection> | null): string {
+function buildChart(
+  day: ArchiveDay,
+  proj: ReturnType<typeof makeProjection> | null,
+  span: number,
+): string {
   const p = day.profile;
   if (p.length < 2 || !proj) return "";
 
@@ -163,11 +167,14 @@ function buildChart(day: ArchiveDay, proj: ReturnType<typeof makeProjection> | n
   const es = p.map((q) => q.e);
   const lo = Math.min(...es);
   const hi = Math.max(...es);
-  const span = Math.max(hi - lo, 20);
   const total = p[p.length - 1].d || 1;
 
+  // Shared metres-per-pixel across days, centred on this day's own altitude.
+  const band = Math.max(span, hi - lo);
+  const base = (lo + hi) / 2 - band / 2;
+
   const x = (q: ProfilePoint) => (q.d / total) * W;
-  const y = (q: ProfilePoint) => TOP + (1 - (q.e - lo) / span) * (H - TOP - BOT);
+  const y = (q: ProfilePoint) => TOP + (1 - (q.e - base) / band) * (H - TOP - BOT);
 
   const line = p.map((q, i) => `${i === 0 ? "M" : "L"}${x(q).toFixed(1)},${y(q).toFixed(1)}`).join("");
   const area = `${line}L${W},${H - BOT}L0,${H - BOT}Z`;
@@ -215,6 +222,16 @@ function buildHtml(opts: {
       : null;
 
   const pct = opts.planKm > 0 ? Math.round((opts.totalKm / opts.planKm) * 100) : null;
+
+  const elevationSpan = Math.max(
+    20,
+    ...opts.days
+      .filter((d) => d.profile.length > 1)
+      .map((d) => {
+        const es = d.profile.map((p) => p.e);
+        return Math.max(...es) - Math.min(...es);
+      }),
+  );
 
   const ribbon = opts.days
     .map(
@@ -278,7 +295,7 @@ function buildHtml(opts: {
       return `<article id="day-${day.dayNumber}" style="border-color:${day.color}">
   <h2>Day ${day.dayNumber}</h2><span class="meta">${formatDate(day.date)}</span>${weatherBit}
   ${stats}
-  ${buildChart(day, proj)}
+  ${buildChart(day, proj, elevationSpan)}
   ${notes}
   ${photos}
   ${comments}
