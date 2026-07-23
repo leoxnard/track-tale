@@ -26,8 +26,12 @@ export interface DbTrip {
   current_day_number: number | null;
   live_url: string | null;
   live_expires_at: string | null;
+  finished_at: string | null;
+  reminders_enabled: boolean;
   og_path: string | null;
   og_updated_at: string | null;
+  archive_path: string | null;
+  archived_at: string | null;
 }
 
 export interface DbDay {
@@ -61,20 +65,31 @@ export async function createUser(
   return data;
 }
 
+/** How long an unused invite code stays redeemable. */
+export const INVITE_TTL_DAYS = 7;
+
 export async function redeemInvite(code: string, telegramId: number): Promise<boolean> {
+  // The expiry check rides along in the update, so a code cannot be redeemed by
+  // two people racing each other past a separate read.
   const { data } = await supabase()
     .from("invites")
     .update({ used_by: telegramId })
     .eq("code", code)
     .is("used_by", null)
+    .gt("expires_at", new Date().toISOString())
     .select()
     .maybeSingle();
   return data !== null;
 }
 
-export async function createInvite(code: string, createdBy: number): Promise<void> {
-  const { error } = await supabase().from("invites").insert({ code, created_by: createdBy });
+/** Returns the expiry stamped on the new code. */
+export async function createInvite(code: string, createdBy: number): Promise<Date> {
+  const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 86400000);
+  const { error } = await supabase()
+    .from("invites")
+    .insert({ code, created_by: createdBy, expires_at: expiresAt.toISOString() });
   if (error) throw error;
+  return expiresAt;
 }
 
 /** Get or create the chat record for a Telegram chat (private or group). */
@@ -157,6 +172,121 @@ export async function listTrips(chatId: number): Promise<DbTrip[]> {
 export async function updateTrip(tripId: string, patch: Partial<DbTrip>): Promise<void> {
   const { error } = await supabase().from("trips").update(patch).eq("id", tripId);
   if (error) throw error;
+}
+
+/**
+ * Mark a trip finished and stop it receiving uploads. The pages, links and
+ * archive all keep working — the chat simply has no active trip any more.
+ */
+export async function finishTrip(trip: DbTrip): Promise<void> {
+  await updateTrip(trip.id, {
+    finished_at: new Date().toISOString(),
+    live_url: null,
+    live_expires_at: null,
+  });
+  const { error } = await supabase()
+    .from("chats")
+    .update({ active_trip_id: null })
+    .eq("chat_id", trip.chat_id)
+    .eq("active_trip_id", trip.id);
+  if (error) throw error;
+}
+
+/** Undo /endtrip, so a trip that ended early can be written to again. */
+export async function reopenTrip(trip: DbTrip): Promise<void> {
+  await updateTrip(trip.id, { finished_at: null });
+  await setActiveTrip(trip.chat_id, trip.id);
+}
+
+/**
+ * Delete every object under a storage prefix. Supabase lists one directory at a
+ * time and returns folders as entries with no id, so this walks them itself.
+ */
+async function removeStoragePrefix(bucket: string, prefix: string): Promise<void> {
+  const store = supabase().storage.from(bucket);
+  // Deleting shrinks the listing, so page by re-reading the front of it.
+  for (;;) {
+    const { data: entries } = await store.list(prefix, { limit: 100 });
+    if (!entries || entries.length === 0) return;
+
+    const files: string[] = [];
+    for (const entry of entries) {
+      const path = `${prefix}/${entry.name}`;
+      if (entry.id === null) await removeStoragePrefix(bucket, path);
+      else files.push(path);
+    }
+    if (files.length > 0) {
+      await store.remove(files);
+    } else {
+      // Nothing but folders, and they have now been emptied — one more list
+      // would either come back empty or reveal something we cannot remove.
+      return;
+    }
+  }
+}
+
+/**
+ * Irreversibly delete a trip. Days, tracks, photos rows, notes and comments go
+ * with it through the cascades; the stored blobs have to be swept by hand.
+ */
+export async function deleteTrip(trip: DbTrip): Promise<void> {
+  await removeStoragePrefix("photos", trip.id);
+  await removeStoragePrefix("archives", trip.id);
+  if (trip.og_path) await supabase().storage.from("photos").remove([trip.og_path]);
+
+  const { error } = await supabase().from("trips").delete().eq("id", trip.id);
+  if (error) throw error;
+}
+
+/** The highest day number that already holds something. 0 when the trip is empty. */
+export async function lastUsedDayNumber(tripId: string): Promise<number> {
+  const { data } = await supabase()
+    .from("days")
+    .select("day_number, track_segments(id), media(id), notes(id)")
+    .eq("trip_id", tripId);
+
+  let last = 0;
+  for (const day of data ?? []) {
+    const d = day as {
+      day_number: number;
+      track_segments: unknown[];
+      media: unknown[];
+      notes: unknown[];
+    };
+    const used = d.track_segments.length + d.media.length + d.notes.length > 0;
+    if (used && d.day_number > last) last = d.day_number;
+  }
+  return last;
+}
+
+/**
+ * Drop day rows that fall off the end of a shortened trip. Only ever called for
+ * days confirmed empty, so the cascades have nothing to take with them.
+ */
+export async function pruneDaysBeyond(tripId: string, lastDayNumber: number): Promise<void> {
+  const { error } = await supabase()
+    .from("days")
+    .delete()
+    .eq("trip_id", tripId)
+    .gt("day_number", lastDayNumber);
+  if (error) throw error;
+}
+
+/** Re-date existing day rows after the trip's start date moved. */
+export async function realignDayDates(trip: DbTrip): Promise<void> {
+  const { data: days } = await supabase()
+    .from("days")
+    .select("id, day_number")
+    .eq("trip_id", trip.id);
+
+  for (const day of days ?? []) {
+    const date = new Date(trip.start_date + "T00:00:00Z");
+    date.setUTCDate(date.getUTCDate() + day.day_number - 1);
+    await supabase()
+      .from("days")
+      .update({ date: date.toISOString().slice(0, 10) })
+      .eq("id", day.id);
+  }
 }
 
 export async function setActiveTrip(chatId: number, tripId: string): Promise<void> {

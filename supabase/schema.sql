@@ -11,6 +11,7 @@ create table if not exists invites (
   code text primary key,
   created_by bigint not null references users(telegram_id),
   used_by bigint references users(telegram_id),
+  expires_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -36,6 +37,13 @@ create table if not exists trips (
   current_day_number int,
   live_url text,
   live_expires_at timestamptz,
+  -- Set by /endtrip. A finished trip keeps its pages but stops being written to.
+  finished_at timestamptz,
+  reminders_enabled boolean not null default true,
+  og_path text,
+  og_updated_at timestamptz,
+  archive_path text,
+  archived_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -104,6 +112,28 @@ create table if not exists notes (
   created_at timestamptz not null default now()
 );
 
+-- Messages left by family on the public trip page.
+create table if not exists comments (
+  id uuid primary key default gen_random_uuid(),
+  day_id uuid not null references days(id) on delete cascade,
+  author_name text not null,
+  text text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Maps each of the bot's confirmation messages to the row it created, so that
+-- replying /delete to one removes exactly that thing.
+create table if not exists bot_actions (
+  chat_id bigint not null,
+  message_id bigint not null,
+  entity_type text not null check (
+    entity_type in ('note', 'media', 'track_segment', 'plan_segment', 'comment')
+  ),
+  entity_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (chat_id, message_id)
+);
+
 create table if not exists weather_cache (
   day_id uuid primary key references days(id) on delete cascade,
   data jsonb not null,
@@ -114,7 +144,10 @@ create index if not exists track_segments_day_idx on track_segments(day_id);
 create index if not exists days_trip_idx on days(trip_id);
 create index if not exists media_day_idx on media(day_id);
 create index if not exists notes_day_idx on notes(day_id);
+create index if not exists comments_day_idx on comments(day_id);
 create index if not exists trips_chat_idx on trips(chat_id);
+-- /undo reads the newest action in a chat.
+create index if not exists bot_actions_recent_idx on bot_actions(chat_id, created_at desc);
 
 -- All access goes through the service-role key on the server; lock everything else out.
 alter table users enable row level security;
@@ -126,13 +159,30 @@ alter table days enable row level security;
 alter table track_segments enable row level security;
 alter table media enable row level security;
 alter table notes enable row level security;
+alter table comments enable row level security;
+alter table bot_actions enable row level security;
 alter table weather_cache enable row level security;
 
 grant usage on schema public to service_role;
 grant all privileges on all tables in schema public to service_role;
 alter default privileges in schema public grant all on tables to service_role;
 
--- Storage: public bucket for photos (viewer page loads them directly).
+-- Storage: public buckets. `photos` is read directly by the viewer page and also
+-- holds the generated share cards under og/; `archives` holds /archive bundles
+-- too large to send through Telegram.
 insert into storage.buckets (id, name, public)
-values ('photos', 'photos', true)
+values ('photos', 'photos', true), ('archives', 'archives', true)
 on conflict (id) do nothing;
+
+-- Columns added after the first release. Safe to re-run; new environments get
+-- them from the create table statements above.
+alter table trips add column if not exists finished_at timestamptz;
+alter table trips add column if not exists reminders_enabled boolean not null default true;
+alter table trips add column if not exists og_path text;
+alter table trips add column if not exists og_updated_at timestamptz;
+alter table trips add column if not exists archive_path text;
+alter table trips add column if not exists archived_at timestamptz;
+alter table invites add column if not exists expires_at timestamptz;
+-- Redemption compares against expires_at, and NULL never compares true, so give
+-- codes issued before expiry existed a deadline rather than breaking them.
+update invites set expires_at = created_at + interval '7 days' where expires_at is null;

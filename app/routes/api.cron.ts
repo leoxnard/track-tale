@@ -22,6 +22,7 @@ export async function loader({ request }: { request: Request }) {
   const { data: trips } = await supabase()
     .from("trips")
     .select("*")
+    .is("finished_at", null) // a finished trip is done being maintained
     .lte("start_date", today)
     .gte("end_date", addDays(today, -1)); // include trips that ended yesterday
 
@@ -29,7 +30,7 @@ export async function loader({ request }: { request: Request }) {
     // Previous local day in the trip's timezone.
     const localToday = new Date().toLocaleDateString("en-CA", { timeZone: trip.timezone });
     const yesterday = addDays(localToday, -1);
-    if (yesterday >= trip.start_date && yesterday <= trip.end_date) {
+    if (trip.reminders_enabled && yesterday >= trip.start_date && yesterday <= trip.end_date) {
       const { data: day } = await supabase()
         .from("days")
         .select("id, day_number, track_segments(id)")
@@ -47,7 +48,8 @@ export async function loader({ request }: { request: Request }) {
           await bot.api.sendMessage(
             trip.chat_id,
             `🌙 Reminder: no track saved for ${yesterday} (day ${dayNumber}) of "${trip.name}" yet.\n` +
-              `Send /day ${dayNumber} and then the Komoot link or GPX file when you get a chance.`,
+              `Send /day ${dayNumber} and then the Komoot link or GPX file when you get a chance.\n` +
+              `(/reminders off to stop these, /endtrip if the journey is over.)`,
             { disable_notification: true },
           );
           report.push(`reminded ${trip.name}`);

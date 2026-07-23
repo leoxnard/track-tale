@@ -7,16 +7,23 @@ import {
   createInvite,
   createTrip,
   createUser,
+  deleteTrip,
   ensureChat,
   ensureDay,
+  finishTrip,
   getActiveTrip,
   getTrip,
   getUser,
+  lastUsedDayNumber,
   listTrips,
+  pruneDaysBeyond,
+  realignDayDates,
   redeemInvite,
+  reopenTrip,
   setActiveTrip,
   tripDayCount,
   updateTrip,
+  INVITE_TTL_DAYS,
   type DbChat,
   type DbTrip,
 } from "./db.server";
@@ -100,6 +107,7 @@ interface BotState {
   senderName: string;
   isGroup: boolean;
   isRegistered: boolean;
+  isOwner: boolean;
 }
 
 const HELP = `🚴 *TrackTale* — your trip journal
@@ -107,10 +115,17 @@ const HELP = `🚴 *TrackTale* — your trip journal
 *Trip setup*
 /newtrip Name | 2026-08-01 | 2026-08-10
 /trips — list this chat's trips
-/usetrip 2 — switch active trip
+/usetrip 2 — switch active trip (reopens a finished one)
 /day 3 — set the day uploads go to
 /trip — status + family link
 /regeneratelink — new family link
+
+*Changing a trip*
+/renametrip New name
+/dates 2026-08-01 | 2026-08-12
+/reminders on — or off, per trip
+/endtrip — mark it finished; pages stay, uploads stop
+/deletetrip Name — erase it and its photos, forever
 
 *During the trip* (everything lands on the current /day)
 • Komoot share link → route imported
@@ -132,9 +147,10 @@ Reply /delete to one of my messages — removes that one
 /mypage — your permanent page with every trip on it
 /archive — download this trip as a self-contained file
 
-/invite — invite code for a friend
+/invite — invite code for a friend (valid 7 days)
 
-_Add me to a group and everyone travelling can contribute — photos and notes are credited by name._`;
+_Add me to a group and everyone travelling can contribute — photos and notes are credited by name._
+_Invited friends run their own trips in their own chats — you don't need to be there._`;
 
 /**
  * Decide whether we may act on this update, and gather sender identity.
@@ -157,12 +173,16 @@ async function authorize(ctx: Context): Promise<BotState | null> {
   }
 
   // An unregistered sender in a private chat can still redeem an invite code.
+  let triedCode = false;
   if (!user && !isGroup) {
     const text = ctx.message?.text?.trim() ?? "";
     const codeMatch = text.match(/^(?:\/start\s+)?([A-Za-z0-9_-]{8,21})$/);
-    if (codeMatch && (await redeemInvite(codeMatch[1], from.id))) {
-      user = await createUser(from.id, senderName, false);
-      await ctx.reply("✅ Welcome to TrackTale! Send /help to see how it works.").catch(() => {});
+    if (codeMatch) {
+      triedCode = true;
+      if (await redeemInvite(codeMatch[1], from.id)) {
+        user = await createUser(from.id, senderName, false);
+        await ctx.reply("✅ Welcome to TrackTale! Send /help to see how it works.").catch(() => {});
+      }
     }
   }
 
@@ -172,7 +192,11 @@ async function authorize(ctx: Context): Promise<BotState | null> {
   if (!allowed) {
     if (ctx.message && !isGroup) {
       await ctx
-        .reply("🔒 This is a private bot. Ask the owner for an invite code and send it here.")
+        .reply(
+          triedCode
+            ? `🔒 That code doesn't work — invite codes last ${INVITE_TTL_DAYS} days and can only be used once. Ask for a fresh one.`
+            : "🔒 This is a private bot. Ask the owner for an invite code and send it here.",
+        )
         .catch(() => {});
     }
     return null;
@@ -190,7 +214,19 @@ async function authorize(ctx: Context): Promise<BotState | null> {
     senderName,
     isGroup,
     isRegistered: user !== null,
+    isOwner: user?.is_owner ?? false,
   };
+}
+
+/**
+ * Ending or deleting a trip is not something any passer-by in a group should be
+ * able to do — it stays with whoever created it (and the bot's owner).
+ */
+async function requireTripManager(ctx: Context, trip: DbTrip): Promise<boolean> {
+  const { senderId, isOwner } = ctx.state;
+  if (senderId === trip.owner_telegram_id || isOwner) return true;
+  await ctx.reply("Only the traveller who created this trip can do that.");
+  return false;
 }
 
 async function requireTrip(ctx: Context): Promise<DbTrip | null> {
@@ -219,6 +255,38 @@ function tripLink(trip: DbTrip): string {
 
 function km(m: number): string {
   return (m / 1000).toFixed(1);
+}
+
+interface TripTotals {
+  distanceM: number;
+  elevationUp: number;
+  daysWithTracks: number;
+  planM: number;
+}
+
+async function tripTotals(tripId: string): Promise<TripTotals> {
+  const { data: days } = await supabase()
+    .from("days")
+    .select("id, day_number, track_segments(distance_m, elevation_up)")
+    .eq("trip_id", tripId);
+
+  const totals: TripTotals = { distanceM: 0, elevationUp: 0, daysWithTracks: 0, planM: 0 };
+  for (const d of days ?? []) {
+    const segs = (d as { track_segments: { distance_m: number; elevation_up: number }[] })
+      .track_segments;
+    if (segs.length > 0) totals.daysWithTracks++;
+    for (const s of segs) {
+      totals.distanceM += s.distance_m;
+      totals.elevationUp += s.elevation_up;
+    }
+  }
+
+  const { data: plans } = await supabase()
+    .from("plan_segments")
+    .select("distance_m")
+    .eq("trip_id", tripId);
+  totals.planM = (plans ?? []).reduce((sum, p) => sum + p.distance_m, 0);
+  return totals;
 }
 
 async function saveTrackSegment(
@@ -420,10 +488,10 @@ export function createBot(): Bot {
       await ctx.reply("No trips in this chat yet. /newtrip Name | 2026-08-01 | 2026-08-10");
       return;
     }
-    const lines = trips.map(
-      (t, i) =>
-        `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date})${t.id === chat.active_trip_id ? " ✅ active" : ""}`,
-    );
+    const lines = trips.map((t, i) => {
+      const mark = t.id === chat.active_trip_id ? " ✅ active" : t.finished_at ? " 🏁 finished" : "";
+      return `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date})${mark}`;
+    });
     await ctx.reply(lines.join("\n") + "\n\nSwitch with /usetrip <number>");
   });
 
@@ -434,6 +502,12 @@ export function createBot(): Bot {
     const trip = trips[idx];
     if (!trip) {
       await ctx.reply("Usage: /usetrip <number from /trips>");
+      return;
+    }
+    // Picking a finished trip is how you reopen one you ended too early.
+    if (trip.finished_at) {
+      await reopenTrip(trip);
+      await ctx.reply(`✅ Active trip: ${trip.name} — reopened, so uploads land here again.`);
       return;
     }
     await setActiveTrip(chat.chat_id, trip.id);
@@ -572,34 +646,164 @@ export function createBot(): Bot {
   bot.command("trip", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    const { data: days } = await supabase()
-      .from("days")
-      .select("id, day_number, track_segments(distance_m, elevation_up)")
-      .eq("trip_id", trip.id);
-    let totalKm = 0;
-    let totalUp = 0;
-    let daysWithTracks = 0;
-    for (const d of days ?? []) {
-      const segs = (d as { track_segments: { distance_m: number; elevation_up: number }[] }).track_segments;
-      if (segs.length > 0) daysWithTracks++;
-      for (const s of segs) {
-        totalKm += s.distance_m;
-        totalUp += s.elevation_up;
-      }
-    }
-    const { data: plans } = await supabase()
-      .from("plan_segments")
-      .select("distance_m")
-      .eq("trip_id", trip.id);
-    const planKm = (plans ?? []).reduce((sum, p) => sum + p.distance_m, 0);
-    const progress = planKm > 0 ? ` (${Math.min(100, Math.round((totalKm / planKm) * 100))}% of plan)` : "";
+    const totals = await tripTotals(trip.id);
+    const progress =
+      totals.planM > 0
+        ? ` (${Math.min(100, Math.round((totals.distanceM / totals.planM) * 100))}% of plan)`
+        : "";
 
     await ctx.reply(
       `🎒 *${escapeMd(trip.name)}* — ${trip.start_date} → ${trip.end_date}\n` +
         `📅 Current day: ${trip.current_day_number ?? "not set"}\n` +
-        `📏 ${km(totalKm)} km over ${daysWithTracks} tracked days${progress}\n` +
+        `📏 ${km(totals.distanceM)} km over ${totals.daysWithTracks} tracked days${progress}\n` +
+        `🔔 Reminders ${trip.reminders_enabled ? "on" : "off"}\n` +
         `👨‍👩‍👧 ${tripLink(trip)}`,
       { parse_mode: "Markdown" },
+    );
+  });
+
+  bot.command("endtrip", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    if (!(await requireTripManager(ctx, trip))) return;
+
+    await finishTrip(trip);
+    const totals = await tripTotals(trip.id);
+    await ctx.reply(
+      `🏁 *${escapeMd(trip.name)}* is finished — ${km(totals.distanceM)} km and ` +
+        `${Math.round(totals.elevationUp)} m of climbing over ${totals.daysWithTracks} days.\n\n` +
+        `Nothing more lands here until you start or pick another trip. The family link keeps working:\n` +
+        `${tripLink(trip)}\n\n` +
+        `_/archive saves it as a file. /usetrip picks it up again if you ended it early._`,
+      { parse_mode: "Markdown" },
+    );
+  });
+
+  bot.command("deletetrip", async (ctx) => {
+    const { chat } = ctx.state;
+    const typed = (ctx.match as string).trim();
+    const trips = await listTrips(chat.chat_id);
+    if (trips.length === 0) {
+      await ctx.reply("No trips in this chat.");
+      return;
+    }
+    if (!typed) {
+      await ctx.reply(
+        "Deleting a trip removes its days, photos, notes and family page for good — " +
+          "there is no undo.\n\nType the name to confirm, e.g.\n" +
+          `/deletetrip ${trips[0].name}`,
+      );
+      return;
+    }
+
+    const matches = trips.filter((t) => t.name.toLowerCase() === typed.toLowerCase());
+    if (matches.length === 0) {
+      await ctx.reply(
+        `No trip here is called "${typed}". /trips lists them — the name has to match exactly.`,
+      );
+      return;
+    }
+    if (matches.length > 1) {
+      await ctx.reply(
+        `Two trips share that name, so I won't guess. Rename one with /renametrip first.`,
+      );
+      return;
+    }
+
+    const trip = matches[0];
+    if (!(await requireTripManager(ctx, trip))) return;
+    await ctx.reply("🗑️ Deleting — this takes a moment…").catch(() => {});
+    try {
+      await deleteTrip(trip);
+      await ctx.reply(`🗑️ *${escapeMd(trip.name)}* is gone, photos and all.`, {
+        parse_mode: "Markdown",
+      });
+    } catch (err) {
+      await ctx.reply(
+        `⚠️ Delete failed: ${err instanceof Error ? err.message : "unknown error"}. Nothing was removed.`,
+      );
+    }
+  });
+
+  bot.command("reminders", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const arg = (ctx.match as string).trim().toLowerCase();
+    if (arg !== "on" && arg !== "off") {
+      await ctx.reply(
+        `Reminders for *${escapeMd(trip.name)}* are *${trip.reminders_enabled ? "on" : "off"}*.\n` +
+          `Change with /reminders on or /reminders off.`,
+        { parse_mode: "Markdown" },
+      );
+      return;
+    }
+    await updateTrip(trip.id, { reminders_enabled: arg === "on" });
+    await ctx.reply(
+      arg === "on"
+        ? "🔔 Reminders on — I'll ping this chat quietly when a day has no track."
+        : "🔕 Reminders off for this trip. Everything else works as before.",
+    );
+  });
+
+  bot.command("renametrip", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    if (!(await requireTripManager(ctx, trip))) return;
+    const name = (ctx.match as string).trim();
+    if (!name) {
+      await ctx.reply("Usage: /renametrip A better name");
+      return;
+    }
+    await updateTrip(trip.id, { name });
+    await ctx.reply(`✏️ Renamed to *${escapeMd(name)}*.`, { parse_mode: "Markdown" });
+  });
+
+  bot.command("dates", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    if (!(await requireTripManager(ctx, trip))) return;
+
+    const [start, end] = (ctx.match as string).split("|").map((s) => s.trim());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(end ?? "")) {
+      await ctx.reply("Format: /dates 2026-08-01 | 2026-08-12");
+      return;
+    }
+    if (Date.parse(end) < Date.parse(start)) {
+      await ctx.reply("End date is before start date.");
+      return;
+    }
+
+    // Shrinking the trip past a day that already holds something would strand
+    // that day off the end of the calendar, so refuse rather than lose it.
+    const newLength = Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
+    const lastUsed = await lastUsedDayNumber(trip.id);
+    if (lastUsed > newLength) {
+      await ctx.reply(
+        `That range is ${newLength} days, but day ${lastUsed} already has things on it. ` +
+          `Delete those first, or pick a later end date.`,
+      );
+      return;
+    }
+
+    await updateTrip(trip.id, {
+      start_date: start,
+      end_date: end,
+      // A current day past the new end would send the next upload nowhere.
+      current_day_number:
+        trip.current_day_number && trip.current_day_number > newLength
+          ? newLength
+          : trip.current_day_number,
+    });
+    const updated = await getTrip(trip.id);
+    if (updated) {
+      await pruneDaysBeyond(trip.id, newLength);
+      await realignDayDates(updated);
+    }
+    await ctx.reply(
+      `📆 Dates updated: ${start} → ${end} (${newLength} days).` +
+        (updated?.current_day_number !== trip.current_day_number
+          ? `\nCurrent day moved to ${updated?.current_day_number}.`
+          : ""),
     );
   });
 
@@ -618,10 +822,12 @@ export function createBot(): Bot {
       return;
     }
     const code = slugId(10);
-    await createInvite(code, senderId);
-    await ctx.reply(`🎟️ One-time invite code (friend sends it to me in a private chat):\n\`${code}\``, {
-      parse_mode: "Markdown",
-    });
+    const expiresAt = await createInvite(code, senderId);
+    await ctx.reply(
+      `🎟️ One-time invite code (friend sends it to me in a private chat):\n\`${code}\`\n\n` +
+        `_Valid for ${INVITE_TTL_DAYS} days, until ${expiresAt.toISOString().slice(0, 10)}._`,
+      { parse_mode: "Markdown" },
+    );
   });
 
   bot.command("refreshplan", async (ctx) => {
