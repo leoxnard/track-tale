@@ -1,5 +1,5 @@
 import { Bot, InputFile, type Context } from "grammy";
-import { customAlphabet, nanoid } from "nanoid";
+import { nanoid } from "nanoid";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
 import {
@@ -34,20 +34,7 @@ import { matchPhotoToTrack } from "./photo-match";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
-
-/**
- * Alphanumeric only. nanoid's default alphabet includes "_" and "-", which
- * Telegram's Markdown parser reads as formatting — a slug containing one breaks
- * the entire message, and roughly 40% of 16-character ids contain one.
- */
-const slugId = customAlphabet(
-  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-);
-
-/** Trip names are user-supplied, so they need neutralising before Markdown. */
-function escapeMd(s: string): string {
-  return s.replace(/([_*`\[\]])/g, "\\$1");
-}
+import { escapeErr, escapeMd, slugId } from "./telegram-md";
 
 type EntityType = "note" | "media" | "track_segment" | "plan_segment" | "comment";
 
@@ -396,9 +383,12 @@ async function ingestKomootUrl(ctx: Context, trip: DbTrip, url: string) {
       await saveTrackSegment(ctx, trip, tour, "komoot", tour.sourceUrl);
     }
   } catch (err) {
+    // "share\_token" is escaped deliberately: a lone underscore opens an italic
+    // entity that never closes, and Telegram then drops the whole message —
+    // leaving a failed import with no explanation at all.
     await ctx.reply(
-      `⚠️ Komoot fetch failed (${err instanceof Error ? err.message : "unknown error"}).\n` +
-        "Make sure you sent the *share link* (with share_token). Fallback: export the tour as GPX and send the file.",
+      `⚠️ Komoot fetch failed (${escapeErr(err)}).\n` +
+        "Make sure you sent the *share link* (with share\\_token). Fallback: export the tour as GPX and send the file.",
       { parse_mode: "Markdown" },
     );
   }
@@ -601,7 +591,7 @@ export function createBot(): Bot {
       await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
     }
     await ctx.reply(
-      `🧭 ${senderName}'s permanent page — share it once and every future trip appears on it:\n` +
+      `🧭 ${escapeMd(senderName)}'s permanent page — share it once and every future trip appears on it:\n` +
         `${env.appOrigin}/traveler/${slug}\n\n` +
         `_Anyone with this link sees all your trips. /newmypage makes a fresh link and kills this one._`,
       { parse_mode: "Markdown" },

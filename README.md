@@ -35,9 +35,14 @@ notes, stats and weather.
 ```sh
 npm run dev        # http://localhost:5173
 npm run typecheck
+npm test           # vitest, unit tests for the pure ingestion/rendering logic
 ```
 
 `/preview` renders the family page with fixture data (dev only, no database needed).
+
+Tests cover the parts that have no database or network in them — track maths, the map
+projection, Komoot URL parsing, photo/track time matching and Telegram Markdown escaping.
+GitHub Actions runs typecheck, tests and a production build on every push and PR.
 
 ## Notes
 

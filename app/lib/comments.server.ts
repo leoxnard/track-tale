@@ -1,6 +1,7 @@
 import { Bot } from "grammy";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
+import { escapeMd } from "./telegram-md";
 
 export interface NewComment {
   slug: string;
@@ -57,12 +58,16 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
     .single();
   if (error) return { ok: false, error: "Could not save your message." };
 
-  // Relay to the travellers so encouragement reaches them on the road.
+  // Relay to the travellers so encouragement reaches them on the road. Name,
+  // message and trip name are all written by other people, so every one of them
+  // has to be escaped — an unmatched "_" would make Telegram reject the relay
+  // and the family would never know their message went nowhere.
   try {
     const bot = new Bot(env.telegramBotToken);
     const sent = await bot.api.sendMessage(
       trip.chat_id,
-      `💬 *${authorName}* on day ${day.day_number} of ${trip.name}:\n${text}\n\n_Reply /delete to remove it._`,
+      `💬 *${escapeMd(authorName)}* on day ${day.day_number} of ${escapeMd(trip.name)}:\n` +
+        `${escapeMd(text)}\n\n_Reply /delete to remove it._`,
       { parse_mode: "Markdown" },
     );
     await db.from("bot_actions").insert({
@@ -71,8 +76,10 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
       entity_type: "comment",
       entity_id: inserted.id,
     });
-  } catch {
-    // the comment is saved; a failed relay must not fail the post
+  } catch (err) {
+    // The comment is saved, so the post still succeeds — but a relay that keeps
+    // failing is invisible from the outside, so make sure it reaches the logs.
+    console.error("comment relay to Telegram failed", { tripId: trip.id, dayNumber: day.day_number }, err);
   }
 
   return { ok: true };
