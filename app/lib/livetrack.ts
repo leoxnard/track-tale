@@ -29,18 +29,18 @@ export interface LivePoint extends TrackPoint {
  * session's `end`, which advances continuously while the session is alive and
  * freezes the instant it finishes. So a stale `end` is the signal.
  *
- * Ten minutes of tolerance is for riders in a tunnel or over a pass, whose
- * session is plainly real because it has already produced points.
+ * Two minutes because that is roughly where Garmin's own banner flips: a
+ * finished session was already showing "Session Complete" at 105 seconds. It
+ * sits far above the ten-second reporting cadence of a live session, so an
+ * active ride is never mistaken for a finished one.
+ *
+ * A longer window was tempting, to ride out a tunnel or a pass without the
+ * banner dropping. It is the wrong call: Garmin drops its own banner in that
+ * situation, and the point of this is to agree with the page the link opens.
+ * Nothing polls, so each page load simply reflects what is true then — the
+ * banner comes back by itself once the signal does.
  */
-const COMPLETE_AFTER_MS = 10 * 60 * 1000;
-
-/**
- * A session that never produced a point has no such claim on our patience, and
- * Garmin does open sessions that die seconds later — one lasted fifteen. Since
- * `end` advances even before the first point arrives, a session that has gone
- * quiet this long without ever reporting a position is finished, not starting.
- */
-const EMPTY_COMPLETE_AFTER_MS = 2 * 60 * 1000;
+const COMPLETE_AFTER_MS = 2 * 60 * 1000;
 
 export interface LiveSession {
   name: string | null;
@@ -169,9 +169,7 @@ export function parseLiveTrackHtml(html: string, now = Date.now()): LiveSession 
     endedAt,
     // No end at all means we cannot tell, and claiming "over" would wrongly
     // hide a live ride — so only a demonstrably stale end counts.
-    complete:
-      Number.isFinite(endMs) &&
-      now - endMs > (points.length > 0 ? COMPLETE_AFTER_MS : EMPTY_COMPLETE_AFTER_MS),
+    complete: Number.isFinite(endMs) && now - endMs > COMPLETE_AFTER_MS,
     points,
     distanceM: points.length > 0 ? points[points.length - 1].distanceM : 0,
     durationS: typeof last?.totalDurationSecs === "number" ? last.totalDurationSecs : 0,

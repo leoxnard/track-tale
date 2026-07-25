@@ -44,17 +44,18 @@ describe("parseLiveTrackHtml", () => {
     });
 
     it("reads a session whose end has gone stale as complete", () => {
-      expect(parseLiveTrackHtml(html, endMs + 11 * 60_000)!.complete).toBe(true);
+      // Garmin's own banner had flipped by 105s; agreeing with it is the point.
+      expect(parseLiveTrackHtml(html, endMs + 150_000)!.complete).toBe(true);
     });
 
-    it("does not flip on a brief gap in coverage", () => {
-      // A tunnel or a pass must not take the live banner down.
-      expect(parseLiveTrackHtml(html, endMs + 9 * 60_000)!.complete).toBe(false);
+    it("tolerates a gap of a few reporting intervals", () => {
+      // A live session reports about every ten seconds, so one missed handful
+      // of points must not read as finished.
+      expect(parseLiveTrackHtml(html, endMs + 60_000)!.complete).toBe(false);
     });
 
-    it("gives up quickly on a session that never produced a point", () => {
+    it("gives up on a session that never produced a point", () => {
       // Garmin opens sessions that die seconds later; one of them lasted 15s.
-      // With no points there is nothing worth waiting ten minutes for.
       const stub = (nowMs: number) =>
         parseLiveTrackHtml(
           `<script>self.__next_f.push([1,"{\\"start\\":\\"2026-07-25T18:24:16.000Z\\",\\"end\\":\\"2026-07-25T18:24:31.000Z\\",\\"trackPoints\\":[]}"])</script>`,
