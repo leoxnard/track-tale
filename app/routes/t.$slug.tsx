@@ -136,7 +136,12 @@ export async function loader({ params }: Route.LoaderArgs) {
 
   // Read straight off Garmin at render time — no polling, no extra cron, and if
   // it fails the page is exactly what it was before.
-  const live = liveActive ? await fetchLiveSession(trip.live_url!) : null;
+  const session = liveActive ? await fetchLiveSession(trip.live_url!) : null;
+  // Garmin's own page says "Session Complete" once the ride is over. Take the
+  // banner and the live overlay down with it rather than waiting out the 24h
+  // expiry, so nothing on the page claims to be live when it isn't.
+  const live = session?.complete ? null : session;
+  const showLive = liveActive && !session?.complete;
 
   // Naming who wrote what only helps when several people did.
   const contributors = new Set<string>();
@@ -153,8 +158,9 @@ export async function loader({ params }: Route.LoaderArgs) {
     name: trip.name,
     startDate: trip.start_date,
     endDate: trip.end_date,
-    liveUrl: liveActive ? trip.live_url : null,
-    live: live && {
+    liveUrl: showLive ? trip.live_url : null,
+    // A session with no points yet is a valid read with nothing to draw.
+    live: live === null || live.points.length === 0 ? null : {
       coords: live.points.map((p) => [p.lng, p.lat] as [number, number]),
       current: live.current ? ([live.current.lng, live.current.lat] as [number, number]) : null,
       distanceM: live.distanceM,
@@ -216,6 +222,8 @@ type MapHandle = {
   flyToDay: (dayNumber: number) => void;
   /** Zoom back out to the whole journey, plan included. */
   resetView: () => void;
+  /** Close in on the live position, which is a speck at whole-tour zoom. */
+  flyToLive: () => void;
   showScrub: (lngLat: [number, number] | null, color: string) => void;
 };
 
@@ -358,6 +366,10 @@ function TripMap({
         },
         resetView() {
           map?.fitBounds(bounds, { padding: 48, duration: 900 });
+        },
+        flyToLive() {
+          if (!map || !live?.current) return;
+          map.flyTo({ center: live.current, zoom: 13, duration: 1200 });
         },
         flyToDay(dayNumber) {
           const day = days.find((d) => d.dayNumber === dayNumber);
@@ -601,6 +613,19 @@ export function TripView({
               >
                 <span aria-hidden>⤢</span> Whole tour
               </button>
+              {trip.live?.current && (
+                <button
+                  onClick={() => mapHandle.current?.flyToLive()}
+                  className="flex shrink-0 items-center gap-2 rounded-full border border-live px-3 py-1 text-sm font-bold text-live hover:bg-live/10 focus-visible:outline-2 focus-visible:outline-live"
+                  title="Zoom the map to where they are right now"
+                >
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute h-full w-full animate-ping rounded-full bg-live/70" />
+                    <span className="relative h-2.5 w-2.5 rounded-full bg-live" />
+                  </span>
+                  Live now
+                </button>
+              )}
               {trip.days.map((day) => (
                 <button
                   key={day.dayNumber}

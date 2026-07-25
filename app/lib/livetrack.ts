@@ -20,9 +20,36 @@ export interface LivePoint extends TrackPoint {
   moving: boolean;
 }
 
+/**
+ * How long the session's own `end` may lag before we call it over.
+ *
+ * Garmin's page shows a "Session Complete" banner, but it renders that in the
+ * browser from a translation bundle — the server-rendered HTML never contains
+ * the words, so there is nothing to match on. What is in the payload is the
+ * session's `end`, which advances continuously while the session is alive and
+ * freezes the instant it finishes. So a stale `end` is the signal.
+ *
+ * Ten minutes of tolerance is for riders in a tunnel or over a pass, whose
+ * session is plainly real because it has already produced points.
+ */
+const COMPLETE_AFTER_MS = 10 * 60 * 1000;
+
+/**
+ * A session that never produced a point has no such claim on our patience, and
+ * Garmin does open sessions that die seconds later — one lasted fifteen. Since
+ * `end` advances even before the first point arrives, a session that has gone
+ * quiet this long without ever reporting a position is finished, not starting.
+ */
+const EMPTY_COMPLETE_AFTER_MS = 2 * 60 * 1000;
+
 export interface LiveSession {
   name: string | null;
   activityType: string | null;
+  /** ISO timestamps from Garmin; `end` freezes when the session finishes. */
+  startedAt: string | null;
+  endedAt: string | null;
+  /** The ride is over: show none of this as live. */
+  complete: boolean;
   points: LivePoint[];
   distanceM: number;
   durationS: number;
@@ -100,7 +127,7 @@ function sliceString(blob: string, key: string): string | null {
 }
 
 /** Parse a LiveTrack session page. Returns null if anything is not as expected. */
-export function parseLiveTrackHtml(html: string): LiveSession | null {
+export function parseLiveTrackHtml(html: string, now = Date.now()): LiveSession | null {
   const blob = extractFlightPayload(html);
   if (blob.length === 0) return null;
 
@@ -128,16 +155,27 @@ export function parseLiveTrackHtml(html: string): LiveSession | null {
       moving: p.pointStatus !== "STATIONARY",
     });
   }
-  if (points.length === 0) return null;
-
+  // An empty session is a successful parse, not a failure: Garmin opens the
+  // session when LiveTrack starts and the first points arrive later. Callers
+  // need to tell "nothing yet" apart from "could not read the page".
   const last = parsed[parsed.length - 1];
+  const endedAt = sliceString(blob, "end");
+  const endMs = endedAt ? Date.parse(endedAt) : NaN;
+
   return {
     name: sliceString(blob, "sessionName"),
     activityType: sliceString(blob, "activityType"),
+    startedAt: sliceString(blob, "start"),
+    endedAt,
+    // No end at all means we cannot tell, and claiming "over" would wrongly
+    // hide a live ride — so only a demonstrably stale end counts.
+    complete:
+      Number.isFinite(endMs) &&
+      now - endMs > (points.length > 0 ? COMPLETE_AFTER_MS : EMPTY_COMPLETE_AFTER_MS),
     points,
-    distanceM: points[points.length - 1].distanceM,
+    distanceM: points.length > 0 ? points[points.length - 1].distanceM : 0,
     durationS: typeof last?.totalDurationSecs === "number" ? last.totalDurationSecs : 0,
-    current: points[points.length - 1],
+    current: points.length > 0 ? points[points.length - 1] : null,
     updatedAt: last?.dateTime ?? null,
   };
 }

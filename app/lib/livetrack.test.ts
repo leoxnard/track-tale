@@ -33,6 +33,49 @@ describe("parseLiveTrackHtml", () => {
     expect(session.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  describe("session completion", () => {
+    // Garmin's `end` tracks the present while a ride is live and freezes when
+    // it finishes, so its staleness is what tells us the session is over. The
+    // fixture's own end is the reference point.
+    const endMs = Date.parse(parseLiveTrackHtml(html)!.endedAt!);
+
+    it("reads a session whose end is still current as live", () => {
+      expect(parseLiveTrackHtml(html, endMs + 30_000)!.complete).toBe(false);
+    });
+
+    it("reads a session whose end has gone stale as complete", () => {
+      expect(parseLiveTrackHtml(html, endMs + 11 * 60_000)!.complete).toBe(true);
+    });
+
+    it("does not flip on a brief gap in coverage", () => {
+      // A tunnel or a pass must not take the live banner down.
+      expect(parseLiveTrackHtml(html, endMs + 9 * 60_000)!.complete).toBe(false);
+    });
+
+    it("gives up quickly on a session that never produced a point", () => {
+      // Garmin opens sessions that die seconds later; one of them lasted 15s.
+      // With no points there is nothing worth waiting ten minutes for.
+      const stub = (nowMs: number) =>
+        parseLiveTrackHtml(
+          `<script>self.__next_f.push([1,"{\\"start\\":\\"2026-07-25T18:24:16.000Z\\",\\"end\\":\\"2026-07-25T18:24:31.000Z\\",\\"trackPoints\\":[]}"])</script>`,
+          nowMs,
+        );
+      const end = Date.parse("2026-07-25T18:24:31.000Z");
+      // Just opened: still worth showing, the first point may be seconds away.
+      expect(stub(end + 30_000)!.complete).toBe(false);
+      // Gone quiet without ever reporting a position: finished, not starting.
+      expect(stub(end + 3 * 60_000)!.complete).toBe(true);
+    });
+
+    it("never claims complete when there is no end to judge by", () => {
+      const noEnd = parseLiveTrackHtml(
+        `<script>self.__next_f.push([1,"{\\"trackPoints\\":[{\\"position\\":{\\"lat\\":1,\\"lon\\":2}}]}"])</script>`,
+      );
+      expect(noEnd!.endedAt).toBeNull();
+      expect(noEnd!.complete).toBe(false);
+    });
+  });
+
   it("carries distance and duration through", () => {
     const session = parseLiveTrackHtml(html)!;
     expect(session.distanceM).toBeGreaterThan(0);
@@ -51,10 +94,24 @@ describe("parseLiveTrackHtml", () => {
     expect(
       parseLiveTrackHtml(`<script>self.__next_f.push([1,"{\\"trackPoints\\":[{\\"position\\""])</script>`),
     ).toBeNull();
-    // Valid envelope, no usable coordinates.
-    expect(
-      parseLiveTrackHtml(`<script>self.__next_f.push([1,"{\\"trackPoints\\":[{\\"altitude\\":5}]}"])</script>`),
-    ).toBeNull();
+  });
+
+  it("reads a session that has not produced points yet as empty, not broken", () => {
+    // Garmin opens the session when LiveTrack starts; points arrive later. The
+    // caller has to be able to tell this apart from a page it could not read.
+    const empty = parseLiveTrackHtml(
+      `<script>self.__next_f.push([1,"{\\"sessionName\\":\\"Not started\\",\\"trackPoints\\":[]}"])</script>`,
+    );
+    expect(empty).not.toBeNull();
+    expect(empty!.points).toEqual([]);
+    expect(empty!.current).toBeNull();
+    expect(empty!.distanceM).toBe(0);
+
+    // Points present but none carrying coordinates is likewise empty, not null.
+    const noCoords = parseLiveTrackHtml(
+      `<script>self.__next_f.push([1,"{\\"trackPoints\\":[{\\"altitude\\":5}]}"])</script>`,
+    );
+    expect(noCoords!.points).toEqual([]);
   });
 
   it("is not fooled by a bracket inside a string value", () => {

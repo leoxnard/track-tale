@@ -2,6 +2,7 @@ import { Bot } from "grammy";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
 import { findLiveTrackUrl, isGarminSender } from "./live-link";
+import { fetchLiveSession } from "./livetrack.server";
 import { escapeMd } from "./telegram-md";
 
 /**
@@ -46,7 +47,15 @@ async function fetchBody(emailId: string): Promise<string> {
  * owner's current trip: the one a chat has open, newest first, and failing that
  * the newest unfinished trip they own.
  */
-async function resolveTrip(): Promise<{ id: string; name: string; chat_id: number } | null> {
+interface TargetTrip {
+  id: string;
+  name: string;
+  chat_id: number;
+  live_url: string | null;
+  live_expires_at: string | null;
+}
+
+async function resolveTrip(): Promise<TargetTrip | null> {
   const db = supabase();
   const { data: chats } = await db.from("chats").select("active_trip_id").not("active_trip_id", "is", null);
   const activeIds = (chats ?? []).map((c) => c.active_trip_id as string);
@@ -54,7 +63,7 @@ async function resolveTrip(): Promise<{ id: string; name: string; chat_id: numbe
   const base = () =>
     db
       .from("trips")
-      .select("id, name, chat_id")
+      .select("id, name, chat_id, live_url, live_expires_at")
       .is("finished_at", null)
       .eq("owner_telegram_id", env.ownerTelegramId)
       .order("created_at", { ascending: false })
@@ -89,6 +98,10 @@ export async function applyInboundLiveEmail(payload: unknown): Promise<InboundOu
   const trip = await resolveTrip();
   if (!trip) return { ok: false, reason: "no open trip to attach the link to" };
 
+  if (await wouldDisplaceALiveSession(trip, url)) {
+    return { ok: false, reason: "kept the session already recording; the new one is empty" };
+  }
+
   const { error } = await supabase()
     .from("trips")
     .update({
@@ -100,6 +113,29 @@ export async function applyInboundLiveEmail(payload: unknown): Promise<InboundOu
 
   await notify(trip, url);
   return { ok: true, tripName: trip.name, url };
+}
+
+/**
+ * Garmin sends an email per LiveTrack session, and opening a second session
+ * does not close the first. Taking the newest link unconditionally therefore
+ * replaces a session that is busy recording with one that may never receive a
+ * point — which is exactly what happened the first time this ran.
+ *
+ * So a new session only displaces the stored one if it has points of its own,
+ * or if what is stored is expired or has gone quiet. A genuinely fresh ride is
+ * empty for its first few seconds, so emptiness alone must not block it.
+ */
+async function wouldDisplaceALiveSession(trip: TargetTrip, incomingUrl: string): Promise<boolean> {
+  const stored = trip.live_url;
+  if (!stored || stored === incomingUrl) return false;
+  if (!trip.live_expires_at || Date.parse(trip.live_expires_at) <= Date.now()) return false;
+
+  const incoming = await fetchLiveSession(incomingUrl);
+  // Could not read the new one, or it has points: let it through either way.
+  if (!incoming || incoming.points.length > 0) return false;
+
+  const current = await fetchLiveSession(stored);
+  return current !== null && current.points.length > 0;
 }
 
 /**
