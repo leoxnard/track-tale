@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase.server";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { weatherIcon, type DayWeather } from "../lib/weather";
 import { ElevationProfile } from "../components/ElevationProfile";
+import { TourProfile } from "../components/TourProfile";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 export interface ViewerPhoto {
@@ -200,6 +201,8 @@ function formatHours(seconds: number): string {
 
 type MapHandle = {
   flyToDay: (dayNumber: number) => void;
+  /** Zoom back out to the whole journey, plan included. */
+  resetView: () => void;
   showScrub: (lngLat: [number, number] | null, color: string) => void;
 };
 
@@ -309,6 +312,9 @@ function TripMap({
             scrubMarker.addTo(map);
             scrubAttached = true;
           }
+        },
+        resetView() {
+          map?.fitBounds(bounds, { padding: 48, duration: 900 });
         },
         flyToDay(dayNumber) {
           const day = days.find((d) => d.dayNumber === dayNumber);
@@ -505,7 +511,9 @@ export function TripView({
 
       {/* Map stays pinned so scrubbing a day's elevation chart is visible on it. */}
       <div className="sticky top-0 z-10 bg-paper">
-        <div className="h-[42vh] min-h-[240px] w-full bg-trail/40 sm:h-[48vh]">
+        {/* dvh, not vh: mobile Safari resolves vh against the viewport with the
+            toolbars hidden, which made the map overhang the visible area. */}
+        <div className="h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
           {mounted && trip.days.length > 0 ? (
             <TripMap days={trip.days} plan={trip.plan} handleRef={mapHandle} />
           ) : (
@@ -517,10 +525,24 @@ export function TripView({
           )}
         </div>
 
-        {/* Stage ribbon: legend + navigation in one */}
+        {/* Stage ribbon: legend + navigation in one. Opaque rather than
+            translucent — a backdrop-filter inside a sticky element makes Safari
+            composite the map canvas through it. */}
         {trip.days.length > 0 && (
-          <nav className="border-b border-trail bg-paper/95 backdrop-blur">
+          <nav className="border-b border-trail bg-paper">
             <div className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 py-2">
+              <button
+                onClick={() => {
+                  mapHandle.current?.resetView();
+                  document
+                    .getElementById("tour-profile")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-trail px-3 py-1 text-sm font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
+                title="Zoom the map back out and jump to the whole-tour profile"
+              >
+                <span aria-hidden>⤢</span> Whole tour
+              </button>
               {trip.days.map((day) => (
                 <button
                   key={day.dayNumber}
@@ -548,6 +570,19 @@ export function TripView({
           </p>
         )}
 
+        {trip.days.length > 0 && (
+          <div className="mb-10">
+            <TourProfile
+              plan={trip.plan}
+              planKm={trip.planKm}
+              days={trip.days}
+              onScrub={(p, color) => mapHandle.current?.showScrub([p.lng, p.lat], color)}
+              onScrubEnd={() => mapHandle.current?.showScrub(null, "")}
+              onSelectDay={scrollToDay}
+            />
+          </div>
+        )}
+
         <div className="space-y-10">
           {trip.days.map((day) => {
             const w = day.weather;
@@ -556,7 +591,7 @@ export function TripView({
               <article
                 key={day.dayNumber}
                 id={`day-${day.dayNumber}`}
-                className="scroll-mt-[calc(42vh+3rem)] border-l-4 pl-4 sm:scroll-mt-[calc(48vh+3rem)] sm:pl-6"
+                className="scroll-mt-[calc(38dvh+3.5rem)] border-l-4 pl-4 sm:scroll-mt-[calc(48dvh+3.5rem)] sm:pl-6"
                 style={{ borderColor: day.color }}
               >
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

@@ -4,6 +4,8 @@ create table if not exists users (
   telegram_id bigint primary key,
   display_name text not null,
   is_owner boolean not null default false,
+  -- Secret slug for this traveller's permanent /traveler/{slug} page.
+  traveler_slug text unique,
   created_at timestamptz not null default now()
 );
 
@@ -183,6 +185,7 @@ alter table trips add column if not exists og_updated_at timestamptz;
 alter table trips add column if not exists archive_path text;
 alter table trips add column if not exists archived_at timestamptz;
 alter table invites add column if not exists expires_at timestamptz;
+alter table users add column if not exists traveler_slug text unique;
 -- Redemption compares against expires_at, and NULL never compares true, so give
 -- codes issued before expiry existed a deadline rather than breaking them.
 update invites set expires_at = created_at + interval '7 days' where expires_at is null;

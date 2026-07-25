@@ -27,4 +27,16 @@ export const env = {
   get appOrigin() {
     return process.env.APP_ORIGIN ?? "http://localhost:5173";
   },
+  /**
+   * Optional. Without it the share card still renders, just on plain paper
+   * instead of over a map.
+   */
+  get maptilerKey() {
+    // `||`, not `??`: an env var present but blank is how "unset" usually looks
+    // in a .env file, and `?? ` would hand a blank style straight into the URL.
+    return process.env.MAPTILER_KEY || null;
+  },
+  get maptilerStyle() {
+    return process.env.MAPTILER_STYLE || "outdoor-v2";
+  },
 };

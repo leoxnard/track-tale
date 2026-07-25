@@ -7,3 +7,5 @@
 /build/
 .vercel
 .env*
+# ...but the template the README tells you to copy has to be in the repo.
+!.env.example

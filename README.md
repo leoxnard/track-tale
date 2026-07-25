@@ -13,6 +13,10 @@ notes, stats and weather.
 - `/day 3` sets which day uploads go to; a silent 3 AM reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
 - A Garmin LiveTrack link shows a "Live now" banner for 24 h.
+- One whole-tour elevation chart shows the plan in grey with each ridden day laid over the
+  stretch of route it actually covers, matched by coordinates rather than stacked in
+  sequence — so a shortcut or a detour leaves a gap or an overlap instead of shifting every
+  day after it.
 
 ## Setup
 
@@ -20,7 +24,9 @@ notes, stats and weather.
    editor (creates tables + public `photos` bucket).
 2. **Telegram**: create a bot via [@BotFather](https://t.me/BotFather); get your user id from
    [@userinfobot](https://t.me/userinfobot).
-3. **Env**: copy [.env.example](.env.example) to `.env` and fill everything in.
+3. **Env**: copy [.env.example](.env.example) to `.env` and fill everything in. Everything
+   is required except `MAPTILER_KEY`, which puts a real map behind the route on the share
+   card; without it the card renders on plain paper.
 4. **Webhook** (after deploying):
    ```sh
    curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \

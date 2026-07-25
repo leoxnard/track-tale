@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ATKINSON_BOLD_B64, ATKINSON_REGULAR_B64 } from "./fonts";
 import { supabase } from "./supabase.server";
-import { makeProjection, polylinePoints as polyline } from "./geo-project";
+import { makeMercatorLayout, polylinePoints as polyline } from "./geo-project";
+import { basemapSvg, BASEMAP_ATTRIBUTION, BASEMAP_TILE_PX } from "./basemap.server";
 import { fromGeoJson, type TrackGeoJson, type TrackPoint } from "./track";
 
 const WIDTH = 1200;
@@ -15,6 +16,8 @@ const PAD = 48;
 const PAPER = "#fbfaf7";
 const PINE = "#1e3a2f";
 const TRAIL = "#c9d2cc";
+/** The plain-paper plan colour vanishes into a basemap; this one holds up. */
+const PLAN_ON_MAP = "#5a6b62";
 
 /**
  * resvg loads fonts from disk only, so the embedded fonts are materialised into
@@ -70,18 +73,39 @@ interface OgData {
   current: TrackPoint | null;
 }
 
-function buildSvg(data: OgData): string {
-  const box = { x: PAD, y: PAD, w: WIDTH - PAD * 2, h: HEIGHT - BAND_H - PAD * 1.5 };
+async function buildSvg(data: OgData): Promise<string> {
+  const routeBox = { x: PAD, y: PAD, w: WIDTH - PAD * 2, h: HEIGHT - BAND_H - PAD * 1.5 };
   const all = [...data.planPoints.flat(), ...data.dayTracks.flatMap((d) => d.points)];
 
   let route = "";
   let bike = "";
+  let basemap = "";
   if (all.length > 0) {
-    const proj = makeProjection(all, box);
+    const proj = makeMercatorLayout(all, routeBox, { tileSize: BASEMAP_TILE_PX });
+    // The route keeps its inset placement; the tiles cover the card edge to
+    // edge. Same zoom, same world-pixel origin — only the window widens, so
+    // the roads stay under the route instead of sliding off it.
+    basemap = await basemapSvg({
+      ...proj,
+      box: { x: 0, y: 0, w: WIDTH, h: HEIGHT },
+      left: proj.left - routeBox.x,
+      top: proj.top - routeBox.y,
+    });
+    // Over a basemap the pale plan colour disappears into the land, and a bare
+    // line of any colour can land on something the same shade. Every line gets
+    // a white casing underneath, and the plan darkens to stay readable.
+    const planStroke = basemap ? PLAN_ON_MAP : TRAIL;
+    const casing = basemap
+      ? (pts: TrackPoint[], w: number, dash: string) =>
+          `<polyline points="${polyline(pts, proj)}" fill="none" stroke="#ffffff" stroke-width="${w}" ${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>`
+      : () => "";
+
     for (const plan of data.planPoints) {
-      route += `<polyline points="${polyline(plan, proj)}" fill="none" stroke="${TRAIL}" stroke-width="7" stroke-dasharray="14 12" stroke-linecap="round"/>`;
+      route += casing(plan, 11, `stroke-dasharray="14 12"`);
+      route += `<polyline points="${polyline(plan, proj)}" fill="none" stroke="${planStroke}" stroke-width="7" stroke-dasharray="14 12" stroke-linecap="round"/>`;
     }
     for (const day of data.dayTracks) {
+      route += casing(day.points, 12, "");
       route += `<polyline points="${polyline(day.points, proj)}" fill="none" stroke="${day.color}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
     if (data.current) {
@@ -106,8 +130,23 @@ function buildSvg(data: OgData): string {
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
   <rect width="${WIDTH}" height="${HEIGHT}" fill="${PAPER}"/>
+  ${basemap}
+  ${
+    basemap
+      ? // Wash the map out so the day colours stay the loudest thing on the card.
+        `<rect width="${WIDTH}" height="${HEIGHT}" fill="${PAPER}" opacity="0.28"/>`
+      : ""
+  }
   ${route}
   ${bike}
+  ${
+    basemap
+      ? // On its own the credit lands on whatever label is underneath it, so it
+        // sits on a plate wide enough for the text at this size.
+        `<rect x="${WIDTH - 316}" y="${bandY - 30}" width="316" height="22" fill="${PAPER}" opacity="0.82"/>
+         <text x="${WIDTH - 10}" y="${bandY - 14}" text-anchor="end" font-family="Atkinson Hyperlegible" font-size="14" fill="#42514a">${escapeXml(BASEMAP_ATTRIBUTION)}</text>`
+      : ""
+  }
   <rect x="0" y="${bandY}" width="${WIDTH}" height="${BAND_H}" fill="${PINE}"/>
   <text x="${PAD}" y="${bandY + 58}" font-family="Atkinson Hyperlegible" font-weight="700" font-size="46" fill="${PAPER}">${escapeXml(data.name)}</text>
   <text x="${PAD}" y="${bandY + 98}" font-family="Atkinson Hyperlegible" font-size="26" fill="#a9bcb2">${escapeXml(statParts.join("  ·  "))}</text>
@@ -165,7 +204,7 @@ export async function renderOgCard(tripId: string): Promise<string | null> {
     }
   }
 
-  const svg = buildSvg({
+  const svg = await buildSvg({
     name: trip.name,
     planPoints: (planRows ?? []).map((p) => fromGeoJson(p.geojson as TrackGeoJson)),
     dayTracks,

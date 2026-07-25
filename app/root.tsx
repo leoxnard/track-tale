@@ -28,7 +28,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* viewport-fit=cover + a theme colour make mobile Safari tint its
+            toolbars with the page instead of framing it in grey. */}
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#fbfaf7" />
         <Meta />
         <Links />
       </head>
