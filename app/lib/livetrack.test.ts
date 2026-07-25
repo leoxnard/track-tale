@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isSettled, parseLiveTrackHtml } from "./livetrack";
+import { isSettled, keepsStoredSession, parseLiveTrackHtml, type LiveSession } from "./livetrack";
 
 // A real session page, trimmed to four points with the location, name and
 // tokens scrubbed. Kept verbatim otherwise: the escaping of the embedded
@@ -139,5 +139,40 @@ describe("parseLiveTrackHtml", () => {
     const session = parseLiveTrackHtml(`<script>self.__next_f.push([1,${payload}])</script>`);
     expect(session!.points).toHaveLength(1);
     expect(session!.name).toBe("Ride [with] brackets");
+  });
+});
+
+describe("keepsStoredSession", () => {
+  const session = (o: Partial<LiveSession>): LiveSession => ({
+    name: null, activityType: null, startedAt: null, endedAt: null, complete: false,
+    points: [], distanceM: 0, durationS: 0, current: null, updatedAt: null, ...o,
+  });
+  const pt = { lat: 1, lng: 2, distanceM: 0, moving: true };
+  const recording = session({ points: [pt] });
+  const finished = session({ points: [pt], complete: true });
+  const empty = session({ points: [] });
+
+  it("protects a ride that is genuinely in progress from an empty stub", () => {
+    expect(keepsStoredSession(recording, empty)).toBe(true);
+  });
+
+  it("lets a session that has points of its own take over", () => {
+    expect(keepsStoredSession(recording, recording)).toBe(false);
+  });
+
+  it("does not let a finished ride block the next one", () => {
+    // The bug this exists for: a finished session keeps its points for good, so
+    // testing points alone blocked every new session for 24 hours.
+    expect(keepsStoredSession(finished, empty)).toBe(false);
+  });
+
+  it("gives up its claim when there is nothing stored or nothing recorded", () => {
+    expect(keepsStoredSession(null, empty)).toBe(false);
+    expect(keepsStoredSession(empty, empty)).toBe(false);
+  });
+
+  it("lets the new link through when it cannot be read", () => {
+    // Unreadable is not the same as a dud; refusing would strand the trip.
+    expect(keepsStoredSession(recording, null)).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import { env } from "./env.server";
 import { supabase } from "./supabase.server";
 import { findLiveTrackUrl, isGarminSender } from "./live-link";
 import { fetchLiveSession } from "./livetrack.server";
+import { keepsStoredSession } from "./livetrack";
 import { escapeMd } from "./telegram-md";
 
 /**
@@ -117,25 +118,19 @@ export async function applyInboundLiveEmail(payload: unknown): Promise<InboundOu
 
 /**
  * Garmin sends an email per LiveTrack session, and opening a second session
- * does not close the first. Taking the newest link unconditionally therefore
- * replaces a session that is busy recording with one that may never receive a
- * point — which is exactly what happened the first time this ran.
- *
- * So a new session only displaces the stored one if it has points of its own,
- * or if what is stored is expired or has gone quiet. A genuinely fresh ride is
- * empty for its first few seconds, so emptiness alone must not block it.
+ * does not close the first, so the newest link is not automatically the right
+ * one. See {@link keepsStoredSession} for which one wins.
  */
 async function wouldDisplaceALiveSession(trip: TargetTrip, incomingUrl: string): Promise<boolean> {
   const stored = trip.live_url;
   if (!stored || stored === incomingUrl) return false;
   if (!trip.live_expires_at || Date.parse(trip.live_expires_at) <= Date.now()) return false;
 
-  const incoming = await fetchLiveSession(incomingUrl);
-  // Could not read the new one, or it has points: let it through either way.
-  if (!incoming || incoming.points.length > 0) return false;
-
-  const current = await fetchLiveSession(stored);
-  return current !== null && current.points.length > 0;
+  const [incoming, current] = await Promise.all([
+    fetchLiveSession(incomingUrl),
+    fetchLiveSession(stored),
+  ]);
+  return keepsStoredSession(current, incoming);
 }
 
 /**

@@ -34,6 +34,29 @@ export function isSettled(session: LiveSession, now = Date.now()): boolean {
   return Number.isFinite(endMs) && now - endMs > SETTLED_AFTER_MS;
 }
 
+/**
+ * Whether an incoming LiveTrack link should be ignored in favour of the one
+ * already stored.
+ *
+ * Garmin opens a session every time the device wakes, and most of them die
+ * seconds later without ever reporting a position. One of those must not be
+ * allowed to replace a ride that is genuinely in progress.
+ *
+ * The stored session only earns that protection while it is still running. A
+ * finished one keeps its points for good, so testing for points alone would let
+ * this morning's ride block every session for the rest of the day.
+ */
+export function keepsStoredSession(
+  stored: LiveSession | null,
+  incoming: LiveSession | null,
+): boolean {
+  // Nothing stored, unreadable, finished, or never got going: no claim.
+  if (!stored || stored.complete || stored.points.length === 0) return false;
+  // Could not read the incoming one, so we cannot say it is a dud: let it in.
+  if (!incoming) return false;
+  return incoming.points.length === 0;
+}
+
 export interface LivePoint extends TrackPoint {
   /** Metres from the start of the session, as Garmin counts them. */
   distanceM: number;
