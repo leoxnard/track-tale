@@ -14,6 +14,26 @@ import type { TrackPoint } from "./track";
  * working. Every caller must treat null as normal and carry on without it.
  */
 
+/**
+ * When a finished session stops being worth re-checking.
+ *
+ * {@link COMPLETE_AFTER_MS} is deliberately short so the banner agrees with
+ * Garmin's, which means a tunnel or a pass trips it. That is harmless while
+ * nothing is written down — the next page load after the signal returns shows
+ * the ride as live again. Recording the session as over is not reversible in
+ * the same way, so it waits until no plausible gap in coverage is left.
+ */
+const SETTLED_AFTER_MS = 30 * 60 * 1000;
+
+/**
+ * True once a session has been over long enough that it will not come back to
+ * life, so the stored link can be dropped and the page can stop fetching it.
+ */
+export function isSettled(session: LiveSession, now = Date.now()): boolean {
+  const endMs = session.endedAt ? Date.parse(session.endedAt) : NaN;
+  return Number.isFinite(endMs) && now - endMs > SETTLED_AFTER_MS;
+}
+
 export interface LivePoint extends TrackPoint {
   /** Metres from the start of the session, as Garmin counts them. */
   distanceM: number;

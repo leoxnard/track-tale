@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { data, Form, useNavigation } from "react-router";
 import type { Route } from "./+types/t.$slug";
-import { getTripBySlug } from "../lib/db.server";
+import { getTripBySlug, updateTrip } from "../lib/db.server";
 import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { weatherIcon, type DayWeather } from "../lib/weather";
 import { fetchLiveSession } from "../lib/livetrack.server";
+import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -142,6 +143,22 @@ export async function loader({ params }: Route.LoaderArgs) {
   // expiry, so nothing on the page claims to be live when it isn't.
   const live = session?.complete ? null : session;
   const showLive = liveActive && !session?.complete;
+
+  // A ride starts by push — Garmin emails the link — but only fetching this
+  // page reveals that it ended. So a link left to run out its 24 hours costs
+  // every single visitor a request to Garmin for a session that finished hours
+  // ago. Once the session is settled the link has nothing left to tell us, so
+  // retire it and the fetch above stops happening at all. Awaited rather than
+  // fired and forgotten: it is one small write that only ever runs once, and a
+  // serverless function can be killed before background work finishes.
+  if (session && isSettled(session)) {
+    try {
+      await updateTrip(trip.id, { live_url: null, live_expires_at: null });
+    } catch (err) {
+      // Purely an optimisation — the page is already correct without it.
+      console.error("could not retire the finished live link", err);
+    }
+  }
 
   // Naming who wrote what only helps when several people did.
   const contributors = new Set<string>();

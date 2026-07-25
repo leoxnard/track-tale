@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseLiveTrackHtml } from "./livetrack";
+import { isSettled, parseLiveTrackHtml } from "./livetrack";
 
 // A real session page, trimmed to four points with the location, name and
 // tokens scrubbed. Kept verbatim otherwise: the escaping of the embedded
@@ -66,6 +66,23 @@ describe("parseLiveTrackHtml", () => {
       expect(stub(end + 30_000)!.complete).toBe(false);
       // Gone quiet without ever reporting a position: finished, not starting.
       expect(stub(end + 3 * 60_000)!.complete).toBe(true);
+    });
+
+    it("waits much longer to call a session settled than to hide the banner", () => {
+      // Hiding the banner is reversible on the next page load; dropping the
+      // stored link is not, so a long tunnel must not trigger it.
+      const session = parseLiveTrackHtml(html, endMs + 5 * 60_000)!;
+      expect(session.complete).toBe(true);
+      expect(isSettled(session, endMs + 5 * 60_000)).toBe(false);
+      expect(isSettled(session, endMs + 25 * 60_000)).toBe(false);
+      expect(isSettled(session, endMs + 31 * 60_000)).toBe(true);
+    });
+
+    it("never settles a session with no end to judge by", () => {
+      const noEnd = parseLiveTrackHtml(
+        `<script>self.__next_f.push([1,"{\\"trackPoints\\":[{\\"position\\":{\\"lat\\":1,\\"lon\\":2}}]}"])</script>`,
+      )!;
+      expect(isSettled(noEnd, Date.now())).toBe(false);
     });
 
     it("never claims complete when there is no end to judge by", () => {
