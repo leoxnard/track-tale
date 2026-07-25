@@ -510,7 +510,7 @@ export function TripView({
       </header>
 
       {/* Map stays pinned so scrubbing a day's elevation chart is visible on it. */}
-      <div className="sticky top-0 z-10 bg-paper">
+      <div className="map-shell sticky top-0 z-10 bg-paper">
         {/* dvh, not vh: mobile Safari resolves vh against the viewport with the
             toolbars hidden, which made the map overhang the visible area. */}
         <div className="h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">

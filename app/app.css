@@ -23,6 +23,23 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/*
+ * The pinned map shell.
+ *
+ * iOS Safari composites sticky elements on a separate thread during momentum
+ * scrolling and can leave the strip around them un-repainted, so a slice of
+ * page content from an older scroll position stays on screen above the map.
+ * Forcing the shell onto its own layer with an opaque background keeps Safari
+ * repainting it in step with the scroll. `transform` on the sticky element
+ * itself is safe — it only breaks stickiness when set on an *ancestor*.
+ */
+.map-shell {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  isolation: isolate;
+  background-color: var(--color-paper);
+}
+
 /* iOS zooms the page in when a focused input is smaller than 16px. */
 @media (max-width: 640px) {
   input,

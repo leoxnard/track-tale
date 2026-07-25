@@ -28,6 +28,7 @@ import {
   type DbTrip,
 } from "./db.server";
 import { fetchKomootTour, findKomootUrl, parseKomootUrl } from "./komoot";
+import { findLiveTrackUrl } from "./live-link";
 import { parseFit, parseGpx } from "./gpx";
 import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson } from "./track";
 import { matchPhotoToTrack } from "./photo-match";
@@ -85,8 +86,6 @@ async function deleteAction(action: { entity_type: EntityType; entity_id: string
   }
   await supabase().from(ENTITY_TABLE[action.entity_type]).delete().eq("id", action.entity_id);
 }
-
-const LIVETRACK_RE = /https?:\/\/(?:livetrack\.garmin\.com|[a-z]+\.garmin\.com\/livetrack)[^\s]*/i;
 
 interface BotState {
   chat: DbChat;
@@ -931,15 +930,15 @@ export function createBot(): Bot {
     const text = ctx.message.text.trim();
     if (text.startsWith("/")) return; // unknown command, stay quiet
 
-    const liveMatch = text.match(LIVETRACK_RE);
+    const liveUrl = findLiveTrackUrl(text);
     const komootUrl = findKomootUrl(text);
 
     // Links are unambiguous intent, so they work anywhere.
-    if (liveMatch) {
+    if (liveUrl) {
       const trip = await requireTrip(ctx);
       if (!trip) return;
       await updateTrip(trip.id, {
-        live_url: liveMatch[0],
+        live_url: liveUrl,
         live_expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       });
       await ctx.reply("🔴 Live banner is on for 24h — family sees it at the top of the trip page.");

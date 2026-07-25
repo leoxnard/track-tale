@@ -12,7 +12,9 @@ notes, stats and weather.
   route by timestamp (Telegram strips GPS EXIF).
 - `/day 3` sets which day uploads go to; a silent 3 AM reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
-- A Garmin LiveTrack link shows a "Live now" banner for 24 h.
+- A Garmin LiveTrack link shows a "Live now" banner for 24 h. Paste it into the chat, or let
+  Garmin email it: add the inbound address as a LiveTrack recipient and starting a ride turns
+  the banner on by itself, with the bot confirming in the chat which trip it landed on.
 - One whole-tour elevation chart shows the plan in grey with each ridden day laid over the
   stretch of route it actually covers, matched by coordinates rather than stacked in
   sequence — so a shortcut or a detour leaves a gap or an overlap instead of shifting every

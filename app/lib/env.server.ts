@@ -31,6 +31,17 @@ export const env = {
    * Optional. Without it the share card still renders, just on plain paper
    * instead of over a map.
    */
+  /**
+   * Inbound mail. Both are optional: without them /api/inbound-email refuses
+   * every request and live links are set by pasting into Telegram, as before.
+   */
+  get resendApiKey() {
+    return process.env.RESEND_API_KEY || null;
+  },
+  /** The `whsec_…` signing secret from the Resend webhook page. */
+  get resendInboundSecret() {
+    return process.env.RESEND_INBOUND_SECRET || null;
+  },
   get maptilerKey() {
     // `||`, not `??`: an env var present but blank is how "unset" usually looks
     // in a .env file, and `?? ` would hand a blank style straight into the URL.

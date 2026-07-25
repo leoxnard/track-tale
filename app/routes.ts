@@ -6,5 +6,6 @@ export default [
   route("traveler/:slug", "routes/traveler.$slug.tsx"),
   route("api/telegram", "routes/api.telegram.ts"),
   route("api/cron", "routes/api.cron.ts"),
+  route("api/inbound-email", "routes/api.inbound-email.ts"),
   route("preview", "routes/preview.tsx"),
 ] satisfies RouteConfig;
