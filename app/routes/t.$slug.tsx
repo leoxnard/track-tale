@@ -6,6 +6,7 @@ import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { weatherIcon, type DayWeather } from "../lib/weather";
+import { fetchLiveSession } from "../lib/livetrack.server";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -133,6 +134,10 @@ export async function loader({ params }: Route.LoaderArgs) {
     trip.live_expires_at !== null &&
     Date.parse(trip.live_expires_at) > Date.now();
 
+  // Read straight off Garmin at render time — no polling, no extra cron, and if
+  // it fails the page is exactly what it was before.
+  const live = liveActive ? await fetchLiveSession(trip.live_url!) : null;
+
   // Naming who wrote what only helps when several people did.
   const contributors = new Set<string>();
   for (const day of days) {
@@ -149,6 +154,14 @@ export async function loader({ params }: Route.LoaderArgs) {
     startDate: trip.start_date,
     endDate: trip.end_date,
     liveUrl: liveActive ? trip.live_url : null,
+    live: live && {
+      coords: live.points.map((p) => [p.lng, p.lat] as [number, number]),
+      current: live.current ? ([live.current.lng, live.current.lat] as [number, number]) : null,
+      distanceM: live.distanceM,
+      durationS: live.durationS,
+      updatedAt: live.updatedAt,
+      moving: live.current?.moving ?? false,
+    },
     days,
     plan,
     planKm,
@@ -209,10 +222,12 @@ type MapHandle = {
 function TripMap({
   days,
   plan,
+  live,
   handleRef,
 }: {
   days: ViewerDay[];
   plan: TrackGeoJson[];
+  live?: ViewerLive | null;
   handleRef: React.MutableRefObject<MapHandle | null>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -228,6 +243,7 @@ function TripMap({
       const allCoords = [
         ...plan.flatMap((p) => p.geometry.coordinates),
         ...days.flatMap((d) => d.tracks.flatMap((t) => t.geometry.coordinates)),
+        ...(live?.coords ?? []),
       ];
       if (allCoords.length === 0) return;
 
@@ -287,6 +303,33 @@ function TripMap({
             new maplibregl.Marker({ element: el }).setLngLat([photo.lng, photo.lat]).addTo(map!);
           }
         }
+
+        // Today's ride, straight from Garmin: drawn on top of the finished days
+        // because it is the bit anyone opening the page right now cares about.
+        if (live && live.coords.length > 1) {
+          map.addSource("live-track", {
+            type: "geojson",
+            data: {
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates: live.coords },
+            },
+          });
+          map.addLayer({
+            id: "live-track",
+            type: "line",
+            source: "live-track",
+            paint: { "line-color": "#d64533", "line-width": 4, "line-dasharray": [3, 1.5] },
+            layout: { "line-cap": "round", "line-join": "round" },
+          });
+        }
+        if (live?.current) {
+          const el = document.createElement("div");
+          el.title = "Live position";
+          el.style.cssText =
+            "width:18px;height:18px;border-radius:50%;background:#d64533;border:3px solid #fff;box-shadow:0 0 0 rgba(214,69,51,.7);animation:tt-pulse 2s infinite";
+          new maplibregl.Marker({ element: el }).setLngLat(live.current).addTo(map);
+        }
       });
 
       // One reusable marker follows the elevation chart as it's scrubbed.
@@ -335,9 +378,19 @@ function TripMap({
       map?.remove();
       handleRef.current = null;
     };
-  }, [days, plan, handleRef]);
+  }, [days, plan, live, handleRef]);
 
   return <div ref={containerRef} className="h-full w-full" />;
+}
+
+export interface ViewerLive {
+  /** Today's session so far, as [lng, lat] pairs. */
+  coords: [number, number][];
+  current: [number, number] | null;
+  distanceM: number;
+  durationS: number;
+  updatedAt: string | null;
+  moving: boolean;
 }
 
 export interface ViewerTrip {
@@ -345,6 +398,7 @@ export interface ViewerTrip {
   startDate: string;
   endDate: string;
   liveUrl: string | null;
+  live?: ViewerLive | null;
   showAuthors: boolean;
   ogUrl: string | null;
   days: ViewerDay[];
@@ -491,7 +545,11 @@ export function TripView({
                 <span className="absolute h-full w-full animate-ping rounded-full bg-white/70" />
                 <span className="relative h-2.5 w-2.5 rounded-full bg-white" />
               </span>
-              Live now — follow along
+              {trip.live
+                ? `Live — ${(trip.live.distanceM / 1000).toFixed(1)} km${
+                    trip.live.durationS > 0 ? ` · ${formatHours(trip.live.durationS)}` : ""
+                  }`
+                : "Live now — follow along"}
             </a>
           )}
         </div>
@@ -515,7 +573,7 @@ export function TripView({
             toolbars hidden, which made the map overhang the visible area. */}
         <div className="h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
           {mounted && trip.days.length > 0 ? (
-            <TripMap days={trip.days} plan={trip.plan} handleRef={mapHandle} />
+            <TripMap days={trip.days} plan={trip.plan} live={trip.live} handleRef={mapHandle} />
           ) : (
             <div className="flex h-full items-center justify-center text-faint">
               {trip.days.length === 0

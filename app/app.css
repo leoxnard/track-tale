@@ -40,6 +40,19 @@ body {
   background-color: var(--color-paper);
 }
 
+/* The live position marker on the map. */
+@keyframes tt-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(214, 69, 51, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(214, 69, 51, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(214, 69, 51, 0);
+  }
+}
+
 /* iOS zooms the page in when a focused input is smaller than 16px. */
 @media (max-width: 640px) {
   input,
