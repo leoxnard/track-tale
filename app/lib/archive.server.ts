@@ -205,7 +205,7 @@ function buildChart(
 function buildHtml(opts: {
   name: string;
   startDate: string;
-  endDate: string;
+  endDate: string | null;
   days: ArchiveDay[];
   plan: TrackPoint[][];
   totalKm: number;
@@ -315,7 +315,7 @@ function buildHtml(opts: {
 <div class="wrap">
   <header>
     <h1>${esc(opts.name)}</h1>
-    <p class="sub">${formatDate(opts.startDate)} – ${formatDate(opts.endDate)}</p>
+    <p class="sub">${opts.endDate ? `${formatDate(opts.startDate)} – ${formatDate(opts.endDate)}` : `since ${formatDate(opts.startDate)}`}</p>
   </header>
 
   <div class="mapwrap">

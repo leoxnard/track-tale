@@ -20,7 +20,7 @@ export interface DbTrip {
   owner_telegram_id: number;
   name: string;
   start_date: string;
-  end_date: string;
+  end_date: string | null;
   timezone: string;
   share_slug: string;
   current_day_number: number | null;
@@ -134,7 +134,7 @@ export async function createTrip(trip: {
   owner_telegram_id: number;
   name: string;
   start_date: string;
-  end_date: string;
+  end_date?: string | null;
   share_slug: string;
   timezone?: string;
 }): Promise<DbTrip> {
@@ -181,6 +181,9 @@ export async function updateTrip(tripId: string, patch: Partial<DbTrip>): Promis
 export async function finishTrip(trip: DbTrip): Promise<void> {
   await updateTrip(trip.id, {
     finished_at: new Date().toISOString(),
+    // A trip created with no end date gets one now, backdated to nothing —
+    // "finished" is itself the date the trip ran to.
+    end_date: trip.end_date ?? new Date().toISOString().slice(0, 10),
     live_url: null,
     live_expires_at: null,
   });
@@ -323,7 +326,9 @@ export async function ensureDay(trip: DbTrip, dayNumber: number): Promise<DbDay>
   return data;
 }
 
+/** Infinity when the trip has no end date yet — /day is unbounded until /endtrip. */
 export function tripDayCount(trip: DbTrip): number {
+  if (trip.end_date === null) return Infinity;
   const start = Date.parse(trip.start_date);
   const end = Date.parse(trip.end_date);
   return Math.round((end - start) / 86400000) + 1;

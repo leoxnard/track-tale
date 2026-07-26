@@ -175,6 +175,7 @@ export async function loader({ params }: Route.LoaderArgs) {
     name: trip.name,
     startDate: trip.start_date,
     endDate: trip.end_date,
+    finished: trip.finished_at !== null,
     liveUrl: showLive ? trip.live_url : null,
     // A session with no points yet is a valid read with nothing to draw.
     live: live === null || live.points.length === 0 ? null : {
@@ -221,11 +222,20 @@ export function meta({ loaderData: trip }: Route.MetaArgs) {
   ];
 }
 
+/** A year ago today, so a date from an older trip carries its year and isn't mistaken for this year's. */
+function isAtLeastAYearAgo(date: Date): boolean {
+  const aYearAgo = new Date();
+  aYearAgo.setFullYear(aYearAgo.getFullYear() - 1);
+  return date <= aYearAgo;
+}
+
 function formatDate(iso: string): string {
-  return new Date(iso + "T00:00:00").toLocaleDateString("en-GB", {
+  const date = new Date(iso + "T00:00:00");
+  return date.toLocaleDateString("en-GB", {
     weekday: "short",
     day: "numeric",
     month: "short",
+    year: isAtLeastAYearAgo(date) ? "numeric" : undefined,
   });
 }
 
@@ -425,7 +435,8 @@ export interface ViewerLive {
 export interface ViewerTrip {
   name: string;
   startDate: string;
-  endDate: string;
+  endDate: string | null;
+  finished: boolean;
   liveUrl: string | null;
   live?: ViewerLive | null;
   showAuthors: boolean;
@@ -557,11 +568,18 @@ export function TripView({
 
   return (
     <div className="min-h-screen">
+      {/* iOS runs the page under the notch/Dynamic Island (viewport-fit=cover).
+          The sticky map below sits at the very top once pinned, and Safari's
+          sticky-element repaint glitch (see .map-shell) is most visible in
+          that strip — this covers it with the same paper background so
+          nothing stale from further down the page ever shows through there. */}
+      <div className="safe-area-blocker fixed inset-x-0 top-0 z-20 bg-paper" />
+
       <header className="border-b border-trail bg-paper">
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-4">
           <h1 className="font-display text-2xl font-semibold text-pine sm:text-3xl">{trip.name}</h1>
           <p className="text-sm text-faint">
-            {formatDate(trip.startDate)} – {formatDate(trip.endDate)}
+            {trip.endDate ? `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}` : `since ${formatDate(trip.startDate)}`}
           </p>
           {trip.liveUrl && (
             <a
@@ -617,7 +635,7 @@ export function TripView({
             composite the map canvas through it. */}
         {trip.days.length > 0 && (
           <nav className="border-b border-trail bg-paper">
-            <div className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 py-2">
+            <div className="mx-auto flex max-w-5xl flex-wrap gap-2 px-4 py-2">
               <button
                 onClick={() => {
                   mapHandle.current?.resetView();
@@ -666,7 +684,8 @@ export function TripView({
           <p className="mb-8 text-sm text-faint">
             {trip.totalKm.toFixed(1)} km · {Math.round(trip.totalUp)} m climbed ·{" "}
             {formatHours(trip.movingS)} in motion · {trip.days.length}{" "}
-            {trip.days.length === 1 ? "day" : "days"} so far
+            {trip.days.length === 1 ? "day" : "days"}
+            {!trip.finished && " so far"}
           </p>
         )}
 
@@ -695,9 +714,14 @@ export function TripView({
                 style={{ borderColor: day.color }}
               >
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <h2 className="font-display text-xl font-semibold text-pine">
+                  <button
+                    type="button"
+                    onClick={() => mapHandle.current?.flyToDay(day.dayNumber)}
+                    className="font-display text-xl font-semibold text-pine hover:underline focus-visible:outline-2 focus-visible:outline-pine"
+                    title="Focus the map on this day"
+                  >
                     Day {day.dayNumber}
-                  </h2>
+                  </button>
                   <p className="text-sm text-faint">{formatDate(day.date)}</p>
                   {w && (
                     <p className="text-sm text-faint" title={wi.label}>

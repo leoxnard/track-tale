@@ -2,6 +2,7 @@
  "name": "Fliegenzerfetzer Tour",
  "startDate": "2026-07-14",
  "endDate": "2026-07-23",
+ "finished": false,
  "liveUrl": "https://livetrack.garmin.com/session/example",
  "plan": [
   {

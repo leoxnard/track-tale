@@ -6,13 +6,23 @@ export interface DayWeather {
   weatherCode: number | null;
 }
 
-/** Open-Meteo daily weather at a point for one date. Free, no API key. */
-export async function fetchDayWeather(
+interface DailyResponse {
+  daily?: {
+    temperature_2m_max?: (number | null)[];
+    temperature_2m_min?: (number | null)[];
+    precipitation_sum?: (number | null)[];
+    wind_speed_10m_max?: (number | null)[];
+    weather_code?: (number | null)[];
+  };
+}
+
+async function fetchDaily(
+  endpoint: string,
   lat: number,
   lng: number,
   isoDate: string,
-): Promise<DayWeather | null> {
-  const url = new URL("https://api.open-meteo.com/v1/forecast");
+): Promise<DailyResponse["daily"] | null> {
+  const url = new URL(endpoint);
   url.searchParams.set("latitude", String(lat));
   url.searchParams.set("longitude", String(lng));
   url.searchParams.set("start_date", isoDate);
@@ -25,16 +35,29 @@ export async function fetchDayWeather(
 
   const res = await fetch(url);
   if (!res.ok) return null;
-  const data = (await res.json()) as {
-    daily?: {
-      temperature_2m_max?: (number | null)[];
-      temperature_2m_min?: (number | null)[];
-      precipitation_sum?: (number | null)[];
-      wind_speed_10m_max?: (number | null)[];
-      weather_code?: (number | null)[];
-    };
-  };
-  const d = data.daily;
+  const data = (await res.json()) as DailyResponse;
+  // A day inside the window has every array populated; one it doesn't cover
+  // comes back with the arrays present but full of nulls.
+  return data.daily?.temperature_2m_max?.[0] != null ? data.daily : null;
+}
+
+/**
+ * Daily weather at a point for one date. Free, no API key.
+ *
+ * The forecast endpoint only keeps a short rolling window of past days
+ * alongside its forecast — plenty for weather cached live as a trip happens,
+ * but empty for a day backfilled well after the fact (a bulk-imported or
+ * long-finished trip). The historical endpoint covers those older dates
+ * instead, so a day uploaded late still gets its weather.
+ */
+export async function fetchDayWeather(
+  lat: number,
+  lng: number,
+  isoDate: string,
+): Promise<DayWeather | null> {
+  const d =
+    (await fetchDaily("https://api.open-meteo.com/v1/forecast", lat, lng, isoDate)) ??
+    (await fetchDaily("https://archive-api.open-meteo.com/v1/archive", lat, lng, isoDate));
   if (!d) return null;
   return {
     tempMaxC: d.temperature_2m_max?.[0] ?? null,

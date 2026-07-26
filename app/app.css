@@ -40,6 +40,13 @@ body {
   background-color: var(--color-paper);
 }
 
+/* Sits above .map-shell (z-10) so it always wins the strip under the notch. */
+.safe-area-blocker {
+  height: env(safe-area-inset-top);
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
 /* The live position marker on the map. */
 @keyframes tt-pulse {
   0% {

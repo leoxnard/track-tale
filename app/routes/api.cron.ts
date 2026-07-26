@@ -30,7 +30,9 @@ export async function loader({ request }: { request: Request }) {
     .select("*")
     .is("finished_at", null) // a finished trip is done being maintained
     .lte("start_date", today)
-    .gte("end_date", addDays(today, -1)); // include trips that ended yesterday
+    // Include trips that ended yesterday, and trips with no end date yet —
+    // a null end_date fails .gte() outright, so it needs its own clause.
+    .or(`end_date.is.null,end_date.gte.${addDays(today, -1)}`);
   if (error) failures.push(`could not load trips: ${error.message}`);
 
   for (const trip of trips ?? []) {
@@ -38,7 +40,11 @@ export async function loader({ request }: { request: Request }) {
       // Previous local day in the trip's timezone.
       const localToday = new Date().toLocaleDateString("en-CA", { timeZone: trip.timezone });
       const yesterday = addDays(localToday, -1);
-      if (trip.reminders_enabled && yesterday >= trip.start_date && yesterday <= trip.end_date) {
+      if (
+        trip.reminders_enabled &&
+        yesterday >= trip.start_date &&
+        (trip.end_date === null || yesterday <= trip.end_date)
+      ) {
         const { data: day } = await supabase()
           .from("days")
           .select("id, day_number, track_segments(id)")

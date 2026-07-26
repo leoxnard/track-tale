@@ -92,34 +92,38 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
 
   return (
     <figure className="mt-3">
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        className="h-[110px] w-full touch-none select-none"
-        role="img"
-        aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} metres over ${(totalD / 1000).toFixed(1)} kilometres`}
-        onMouseMove={(e) => move(e.clientX)}
-        onTouchStart={(e) => move(e.touches[0].clientX)}
-        onTouchMove={(e) => move(e.touches[0].clientX)}
-      >
-        <path d={area} fill={color} opacity={0.16} />
-        <path d={path} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-        {cur && (
-          <g>
-            <line
-              x1={curX}
-              x2={curX}
-              y1={PAD_TOP}
-              y2={H - PAD_BOTTOM}
-              stroke={color}
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-            <circle cx={curX} cy={curY} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
-          </g>
-        )}
-      </svg>
+      <div className="overflow-x-auto">
+        <div style={{ width: W, minWidth: W }}>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            className="h-[110px] w-full touch-none select-none"
+            role="img"
+            aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} metres over ${(totalD / 1000).toFixed(1)} kilometres`}
+            onMouseMove={(e) => move(e.clientX)}
+            onTouchStart={(e) => move(e.touches[0].clientX)}
+            onTouchMove={(e) => move(e.touches[0].clientX)}
+          >
+            <path d={area} fill={color} opacity={0.16} />
+            <path d={path} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            {cur && (
+              <g>
+                <line
+                  x1={curX}
+                  x2={curX}
+                  y1={PAD_TOP}
+                  y2={H - PAD_BOTTOM}
+                  stroke={color}
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <circle cx={curX} cy={curY} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+              </g>
+            )}
+          </svg>
+        </div>
+      </div>
       <figcaption className="mt-1 flex justify-between text-xs text-faint">
         {cur ? (
           <>

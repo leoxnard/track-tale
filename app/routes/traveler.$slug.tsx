@@ -58,9 +58,10 @@ export function meta({ loaderData }: Route.MetaArgs) {
   ];
 }
 
-function formatRange(start: string, end: string): string {
+function formatRange(start: string, end: string | null): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
   const s = new Date(start + "T00:00:00").toLocaleDateString("en-GB", opts);
+  if (!end) return `since ${s}`;
   const e = new Date(end + "T00:00:00").toLocaleDateString("en-GB", opts);
   return `${s} – ${e}`;
 }

@@ -99,10 +99,11 @@ interface BotState {
 const HELP = `🚴 *TrackTale* — your trip journal
 
 *Trip setup*
-/newtrip Name | 2026-08-01 | 2026-08-10
+/newtrip Name | 2026-08-01 — end date optional, add it with | 2026-08-10
 /trips — list this chat's trips
 /usetrip 2 — switch active trip (reopens a finished one)
 /day 3 — set the day uploads go to
+/day3, /nextday, /previousday — same, quicker
 /trip — status + family link
 /regeneratelink — new family link
 
@@ -220,7 +221,7 @@ async function requireTrip(ctx: Context): Promise<DbTrip | null> {
   const trip = await getActiveTrip(chat);
   if (!trip) {
     await ctx.reply(
-      "No active trip here. Create one:\n/newtrip Name | 2026-08-01 | 2026-08-10",
+      "No active trip here. Create one:\n/newtrip Name | 2026-08-01",
     );
     return null;
   }
@@ -233,6 +234,22 @@ async function requireDay(ctx: Context, trip: DbTrip) {
     return null;
   }
   return ensureDay(trip, trip.current_day_number);
+}
+
+/** tripDayCount is Infinity for a trip with no end date yet — /day is unbounded until /endtrip. */
+function dayRange(max: number): string {
+  return Number.isFinite(max) ? `1–${max}` : "1 or more";
+}
+
+/**
+ * Shared body of /day <n>, /dayN, /nextday, /previousday: n is assumed to
+ * already be a valid integer within [1, max] — callers handle their own
+ * usage/boundary messaging before reaching here.
+ */
+async function setCurrentDay(ctx: Context, trip: DbTrip, n: number) {
+  const day = await ensureDay(trip, n);
+  await updateTrip(trip.id, { current_day_number: n });
+  await ctx.reply(`📅 Day ${n} (${day.date}) is now current — uploads land here.`);
 }
 
 function tripLink(trip: DbTrip): string {
@@ -446,11 +463,14 @@ export function createBot(): Bot {
     }
     const parts = (ctx.match as string).split("|").map((s) => s.trim());
     const [name, start, end] = parts;
-    if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(start ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(end ?? "")) {
-      await ctx.reply("Format: /newtrip Name | 2026-08-01 | 2026-08-10");
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    // The end date is optional — /endtrip marks a trip done whenever that
+    // turns out to be, so committing to a date up front is rarely useful.
+    if (!name || !dateRe.test(start ?? "") || (end !== undefined && !dateRe.test(end))) {
+      await ctx.reply("Format: /newtrip Name | 2026-08-01 (end date optional: | 2026-08-10)");
       return;
     }
-    if (Date.parse(end) < Date.parse(start)) {
+    if (end !== undefined && Date.parse(end) < Date.parse(start)) {
       await ctx.reply("End date is before start date.");
       return;
     }
@@ -459,11 +479,12 @@ export function createBot(): Bot {
       owner_telegram_id: senderId,
       name,
       start_date: start,
-      end_date: end,
+      end_date: end ?? null,
       share_slug: slugId(16),
     });
+    const length = Number.isFinite(tripDayCount(trip)) ? ` (${tripDayCount(trip)} days)` : "";
     await ctx.reply(
-      `🎒 Trip *${escapeMd(name)}* created (${tripDayCount(trip)} days) and set active.\n\n` +
+      `🎒 Trip *${escapeMd(name)}*${length} created and set active.\n\n` +
         `👨‍👩‍👧 Family link:\n${tripLink(trip)}\n\n` +
         `Next: /day 1, then send tracks. Optional: send planned Komoot links for the grey plan line.`,
       { parse_mode: "Markdown" },
@@ -474,12 +495,12 @@ export function createBot(): Bot {
     const { chat } = ctx.state;
     const trips = await listTrips(chat.chat_id);
     if (trips.length === 0) {
-      await ctx.reply("No trips in this chat yet. /newtrip Name | 2026-08-01 | 2026-08-10");
+      await ctx.reply("No trips in this chat yet. /newtrip Name | 2026-08-01");
       return;
     }
     const lines = trips.map((t, i) => {
       const mark = t.id === chat.active_trip_id ? " ✅ active" : t.finished_at ? " 🏁 finished" : "";
-      return `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date})${mark}`;
+      return `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date ?? "ongoing"})${mark}`;
     });
     await ctx.reply(lines.join("\n") + "\n\nSwitch with /usetrip <number>");
   });
@@ -509,12 +530,48 @@ export function createBot(): Bot {
     const n = parseInt((ctx.match as string).trim(), 10);
     const max = tripDayCount(trip);
     if (!Number.isInteger(n) || n < 1 || n > max) {
-      await ctx.reply(`Usage: /day <1–${max}>`);
+      await ctx.reply(`Usage: /day <${dayRange(max)}>`);
       return;
     }
-    const day = await ensureDay(trip, n);
-    await updateTrip(trip.id, { current_day_number: n });
-    await ctx.reply(`📅 Day ${n} (${day.date}) is now current — uploads land here.`);
+    await setCurrentDay(ctx, trip, n);
+  });
+
+  // "/day3" (no space) — Telegram parses this as a literal command named "day3",
+  // so grammy's bot.command("day", ...) never sees it. Catch it here instead.
+  bot.hears(/^\/day(\d+)(?:@\w+)?$/i, async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const n = parseInt(ctx.match![1], 10);
+    const max = tripDayCount(trip);
+    if (!Number.isInteger(n) || n < 1 || n > max) {
+      await ctx.reply(`Usage: /day <${dayRange(max)}>`);
+      return;
+    }
+    await setCurrentDay(ctx, trip, n);
+  });
+
+  bot.hears(/^\/nextday(?:@\w+)?$/i, async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const n = (trip.current_day_number ?? 0) + 1;
+    const max = tripDayCount(trip);
+    if (n > max) {
+      await ctx.reply(`You're already on the last day (${max}).`);
+      return;
+    }
+    await setCurrentDay(ctx, trip, n);
+  });
+
+  bot.hears(/^\/previousday(?:@\w+)?$/i, async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const n = (trip.current_day_number ?? 2) - 1;
+    const max = tripDayCount(trip);
+    if (n < 1) {
+      await ctx.reply("You're already on day 1.");
+      return;
+    }
+    await setCurrentDay(ctx, trip, n);
   });
 
   bot.command("note", async (ctx) => {
@@ -642,7 +699,7 @@ export function createBot(): Bot {
         : "";
 
     await ctx.reply(
-      `🎒 *${escapeMd(trip.name)}* — ${trip.start_date} → ${trip.end_date}\n` +
+      `🎒 *${escapeMd(trip.name)}* — ${trip.start_date} → ${trip.end_date ?? "ongoing"}\n` +
         `📅 Current day: ${trip.current_day_number ?? "not set"}\n` +
         `📏 ${km(totals.distanceM)} km over ${totals.daysWithTracks} tracked days${progress}\n` +
         `🔔 Reminders ${trip.reminders_enabled ? "on" : "off"}\n` +
