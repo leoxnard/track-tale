@@ -129,6 +129,7 @@ Reply /delete to one of my messages — removes that one
 • A *planned* Komoot tour link → grey plan line + progress
 • GPX with caption "plan" → same
 /refreshplan — re-sync plan links after editing in Komoot
+/refreshweather — fill in weather for older days
 
 *Looking back*
 /mypage — your permanent page with every trip on it
@@ -292,6 +293,30 @@ async function tripTotals(tripId: string): Promise<TripTotals> {
   return totals;
 }
 
+/**
+ * Cache a day's weather, taken at the midpoint of the route it covers.
+ * Returns whether anything was stored — callers on the upload path ignore it,
+ * since weather is never worth failing an upload over.
+ */
+async function cacheDayWeather(
+  dayId: string,
+  date: string,
+  points: { lat: number; lng: number }[],
+): Promise<boolean> {
+  if (points.length === 0) return false;
+  try {
+    const mid = points[Math.floor(points.length / 2)];
+    const weather = await fetchDayWeather(mid.lat, mid.lng, date);
+    if (!weather) return false;
+    await supabase()
+      .from("weather_cache")
+      .upsert({ day_id: dayId, data: weather, fetched_at: new Date().toISOString() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function saveTrackSegment(
   ctx: Context,
   trip: DbTrip,
@@ -321,18 +346,7 @@ async function saveTrackSegment(
     .single();
   if (error) throw error;
 
-  // Cache weather for the day at the track midpoint (best effort).
-  try {
-    const mid = points[Math.floor(points.length / 2)];
-    const weather = await fetchDayWeather(mid.lat, mid.lng, day.date);
-    if (weather) {
-      await supabase()
-        .from("weather_cache")
-        .upsert({ day_id: day.id, data: weather, fetched_at: new Date().toISOString() });
-    }
-  } catch {
-    // never fail an upload over weather
-  }
+  await cacheDayWeather(day.id, day.date, points);
 
   const { count } = await supabase()
     .from("track_segments")
@@ -884,6 +898,36 @@ export function createBot(): Bot {
       updated > 0
         ? `🔄 Refreshed ${updated} plan segment(s) from Komoot.`
         : "No linked plan segments to refresh.",
+    );
+  });
+
+  // Weather is normally cached the moment a track lands. A day imported long
+  // after the fact missed that, and a day uploaded once the forecast window had
+  // already moved past it got nothing at all — this fills both in from the
+  // historical archive.
+  bot.command("refreshweather", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const { data: days } = await supabase()
+      .from("days")
+      .select("id, day_number, date, track_segments(geojson)")
+      .eq("trip_id", trip.id)
+      .order("day_number");
+
+    await ctx.reply("🌤️ Fetching weather — this can take a moment…").catch(() => {});
+    let filled = 0;
+    let skipped = 0;
+    for (const day of days ?? []) {
+      const segments = (day as { track_segments: { geojson: TrackGeoJson }[] }).track_segments;
+      if (segments.length === 0) continue;
+      const points = fromGeoJson(segments[0].geojson);
+      if (await cacheDayWeather(day.id, day.date, points)) filled++;
+      else skipped++;
+    }
+    await ctx.reply(
+      filled > 0
+        ? `🌤️ Weather updated for ${filled} day(s)${skipped > 0 ? `, ${skipped} unavailable` : ""}.`
+        : "No weather found for this trip's days.",
     );
   });
 

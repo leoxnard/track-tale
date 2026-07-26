@@ -1,11 +1,20 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { buildProfile, fromGeoJson, haversineM, type ProfilePoint, type TrackGeoJson } from "../lib/track";
+import { useChartScroll } from "./useChartScroll";
 
 const W = 960;
 const H = 200;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 22;
 const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
+
+/**
+ * Narrowest the chart is allowed to get before it starts scrolling instead of
+ * squeezing. Deliberately under the widest the page column ever is, so a
+ * desktop reader fills the space and never gets a scrollbar for a few
+ * stray pixels — W above is only the drawing grid, not a width.
+ */
+const MIN_W = 880;
 
 const PLAN_COLOR = "#9aa59e";
 
@@ -72,6 +81,7 @@ function median(nums: number[]): number {
  */
 export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectDay }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const scroll = useChartScroll();
   const [active, setActive] = useState<{ d: number; e: number; color: string; day: number | null } | null>(
     null,
   );
@@ -223,8 +233,11 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         </p>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
-        <div className="relative" style={{ width: W, minWidth: W }}>
+      <div className="mt-3" {...scroll.handlers}>
+        <div ref={scroll.ref} className="overflow-x-auto">
+          {/* Fills the width it is given, and only scrolls once that is
+              narrower than the chart's natural width. */}
+          <div className="relative w-full" style={{ minWidth: MIN_W }}>
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
@@ -237,8 +250,9 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               setActive(null);
               onScrubEnd?.();
             }}
-            onTouchStart={(e) => move(e.touches[0].clientX)}
-            onTouchMove={(e) => move(e.touches[0].clientX)}
+            // A second finger means the reader is scrolling, not scrubbing.
+            onTouchStart={(e) => e.touches.length === 1 && move(e.touches[0].clientX)}
+            onTouchMove={(e) => e.touches.length === 1 && move(e.touches[0].clientX)}
             onClick={() => {
               if (active?.day != null) onSelectDay?.(active.day);
             }}
@@ -357,6 +371,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                 {day.dayNumber}
               </span>
             ))}
+          </div>
           </div>
         </div>
       </div>

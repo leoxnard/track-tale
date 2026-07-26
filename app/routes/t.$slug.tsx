@@ -661,16 +661,25 @@ export function TripView({
                   Live now
                 </button>
               )}
+              {/* A long tour wraps to several rows, so on a phone each day is
+                  cut back to its colour and number — enough to pick one out,
+                  and small enough that a fortnight still fits in two rows. */}
               {trip.days.map((day) => (
                 <button
                   key={day.dayNumber}
                   onClick={() => scrollToDay(day.dayNumber)}
-                  className="flex shrink-0 items-center gap-2 rounded-full border border-trail px-3 py-1 text-sm hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
+                  className="flex shrink-0 items-center gap-1.5 rounded-full border border-trail px-2.5 py-1 text-sm hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine sm:gap-2 sm:px-3"
+                  title={`Day ${day.dayNumber}`}
                 >
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: day.color }} />
-                  <span className="font-bold text-pine">Day {day.dayNumber}</span>
+                  <span className="font-bold text-pine">
+                    <span className="hidden sm:inline">Day </span>
+                    {day.dayNumber}
+                  </span>
                   {day.distanceM > 0 && (
-                    <span className="text-faint">{(day.distanceM / 1000).toFixed(0)} km</span>
+                    <span className="hidden text-faint sm:inline">
+                      {(day.distanceM / 1000).toFixed(0)} km
+                    </span>
                   )}
                 </button>
               ))}
