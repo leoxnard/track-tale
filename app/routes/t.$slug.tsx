@@ -10,6 +10,16 @@ import { fetchLiveSession } from "../lib/livetrack.server";
 import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import {
+  formatDayDate,
+  formatDuration,
+  formatShortDate,
+  messages,
+  resolveLocale,
+  type Messages,
+} from "../lib/i18n";
+import { useLocale, useMessages } from "../lib/locale";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 export interface ViewerPhoto {
@@ -55,13 +65,15 @@ export async function action({ request, params }: Route.ActionArgs) {
     dayNumber: Number(form.get("dayNumber")),
     authorName: String(form.get("authorName") ?? ""),
     text: String(form.get("text") ?? ""),
+    locale: resolveLocale(request),
   });
   return result.ok
     ? { ok: true as const, error: null, dayNumber: Number(form.get("dayNumber")) }
     : { ok: false as const, error: result.error, dayNumber: Number(form.get("dayNumber")) };
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
+  const locale = resolveLocale(request);
   const trip = await getTripBySlug(params.slug);
   if (!trip) throw data("Trip not found", { status: 404 });
 
@@ -117,10 +129,7 @@ export async function loader({ params }: Route.LoaderArgs) {
           .map((c) => ({
             author: c.author_name,
             text: c.text,
-            at: new Date(c.created_at).toLocaleDateString("en-GB", {
-              day: "numeric",
-              month: "short",
-            }),
+            at: formatShortDate(c.created_at, locale),
           })),
         weather: (d.weather_cache as unknown as { data: DayWeather } | null)?.data ?? null,
       };
@@ -168,6 +177,7 @@ export async function loader({ params }: Route.LoaderArgs) {
   }
 
   return {
+    locale,
     showAuthors: contributors.size > 1,
     ogUrl: trip.og_path
       ? `${storage.getPublicUrl(trip.og_path).data.publicUrl}?v=${Date.parse(trip.og_updated_at ?? "") || 0}`
@@ -198,10 +208,11 @@ export async function loader({ params }: Route.LoaderArgs) {
 export function meta({ loaderData: trip }: Route.MetaArgs) {
   if (!trip) return [{ title: "TrackTale" }, { name: "robots", content: "noindex, nofollow" }];
 
+  const m = messages(trip.locale);
   const summary = [
     `${trip.totalKm.toFixed(0)} km`,
-    `${Math.round(trip.totalUp)} m climbed`,
-    `${trip.days.length} ${trip.days.length === 1 ? "day" : "days"}`,
+    m.trip.climbed(String(Math.round(trip.totalUp))),
+    m.trip.days(trip.days.length),
   ].join(" · ");
 
   return [
@@ -222,29 +233,6 @@ export function meta({ loaderData: trip }: Route.MetaArgs) {
   ];
 }
 
-/** A year ago today, so a date from an older trip carries its year and isn't mistaken for this year's. */
-function isAtLeastAYearAgo(date: Date): boolean {
-  const aYearAgo = new Date();
-  aYearAgo.setFullYear(aYearAgo.getFullYear() - 1);
-  return date <= aYearAgo;
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso + "T00:00:00");
-  return date.toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: isAtLeastAYearAgo(date) ? "numeric" : undefined,
-  });
-}
-
-function formatHours(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
 type MapHandle = {
   flyToDay: (dayNumber: number) => void;
   /** Zoom back out to the whole journey, plan included. */
@@ -259,11 +247,13 @@ function TripMap({
   plan,
   live,
   handleRef,
+  m,
 }: {
   days: ViewerDay[];
   plan: TrackGeoJson[];
   live?: ViewerLive | null;
   handleRef: React.MutableRefObject<MapHandle | null>;
+  m: Messages;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -333,7 +323,7 @@ function TripMap({
             el.href = photo.url;
             el.target = "_blank";
             el.rel = "noreferrer";
-            el.title = photo.caption ?? "Photo";
+            el.title = photo.caption ?? m.trip.photo;
             el.style.cssText = `display:block;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);background:url(${JSON.stringify(photo.thumbUrl)}) center/cover;`;
             new maplibregl.Marker({ element: el }).setLngLat([photo.lng, photo.lat]).addTo(map!);
           }
@@ -360,7 +350,7 @@ function TripMap({
         }
         if (live?.current) {
           const el = document.createElement("div");
-          el.title = "Live position";
+          el.title = m.trip.livePosition;
           el.style.cssText =
             "width:18px;height:18px;border-radius:50%;background:#d64533;border:3px solid #fff;box-shadow:0 0 0 rgba(214,69,51,.7);animation:tt-pulse 2s infinite";
           new maplibregl.Marker({ element: el }).setLngLat(live.current).addTo(map);
@@ -417,7 +407,7 @@ function TripMap({
       map?.remove();
       handleRef.current = null;
     };
-  }, [days, plan, live, handleRef]);
+  }, [days, plan, live, handleRef, m]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -466,6 +456,7 @@ function DayGuestbook({
   color: string;
   result?: CommentResult;
 }) {
+  const m = useMessages();
   const navigation = useNavigation();
   const sending =
     navigation.state === "submitting" &&
@@ -496,16 +487,16 @@ function DayGuestbook({
             name="authorName"
             required
             maxLength={40}
-            placeholder="Your name"
-            aria-label={`Your name, day ${dayNumber}`}
+            placeholder={m.guestbook.yourName}
+            aria-label={m.guestbook.yourNameFor(dayNumber)}
             className="rounded-lg border border-trail bg-paper px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-pine sm:w-40"
           />
           <input
             name="text"
             required
             maxLength={800}
-            placeholder={`Say something about day ${dayNumber}…`}
-            aria-label={`Message for day ${dayNumber}`}
+            placeholder={m.guestbook.messagePlaceholder(dayNumber)}
+            aria-label={m.guestbook.messageFor(dayNumber)}
             className="flex-1 rounded-lg border border-trail bg-paper px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-pine"
           />
           <button
@@ -513,7 +504,7 @@ function DayGuestbook({
             disabled={sending}
             className="rounded-lg bg-pine px-4 py-2 text-sm font-bold text-paper disabled:opacity-60"
           >
-            {sending ? "Sending…" : "Send"}
+            {sending ? m.guestbook.sending : m.guestbook.send}
           </button>
         </Form>
       ) : (
@@ -521,12 +512,12 @@ function DayGuestbook({
           onClick={() => setOpen(true)}
           className="text-sm text-faint underline underline-offset-2 hover:text-pine"
         >
-          Leave a message for day {dayNumber}
+          {m.guestbook.leaveMessage(dayNumber)}
         </button>
       )}
 
       {result?.error && <p className="mt-2 text-sm text-live">{result.error}</p>}
-      {result?.ok && <p className="mt-2 text-sm text-pine-soft">Sent — they'll see it on the road.</p>}
+      {result?.ok && <p className="mt-2 text-sm text-pine-soft">{m.guestbook.sent}</p>}
     </section>
   );
 }
@@ -542,6 +533,11 @@ export function TripView({
   trip: ViewerTrip;
   actionData?: CommentResult;
 }) {
+  const locale = useLocale();
+  const m = useMessages();
+  const formatDate = (iso: string) => formatDayDate(iso, locale);
+  const formatHours = (seconds: number) => formatDuration(seconds, locale);
+
   const mapHandle = useRef<MapHandle | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -579,7 +575,9 @@ export function TripView({
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-4">
           <h1 className="font-display text-2xl font-semibold text-pine sm:text-3xl">{trip.name}</h1>
           <p className="text-sm text-faint">
-            {trip.endDate ? `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}` : `since ${formatDate(trip.startDate)}`}
+            {trip.endDate
+              ? `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`
+              : m.trip.since(formatDate(trip.startDate))}
           </p>
           {trip.liveUrl && (
             <a
@@ -593,10 +591,11 @@ export function TripView({
                 <span className="relative h-2.5 w-2.5 rounded-full bg-white" />
               </span>
               {trip.live
-                ? `Live — ${(trip.live.distanceM / 1000).toFixed(1)} km${
-                    trip.live.durationS > 0 ? ` · ${formatHours(trip.live.durationS)}` : ""
-                  }`
-                : "Live now — follow along"}
+                ? m.trip.live(
+                    (trip.live.distanceM / 1000).toFixed(1),
+                    trip.live.durationS > 0 ? formatHours(trip.live.durationS) : null,
+                  )
+                : m.trip.liveFollow}
             </a>
           )}
         </div>
@@ -607,7 +606,7 @@ export function TripView({
                 <div className="h-full rounded-full bg-pine-soft" style={{ width: `${progressPct}%` }} />
               </div>
               <p className="shrink-0 text-xs text-faint">
-                {trip.totalKm.toFixed(0)} of {trip.planKm.toFixed(0)} km · {progressPct}%
+                {m.trip.progress(trip.totalKm.toFixed(0), trip.planKm.toFixed(0), progressPct)}
               </p>
             </div>
           </div>
@@ -620,12 +619,16 @@ export function TripView({
             toolbars hidden, which made the map overhang the visible area. */}
         <div className="h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
           {mounted && trip.days.length > 0 ? (
-            <TripMap days={trip.days} plan={trip.plan} live={trip.live} handleRef={mapHandle} />
+            <TripMap
+              days={trip.days}
+              plan={trip.plan}
+              live={trip.live}
+              handleRef={mapHandle}
+              m={m}
+            />
           ) : (
             <div className="flex h-full items-center justify-center text-faint">
-              {trip.days.length === 0
-                ? "The journey hasn't started yet — check back soon."
-                : "Loading map…"}
+              {trip.days.length === 0 ? m.trip.notStarted : m.trip.loadingMap}
             </div>
           )}
         </div>
@@ -644,21 +647,21 @@ export function TripView({
                     ?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }}
                 className="flex shrink-0 items-center gap-1.5 rounded-full border border-trail px-3 py-1 text-sm font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
-                title="Zoom the map back out and jump to the whole-tour profile"
+                title={m.trip.wholeTourHint}
               >
-                <span aria-hidden>⤢</span> Whole tour
+                <span aria-hidden>⤢</span> {m.trip.wholeTour}
               </button>
               {trip.live?.current && (
                 <button
                   onClick={() => mapHandle.current?.flyToLive()}
                   className="flex shrink-0 items-center gap-2 rounded-full border border-live px-3 py-1 text-sm font-bold text-live hover:bg-live/10 focus-visible:outline-2 focus-visible:outline-live"
-                  title="Zoom the map to where they are right now"
+                  title={m.trip.liveNowHint}
                 >
                   <span className="relative flex h-2.5 w-2.5">
                     <span className="absolute h-full w-full animate-ping rounded-full bg-live/70" />
                     <span className="relative h-2.5 w-2.5 rounded-full bg-live" />
                   </span>
-                  Live now
+                  {m.trip.liveNow}
                 </button>
               )}
               {/* A long tour wraps to several rows, so on a phone each day is
@@ -669,11 +672,11 @@ export function TripView({
                   key={day.dayNumber}
                   onClick={() => scrollToDay(day.dayNumber)}
                   className="flex shrink-0 items-center gap-1.5 rounded-full border border-trail px-2.5 py-1 text-sm hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine sm:gap-2 sm:px-3"
-                  title={`Day ${day.dayNumber}`}
+                  title={m.trip.day(day.dayNumber)}
                 >
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: day.color }} />
                   <span className="font-bold text-pine">
-                    <span className="hidden sm:inline">Day </span>
+                    <span className="hidden sm:inline">{m.trip.dayPrefix}</span>
                     {day.dayNumber}
                   </span>
                   {day.distanceM > 0 && (
@@ -691,10 +694,9 @@ export function TripView({
       <main className="mx-auto max-w-5xl px-4 py-8">
         {trip.days.length > 0 && (
           <p className="mb-8 text-sm text-faint">
-            {trip.totalKm.toFixed(1)} km · {Math.round(trip.totalUp)} m climbed ·{" "}
-            {formatHours(trip.movingS)} in motion · {trip.days.length}{" "}
-            {trip.days.length === 1 ? "day" : "days"}
-            {!trip.finished && " so far"}
+            {trip.totalKm.toFixed(1)} km · {m.trip.climbed(String(Math.round(trip.totalUp)))} ·{" "}
+            {m.trip.inMotion(formatHours(trip.movingS))} · {m.trip.days(trip.days.length)}
+            {!trip.finished && m.trip.soFar}
           </p>
         )}
 
@@ -714,7 +716,7 @@ export function TripView({
         <div className="space-y-10">
           {trip.days.map((day) => {
             const w = day.weather;
-            const wi = weatherIcon(w?.weatherCode ?? null);
+            const wi = weatherIcon(w?.weatherCode ?? null, locale);
             return (
               <article
                 key={day.dayNumber}
@@ -727,9 +729,9 @@ export function TripView({
                     type="button"
                     onClick={() => mapHandle.current?.flyToDay(day.dayNumber)}
                     className="font-display text-xl font-semibold text-pine hover:underline focus-visible:outline-2 focus-visible:outline-pine"
-                    title="Focus the map on this day"
+                    title={m.trip.focusDay}
                   >
-                    Day {day.dayNumber}
+                    {m.trip.day(day.dayNumber)}
                   </button>
                   <p className="text-sm text-faint">{formatDate(day.date)}</p>
                   {w && (
@@ -747,8 +749,9 @@ export function TripView({
                   <p className="mt-1 text-sm">
                     <strong>{(day.distanceM / 1000).toFixed(1)} km</strong>
                     <span className="text-faint">
-                      {" "}· ↑ {Math.round(day.elevationUp)} m · {formatHours(day.movingS)} moving
-                      {day.tracks.length > 1 && ` · ${day.tracks.length} segments`}
+                      {" "}· ↑ {Math.round(day.elevationUp)} m ·{" "}
+                      {m.trip.moving(formatHours(day.movingS))}
+                      {day.tracks.length > 1 && ` · ${m.trip.segments(day.tracks.length)}`}
                     </span>
                   </p>
                 )}
@@ -783,7 +786,7 @@ export function TripView({
                       >
                         <img
                           src={photo.thumbUrl}
-                          alt={photo.caption ?? `Day ${day.dayNumber} photo`}
+                          alt={photo.caption ?? m.trip.photoAlt(day.dayNumber)}
                           loading="lazy"
                           className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                         />
@@ -813,8 +816,9 @@ export function TripView({
           })}
         </div>
 
-        <footer className="mt-16 border-t border-trail pt-4 text-xs text-faint">
-          Followed with TrackTale — a private trip journal.
+        <footer className="mt-16 flex flex-wrap items-center justify-between gap-2 border-t border-trail pt-4 text-xs text-faint">
+          <span>{m.footer}</span>
+          <LanguageSwitcher />
         </footer>
       </main>
     </div>

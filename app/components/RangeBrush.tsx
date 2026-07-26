@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import { useMessages } from "../lib/locale";
 
 interface Props {
   /** Full extent of the axis, in the chart's own units. */
@@ -26,6 +27,7 @@ const MIN_SPAN_RATIO = 0.005;
  * drag keeps working after it leaves the handle.
  */
 export function RangeBrush({ total, from, to, onChange, backdrop, label }: Props) {
+  const m = useMessages();
   const trackRef = useRef<HTMLDivElement>(null);
   const grab = useRef<{ edge: "from" | "to" | "pan"; at: number } | null>(null);
 
@@ -82,7 +84,7 @@ export function RangeBrush({ total, from, to, onChange, backdrop, label }: Props
         onPointerUp={release}
         onPointerCancel={release}
         role="group"
-        aria-label={label ?? "Zoom range"}
+        aria-label={label ?? m.brush.zoomRange}
       >
         {backdrop && (
           <svg
@@ -114,7 +116,7 @@ export function RangeBrush({ total, from, to, onChange, backdrop, label }: Props
             style={{ left: pct(edge === "from" ? from : to) }}
             onPointerDown={onPointerDown(edge)}
             role="slider"
-            aria-label={edge === "from" ? "Range start" : "Range end"}
+            aria-label={edge === "from" ? m.brush.rangeStart : m.brush.rangeEnd}
             aria-valuemin={0}
             aria-valuemax={Math.round(total)}
             aria-valuenow={Math.round(edge === "from" ? from : to)}

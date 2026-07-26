@@ -1,6 +1,7 @@
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import type { ProfilePoint } from "../lib/track";
 import { useDragZoom } from "./useDragZoom";
+import { useMessages } from "../lib/locale";
 
 const W = 720;
 const H = 110;
@@ -29,6 +30,7 @@ interface Props {
  * being used to scrub it. A mouse can still drag out a stretch to zoom into.
  */
 export function ElevationProfile({ profile, color, span, onScrub }: Props) {
+  const m = useMessages();
   const svgRef = useRef<SVGSVGElement>(null);
   const clipId = useId();
   const [active, setActive] = useState<number | null>(null);
@@ -102,7 +104,11 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
         preserveAspectRatio="none"
         className="h-[110px] w-full touch-none select-none"
         role="img"
-        aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} metres over ${(totalD / 1000).toFixed(1)} kilometres`}
+        aria-label={m.elevation.aria(
+          Math.round(minE),
+          Math.round(maxE),
+          (totalD / 1000).toFixed(1),
+        )}
         onMouseDown={(e) => zoom.start(e.clientX)}
         onMouseMove={(e) => {
           // While a range is being dragged out, the pointer is choosing a zoom
@@ -163,8 +169,8 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
               {Math.round(minE)}–{Math.round(maxE)} m
             </span>
             <span className="opacity-70">
-              <span className="hidden sm:inline">drag across to zoom · </span>
-              drag along the line to follow the route
+              <span className="hidden sm:inline">{m.profile.dragToZoom}</span>
+              {m.elevation.dragAlong}
             </span>
           </>
         )}
@@ -174,7 +180,7 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
             onClick={zoom.reset}
             className="shrink-0 rounded-full border border-trail px-2 py-0.5 font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
           >
-            Reset zoom
+            {m.elevation.resetZoom}
           </button>
         )}
       </figcaption>

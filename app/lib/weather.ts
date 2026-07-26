@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE, messages, type Locale, type Messages } from "./i18n";
+
 export interface DayWeather {
   tempMaxC: number | null;
   tempMinC: number | null;
@@ -82,24 +84,30 @@ export async function fetchDayWeather(
   };
 }
 
-const WEATHER_ICONS: [number, string, string][] = [
-  [0, "☀️", "Clear"],
-  [1, "🌤️", "Mostly clear"],
-  [2, "⛅", "Partly cloudy"],
-  [3, "☁️", "Overcast"],
-  [45, "🌫️", "Fog"],
-  [51, "🌦️", "Drizzle"],
-  [61, "🌧️", "Rain"],
-  [71, "🌨️", "Snow"],
-  [80, "🌧️", "Showers"],
-  [95, "⛈️", "Thunderstorm"],
+type WeatherName = keyof Messages["weather"];
+
+/** WMO code floor, emoji, and the key its wording lives under. */
+const WEATHER_ICONS: [number, string, WeatherName][] = [
+  [0, "☀️", "clear"],
+  [1, "🌤️", "mostlyClear"],
+  [2, "⛅", "partlyCloudy"],
+  [3, "☁️", "overcast"],
+  [45, "🌫️", "fog"],
+  [51, "🌦️", "drizzle"],
+  [61, "🌧️", "rain"],
+  [71, "🌨️", "snow"],
+  [80, "🌧️", "showers"],
+  [95, "⛈️", "thunderstorm"],
 ];
 
-export function weatherIcon(code: number | null): { icon: string; label: string } {
+export function weatherIcon(
+  code: number | null,
+  locale: Locale = DEFAULT_LOCALE,
+): { icon: string; label: string } {
   if (code === null) return { icon: "", label: "" };
-  let best: [number, string, string] = WEATHER_ICONS[0];
+  let best = WEATHER_ICONS[0];
   for (const entry of WEATHER_ICONS) {
     if (code >= entry[0]) best = entry;
   }
-  return { icon: best[1], label: best[2] };
+  return { icon: best[1], label: messages(locale).weather[best[2]] };
 }

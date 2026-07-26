@@ -1,6 +1,9 @@
 import { data, Link } from "react-router";
 import type { Route } from "./+types/traveler.$slug";
 import { supabase } from "../lib/supabase.server";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { intlTag, type Locale, type Messages } from "../lib/i18n";
+import { useLocale, useMessages } from "../lib/locale";
 
 export async function loader({ params }: Route.LoaderArgs) {
   const db = supabase();
@@ -58,35 +61,43 @@ export function meta({ loaderData }: Route.MetaArgs) {
   ];
 }
 
-function formatRange(start: string, end: string | null): string {
+function formatRange(start: string, end: string | null, locale: Locale, m: Messages): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
-  const s = new Date(start + "T00:00:00").toLocaleDateString("en-GB", opts);
-  if (!end) return `since ${s}`;
-  const e = new Date(end + "T00:00:00").toLocaleDateString("en-GB", opts);
+  const s = new Date(start + "T00:00:00").toLocaleDateString(intlTag(locale), opts);
+  if (!end) return m.trip.since(s);
+  const e = new Date(end + "T00:00:00").toLocaleDateString(intlTag(locale), opts);
   return `${s} – ${e}`;
 }
 
 export default function TravelerPage({ loaderData }: Route.ComponentProps) {
   const { name, trips, totalKm, totalUp, totalDays } = loaderData;
+  const locale = useLocale();
+  const m = useMessages();
+  const range = (start: string, end: string | null) => formatRange(start, end, locale, m);
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
       <header className="border-b border-trail pb-6">
         <h1 className="font-display text-3xl font-semibold text-pine sm:text-4xl">
+          {m.traveler.journeys.before && (
+            <span className="text-faint">{m.traveler.journeys.before}</span>
+          )}
           {name}
-          <span className="text-faint">’s journeys</span>
+          {m.traveler.journeys.after && (
+            <span className="text-faint">{m.traveler.journeys.after}</span>
+          )}
         </h1>
         {trips.length > 0 && (
           <p className="mt-2 text-faint">
-            {totalKm.toFixed(0)} km · {Math.round(totalUp).toLocaleString("en-GB")} m climbed ·{" "}
-            {totalDays} days on the road · {trips.length}{" "}
-            {trips.length === 1 ? "trip" : "trips"}
+            {totalKm.toFixed(0)} km ·{" "}
+            {m.trip.climbed(Math.round(totalUp).toLocaleString(intlTag(locale)))} ·{" "}
+            {m.traveler.daysOnRoad(totalDays)} · {m.traveler.trips(trips.length)}
           </p>
         )}
       </header>
 
       {trips.length === 0 ? (
-        <p className="mt-10 text-faint">No trips to show yet — the first one is being planned.</p>
+        <p className="mt-10 text-faint">{m.traveler.noTrips}</p>
       ) : (
         <ul className="mt-8 grid gap-6 sm:grid-cols-2">
           {trips.map((trip) => (
@@ -111,13 +122,12 @@ export default function TravelerPage({ loaderData }: Route.ComponentProps) {
                   <h2 className="font-display text-lg font-semibold text-pine group-hover:underline">
                     {trip.name}
                   </h2>
-                  <p className="text-sm text-faint">{formatRange(trip.startDate, trip.endDate)}</p>
+                  <p className="text-sm text-faint">{range(trip.startDate, trip.endDate)}</p>
                   <p className="mt-1 text-sm">
                     {trip.km.toFixed(0)} km
                     <span className="text-faint">
                       {" "}
-                      · ↑ {Math.round(trip.up)} m · {trip.days}{" "}
-                      {trip.days === 1 ? "day" : "days"}
+                      · ↑ {Math.round(trip.up)} m · {m.trip.days(trip.days)}
                     </span>
                   </p>
                 </div>
@@ -127,8 +137,9 @@ export default function TravelerPage({ loaderData }: Route.ComponentProps) {
         </ul>
       )}
 
-      <footer className="mt-16 border-t border-trail pt-4 text-xs text-faint">
-        Followed with TrackTale — a private trip journal.
+      <footer className="mt-16 flex flex-wrap items-center justify-between gap-2 border-t border-trail pt-4 text-xs text-faint">
+        <span>{m.footer}</span>
+        <LanguageSwitcher />
       </footer>
     </main>
   );

@@ -2,6 +2,7 @@ import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { buildProfile, fromGeoJson, haversineM, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
+import { useMessages } from "../lib/locale";
 
 const W = 960;
 const H = 200;
@@ -77,6 +78,7 @@ function median(nums: number[]): number {
  * or drag a stretch out of the chart itself with a mouse.
  */
 export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectDay }: Props) {
+  const m = useMessages();
   const svgRef = useRef<SVGSVGElement>(null);
   const clipId = useId();
   const [active, setActive] = useState<{ d: number; e: number; color: string; day: number | null } | null>(
@@ -253,11 +255,12 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
       className="scroll-mt-[calc(38dvh+3.5rem)] rounded-xl border border-trail bg-paper p-4 sm:scroll-mt-[calc(48dvh+3.5rem)]"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="font-display text-lg font-semibold text-pine">The whole tour</h2>
+        <h2 className="font-display text-lg font-semibold text-pine">{m.profile.title}</h2>
         <p className="text-xs text-faint">
-          <span className="inline-block h-0.5 w-4 translate-y-[-3px] bg-[#9aa59e] align-middle" /> planned
+          <span className="inline-block h-0.5 w-4 translate-y-[-3px] bg-[#9aa59e] align-middle" />{" "}
+          {m.profile.planned}
           {planM > 0 && <> · {(planM / 1000).toFixed(0)} km</>}
-          {riddenM > 0 && <> · {(riddenM / 1000).toFixed(0)} km ridden</>}
+          {riddenM > 0 && <> · {m.profile.ridden((riddenM / 1000).toFixed(0))}</>}
         </p>
       </div>
 
@@ -268,7 +271,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           preserveAspectRatio="none"
           className="h-44 w-full touch-none select-none sm:h-56"
           role="img"
-          aria-label={`Elevation of the whole tour: ${(riddenM / 1000).toFixed(0)} of ${(planM / 1000).toFixed(0)} kilometres ridden`}
+          aria-label={m.profile.aria((riddenM / 1000).toFixed(0), (planM / 1000).toFixed(0))}
           onMouseDown={(e) => zoom.start(e.clientX)}
           onMouseMove={(e) => {
             // While a range is being dragged out, the pointer is choosing a
@@ -428,7 +431,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         to={zoom.to}
         onChange={zoom.setWindow}
         backdrop={brush}
-        label="Stretch of the tour on screen"
+        label={m.profile.brushLabel}
       />
 
       <p className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 text-xs text-faint">
@@ -436,18 +439,18 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           <>
             <span>
               {(active.d / 1000).toFixed(1)} km · {Math.round(active.e)} m
-              {active.day !== null && <> · day {active.day}</>}
+              {active.day !== null && <> · {m.profile.day(active.day)}</>}
             </span>
-            {active.day !== null && <span className="opacity-70">tap to jump to that day</span>}
+            {active.day !== null && <span className="opacity-70">{m.profile.tapToJump}</span>}
           </>
         ) : (
           <>
             <span>
-              {(zoom.from / 1000).toFixed(0)} – {(zoom.to / 1000).toFixed(0)} km along the planned route
+              {m.profile.alongRoute((zoom.from / 1000).toFixed(0), (zoom.to / 1000).toFixed(0))}
             </span>
             <span className="opacity-70">
-              <span className="hidden sm:inline">drag across to zoom · </span>
-              drag the handles to zoom
+              <span className="hidden sm:inline">{m.profile.dragToZoom}</span>
+              {m.profile.dragHandles}
             </span>
           </>
         )}
@@ -457,7 +460,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
             onClick={zoom.reset}
             className="shrink-0 rounded-full border border-trail px-2 py-0.5 font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
           >
-            Whole tour
+            {m.trip.wholeTour}
           </button>
         )}
       </p>

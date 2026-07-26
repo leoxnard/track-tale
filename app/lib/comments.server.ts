@@ -2,12 +2,15 @@ import { Bot } from "grammy";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
 import { escapeMd } from "./telegram-md";
+import { DEFAULT_LOCALE, messages, type Locale } from "./i18n";
 
 export interface NewComment {
   slug: string;
   dayNumber: number;
   authorName: string;
   text: string;
+  /** Language the visitor is reading the page in — errors go back to them. */
+  locale?: Locale;
 }
 
 export type CommentResult = { ok: true } | { ok: false; error: string };
@@ -19,10 +22,11 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 8;
 
 export async function postComment(input: NewComment): Promise<CommentResult> {
+  const err = messages(input.locale ?? DEFAULT_LOCALE).guestbook.errors;
   const authorName = input.authorName.trim().slice(0, MAX_NAME);
   const text = input.text.trim().slice(0, MAX_TEXT);
-  if (!authorName) return { ok: false, error: "Add your name so they know who wrote it." };
-  if (!text) return { ok: false, error: "Write a message first." };
+  if (!authorName) return { ok: false, error: err.noName };
+  if (!text) return { ok: false, error: err.noText };
 
   const db = supabase();
 
@@ -31,7 +35,7 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
     .select("id, name, chat_id")
     .eq("share_slug", input.slug)
     .maybeSingle();
-  if (!trip) return { ok: false, error: "This trip no longer exists." };
+  if (!trip) return { ok: false, error: err.noTrip };
 
   const { data: day } = await db
     .from("days")
@@ -39,7 +43,7 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
     .eq("trip_id", trip.id)
     .eq("day_number", input.dayNumber)
     .maybeSingle();
-  if (!day) return { ok: false, error: "That day isn't part of the trip." };
+  if (!day) return { ok: false, error: err.noDay };
 
   const since = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
   const { count } = await db
@@ -48,7 +52,7 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
     .eq("day_id", day.id)
     .gt("created_at", since);
   if ((count ?? 0) >= RATE_MAX) {
-    return { ok: false, error: "That's a lot of messages at once — try again in a minute." };
+    return { ok: false, error: err.tooMany };
   }
 
   const { data: inserted, error } = await db
@@ -56,7 +60,7 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
     .insert({ day_id: day.id, author_name: authorName, text })
     .select("id")
     .single();
-  if (error) return { ok: false, error: "Could not save your message." };
+  if (error) return { ok: false, error: err.saveFailed };
 
   // Relay to the travellers so encouragement reaches them on the road. Name,
   // message and trip name are all written by other people, so every one of them
