@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import type { ProfilePoint } from "../lib/track";
-import { useChartScroll } from "./useChartScroll";
+import { useDragZoom } from "./useDragZoom";
 
 const W = 720;
 const H = 110;
@@ -23,44 +23,56 @@ interface Props {
 /**
  * Elevation chart for one day. Scrubbing with mouse or finger reports the
  * position back so the map can show where on the route you are.
+ *
+ * The chart always fits its box — a day is short enough to read whole, and
+ * making it scroll sideways only ever got in the way of the finger already
+ * being used to scrub it. A mouse can still drag out a stretch to zoom into.
  */
 export function ElevationProfile({ profile, color, span, onScrub }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const scroll = useChartScroll();
+  const clipId = useId();
   const [active, setActive] = useState<number | null>(null);
 
-  const { path, area, minE, maxE, totalD, yOf } = useMemo(() => {
+  const totalD = profile[profile.length - 1]?.d || 1;
+  const zoom = useDragZoom(totalD, svgRef);
+
+  const { path, area, minE, maxE, xOf, yOf } = useMemo(() => {
     const es = profile.map((p) => p.e);
     const lo = Math.min(...es);
     const hi = Math.max(...es);
-    const total = profile[profile.length - 1]?.d || 1;
 
     // The band is the shared span, positioned around this day's own altitude:
     // charts slide up and down the axis but every pixel is the same climb.
     const band = Math.max(span, hi - lo);
     const base = (lo + hi) / 2 - band / 2;
 
-    const x = (p: ProfilePoint) => (p.d / total) * W;
-    const y = (p: ProfilePoint) =>
-      PAD_TOP + (1 - (p.e - base) / band) * (H - PAD_TOP - PAD_BOTTOM);
+    const viewSpan = zoom.to - zoom.from || 1;
+    const x = (d: number) => ((d - zoom.from) / viewSpan) * W;
+    const y = (e: number) => PAD_TOP + (1 - (e - base) / band) * (H - PAD_TOP - PAD_BOTTOM);
 
-    const line = profile.map((p, i) => `${i === 0 ? "M" : "L"}${x(p).toFixed(1)},${y(p).toFixed(1)}`).join("");
+    const line = profile
+      .map((p, i) => `${i === 0 ? "M" : "L"}${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`)
+      .join("");
+    const first = x(profile[0]?.d ?? 0).toFixed(1);
+    const last = x(profile[profile.length - 1]?.d ?? 0).toFixed(1);
+
     return {
       path: line,
-      area: `${line}L${W},${H - PAD_BOTTOM}L0,${H - PAD_BOTTOM}Z`,
+      area: `${line}L${last},${H - PAD_BOTTOM}L${first},${H - PAD_BOTTOM}Z`,
       minE: lo,
       maxE: hi,
-      totalD: total,
+      xOf: x,
       yOf: y,
     };
-  }, [profile, span]);
+  }, [profile, span, zoom.from, zoom.to]);
 
-  const indexAt = useCallback(
-    (clientX: number): number | null => {
+  const move = useCallback(
+    (clientX: number) => {
       const rect = svgRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0) return null;
+      if (!rect || rect.width === 0) return;
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      const target = ratio * totalD;
+      const target = zoom.from + ratio * (zoom.to - zoom.from);
+
       // profile is sorted by distance, so a scan is fine at ~240 points
       let best = 0;
       let bestGap = Infinity;
@@ -71,67 +83,75 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
           best = i;
         }
       }
-      return best;
+      setActive(best);
+      onScrub?.(profile[best]);
     },
-    [profile, totalD],
-  );
-
-  const move = useCallback(
-    (clientX: number) => {
-      const i = indexAt(clientX);
-      if (i === null) return;
-      setActive(i);
-      onScrub?.(profile[i]);
-    },
-    [indexAt, onScrub, profile],
+    [onScrub, profile, zoom.from, zoom.to],
   );
 
   if (profile.length < 2) return null;
 
   const cur = active !== null ? profile[active] : null;
-  const curX = cur ? (cur.d / totalD) * W : 0;
-  const curY = cur ? yOf(cur) : 0;
+  const sel = zoom.selection;
 
   return (
     <figure className="mt-3">
-      <div {...scroll.handlers}>
-        <div ref={scroll.ref} className="overflow-x-auto">
-          {/* Fills the width it is given, and only scrolls once that is
-              narrower than the chart's natural width. */}
-          <div className="w-full" style={{ minWidth: W }}>
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${W} ${H}`}
-              preserveAspectRatio="none"
-              className="h-[110px] w-full touch-none select-none"
-              role="img"
-              aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} metres over ${(totalD / 1000).toFixed(1)} kilometres`}
-              onMouseMove={(e) => move(e.clientX)}
-              // A second finger means the reader is scrolling, not scrubbing.
-              onTouchStart={(e) => e.touches.length === 1 && move(e.touches[0].clientX)}
-              onTouchMove={(e) => e.touches.length === 1 && move(e.touches[0].clientX)}
-            >
-              <path d={area} fill={color} opacity={0.16} />
-              <path d={path} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-              {cur && (
-                <g>
-                  <line
-                    x1={curX}
-                    x2={curX}
-                    y1={PAD_TOP}
-                    y2={H - PAD_BOTTOM}
-                    stroke={color}
-                    strokeWidth={1}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle cx={curX} cy={curY} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
-                </g>
-              )}
-            </svg>
-          </div>
-        </div>
-      </div>
-      <figcaption className="mt-1 flex justify-between text-xs text-faint">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="h-[110px] w-full touch-none select-none"
+        role="img"
+        aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} metres over ${(totalD / 1000).toFixed(1)} kilometres`}
+        onMouseDown={(e) => zoom.start(e.clientX)}
+        onMouseMove={(e) => {
+          // While a range is being dragged out, the pointer is choosing a zoom
+          // rather than reading a position.
+          if (!zoom.extend(e.clientX)) move(e.clientX);
+        }}
+        onMouseUp={() => zoom.commit()}
+        onMouseLeave={() => zoom.cancel()}
+        onTouchStart={(e) => move(e.touches[0].clientX)}
+        onTouchMove={(e) => move(e.touches[0].clientX)}
+      >
+        <defs>
+          <clipPath id={clipId}>
+            <rect x={0} y={0} width={W} height={H} />
+          </clipPath>
+        </defs>
+
+        <g clipPath={`url(#${clipId})`}>
+          <path d={area} fill={color} opacity={0.16} />
+          <path d={path} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          {cur && (
+            <g>
+              <line
+                x1={xOf(cur.d)}
+                x2={xOf(cur.d)}
+                y1={PAD_TOP}
+                y2={H - PAD_BOTTOM}
+                stroke={color}
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+              <circle cx={xOf(cur.d)} cy={yOf(cur.e)} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+            </g>
+          )}
+        </g>
+
+        {sel && (
+          <rect
+            x={sel[0] * W}
+            y={PAD_TOP}
+            width={(sel[1] - sel[0]) * W}
+            height={H - PAD_TOP - PAD_BOTTOM}
+            fill={color}
+            opacity={0.18}
+          />
+        )}
+      </svg>
+
+      <figcaption className="mt-1 flex items-baseline justify-between gap-x-3 text-xs text-faint">
         {cur ? (
           <>
             <span>{(cur.d / 1000).toFixed(1)} km</span>
@@ -142,8 +162,20 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
             <span>
               {Math.round(minE)}–{Math.round(maxE)} m
             </span>
-            <span className="opacity-70">drag along the line to follow the route</span>
+            <span className="opacity-70">
+              <span className="hidden sm:inline">drag across to zoom · </span>
+              drag along the line to follow the route
+            </span>
           </>
+        )}
+        {zoom.zoomed && (
+          <button
+            type="button"
+            onClick={zoom.reset}
+            className="shrink-0 rounded-full border border-trail px-2 py-0.5 font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
+          >
+            Reset zoom
+          </button>
         )}
       </figcaption>
     </figure>

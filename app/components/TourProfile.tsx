@@ -1,20 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { buildProfile, fromGeoJson, haversineM, type ProfilePoint, type TrackGeoJson } from "../lib/track";
-import { useChartScroll } from "./useChartScroll";
+import { RangeBrush } from "./RangeBrush";
+import { useDragZoom } from "./useDragZoom";
 
 const W = 960;
 const H = 200;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 22;
 const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
-
-/**
- * Narrowest the chart is allowed to get before it starts scrolling instead of
- * squeezing. Deliberately under the widest the page column ever is, so a
- * desktop reader fills the space and never gets a scrollbar for a few
- * stray pixels — W above is only the drawing grid, not a width.
- */
-const MIN_W = 880;
 
 const PLAN_COLOR = "#9aa59e";
 
@@ -78,13 +71,18 @@ function median(nums: number[]): number {
  * backdrop, with each ridden day laid over the stretch of the route it covers.
  * Days sit end to end by distance, so the coloured line stops exactly where
  * the traveller has got to and the grey line ahead is what's left.
+ *
+ * A tour of any length flattens into an unreadable smear at one screen width,
+ * so the strip underneath sets how much of it is on screen — drag its handles,
+ * or drag a stretch out of the chart itself with a mouse.
  */
 export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectDay }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const scroll = useChartScroll();
+  const clipId = useId();
   const [active, setActive] = useState<{ d: number; e: number; color: string; day: number | null } | null>(
     null,
   );
+  const justZoomed = useRef(false);
 
   const chart = useMemo(() => {
     const planPoints = buildProfile(plan.flatMap(fromGeoJson), 600);
@@ -161,30 +159,58 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
     const base = lo - pad;
     const band = hi + pad - base || 1;
 
-    const x = (d: number) => (d / totalM) * W;
+    const step = tickStep(band);
+    const ticks: number[] = [];
+    for (let t = Math.ceil(base / step) * step; t < base + band; t += step) ticks.push(t);
+
+    // Whole-tour silhouette for the brush, in its own fixed 1000×100 box so it
+    // never has to be redrawn as the window moves. It gets its own vertical
+    // scale rather than the chart's: the brush is a map of where you are along
+    // the tour, and sharing an axis stretched by the highest day would flatten
+    // it into a line.
+    const planEs = planLine.map((p) => p.e);
+    const planLo = planEs.length > 0 ? Math.min(...planEs) : 0;
+    const planBand = (planEs.length > 0 ? Math.max(...planEs) : 0) - planLo || 1;
+    const brush =
+      planLine.length > 1
+        ? `${planLine
+            .map(
+              (p, i) =>
+                `${i === 0 ? "M" : "L"}${((p.d / totalM) * 1000).toFixed(1)},${(95 - ((p.e - planLo) / planBand) * 90).toFixed(1)}`,
+            )
+            .join("")}L${((planM / totalM) * 1000).toFixed(1)},100L0,100Z`
+        : "";
+
+    return { laid, planLine, riddenM, reachedM, planM, totalM, base, band, ticks, brush };
+  }, [plan, planKm, days]);
+
+  const zoom = useDragZoom(chart?.totalM ?? 1, svgRef);
+
+  const geom = useMemo(() => {
+    if (!chart) return null;
+    const { planLine, laid, planM, base, band } = chart;
+    const viewSpan = zoom.to - zoom.from || 1;
+    const x = (d: number) => ((d - zoom.from) / viewSpan) * W;
     const y = (e: number) => PAD_TOP + (1 - (e - base) / band) * PLOT_H;
 
     const toPath = (pts: ProfilePoint[]) =>
       pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`).join("");
 
-    const step = tickStep(band);
-    const ticks: number[] = [];
-    for (let t = Math.ceil(base / step) * step; t < base + band; t += step) ticks.push(t);
-
     return {
-      laid,
-      planLine,
-      planPath: toPath(planLine),
-      planArea: planLine.length > 1 ? `${toPath(planLine)}L${x(planM)},${H - PAD_BOTTOM}L0,${H - PAD_BOTTOM}Z` : "",
-      riddenM,
-      reachedM,
-      planM,
-      totalM,
-      ticks,
       x,
       y,
+      planPath: toPath(planLine),
+      planArea:
+        planLine.length > 1
+          ? `${toPath(planLine)}L${x(planM).toFixed(1)},${H - PAD_BOTTOM}L${x(0).toFixed(1)},${H - PAD_BOTTOM}Z`
+          : "",
+      dayPaths: laid.map((day) => ({
+        day,
+        line: toPath(day.points),
+        area: `${toPath(day.points)}L${x(day.endM).toFixed(1)},${H - PAD_BOTTOM}L${x(day.startM).toFixed(1)},${H - PAD_BOTTOM}Z`,
+      })),
     };
-  }, [plan, planKm, days]);
+  }, [chart, zoom.from, zoom.to]);
 
   const move = useCallback(
     (clientX: number) => {
@@ -192,7 +218,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect || rect.width === 0) return;
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      const target = ratio * chart.totalM;
+      const target = zoom.from + ratio * (zoom.to - zoom.from);
 
       // Prefer the ridden line where there is one; fall back to the plan ahead.
       const day = chart.laid.find((d) => target >= d.startM && target <= d.endM);
@@ -211,13 +237,15 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
       setActive({ d: best.d, e: best.e, color, day: day?.dayNumber ?? null });
       onScrub?.(best, color);
     },
-    [chart, onScrub],
+    [chart, onScrub, zoom.from, zoom.to],
   );
 
-  if (!chart) return null;
+  if (!chart || !geom) return null;
 
-  const { laid, planPath, planArea, riddenM, reachedM, planM, totalM, ticks, x, y } = chart;
-  const aheadX = x(reachedM);
+  const { laid, riddenM, reachedM, planM, totalM, ticks, brush } = chart;
+  const { x, y, planPath, planArea, dayPaths } = geom;
+  const sel = zoom.selection;
+  const visible = (d: number) => d >= zoom.from && d <= zoom.to;
 
   return (
     <section
@@ -233,44 +261,60 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         </p>
       </div>
 
-      <div className="mt-3" {...scroll.handlers}>
-        <div ref={scroll.ref} className="overflow-x-auto">
-          {/* Fills the width it is given, and only scrolls once that is
-              narrower than the chart's natural width. */}
-          <div className="relative w-full" style={{ minWidth: MIN_W }}>
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            className="h-44 w-full touch-none select-none sm:h-56"
-            role="img"
-            aria-label={`Elevation of the whole tour: ${(riddenM / 1000).toFixed(0)} of ${(planM / 1000).toFixed(0)} kilometres ridden`}
-            onMouseMove={(e) => move(e.clientX)}
-            onMouseLeave={() => {
-              setActive(null);
-              onScrubEnd?.();
-            }}
-            // A second finger means the reader is scrolling, not scrubbing.
-            onTouchStart={(e) => e.touches.length === 1 && move(e.touches[0].clientX)}
-            onTouchMove={(e) => e.touches.length === 1 && move(e.touches[0].clientX)}
-            onClick={() => {
-              if (active?.day != null) onSelectDay?.(active.day);
-            }}
-          >
-            {ticks.map((t) => (
-              <line
-                key={t}
-                x1={0}
-                x2={W}
-                y1={y(t)}
-                y2={y(t)}
-                stroke="currentColor"
-                className="text-trail"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-  
+      <div className="relative mt-3">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          className="h-44 w-full touch-none select-none sm:h-56"
+          role="img"
+          aria-label={`Elevation of the whole tour: ${(riddenM / 1000).toFixed(0)} of ${(planM / 1000).toFixed(0)} kilometres ridden`}
+          onMouseDown={(e) => zoom.start(e.clientX)}
+          onMouseMove={(e) => {
+            // While a range is being dragged out, the pointer is choosing a
+            // zoom rather than reading a position.
+            if (!zoom.extend(e.clientX)) move(e.clientX);
+          }}
+          onMouseUp={() => {
+            justZoomed.current = zoom.commit();
+          }}
+          onMouseLeave={() => {
+            zoom.cancel();
+            setActive(null);
+            onScrubEnd?.();
+          }}
+          onTouchStart={(e) => move(e.touches[0].clientX)}
+          onTouchMove={(e) => move(e.touches[0].clientX)}
+          onClick={() => {
+            // The click that ends a zoom drag is not a request to jump anywhere.
+            if (justZoomed.current) {
+              justZoomed.current = false;
+              return;
+            }
+            if (active?.day != null) onSelectDay?.(active.day);
+          }}
+        >
+          <defs>
+            <clipPath id={clipId}>
+              <rect x={0} y={0} width={W} height={H} />
+            </clipPath>
+          </defs>
+
+          {ticks.map((t) => (
+            <line
+              key={t}
+              x1={0}
+              x2={W}
+              y1={y(t)}
+              y2={y(t)}
+              stroke="currentColor"
+              className="text-trail"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+
+          <g clipPath={`url(#${clipId})`}>
             {planArea && <path d={planArea} fill={PLAN_COLOR} opacity={0.12} />}
             {planPath && (
               <path
@@ -282,25 +326,19 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                 vectorEffect="non-scaling-stroke"
               />
             )}
-  
-            {laid.map((day) => (
+
+            {dayPaths.map(({ day, line, area }) => (
               <g key={day.dayNumber}>
+                <path d={area} fill={day.color} opacity={0.14} />
                 <path
-                  d={`${day.points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`).join("")}L${x(day.endM).toFixed(1)},${H - PAD_BOTTOM}L${x(day.startM).toFixed(1)},${H - PAD_BOTTOM}Z`}
-                  fill={day.color}
-                  opacity={0.14}
-                />
-                <path
-                  d={day.points
-                    .map((p, i) => `${i === 0 ? "M" : "L"}${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`)
-                    .join("")}
+                  d={line}
                   fill="none"
                   stroke={day.color}
                   strokeWidth={2}
                   vectorEffect="non-scaling-stroke"
                 />
                 {/* Day boundary. The first day starts at the axis, which needs no line. */}
-                {day.startM > 0 && (
+                {day.startM > 0 && visible(day.startM) && (
                   <line
                     x1={x(day.startM)}
                     x2={x(day.startM)}
@@ -314,12 +352,12 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                 )}
               </g>
             ))}
-  
+
             {/* Where the traveller has got to. */}
-            {reachedM > 0 && reachedM < totalM && (
+            {reachedM > 0 && reachedM < totalM && visible(reachedM) && (
               <line
-                x1={aheadX}
-                x2={aheadX}
+                x1={x(reachedM)}
+                x2={x(reachedM)}
                 y1={PAD_TOP}
                 y2={H - PAD_BOTTOM}
                 stroke="currentColor"
@@ -328,8 +366,8 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                 vectorEffect="non-scaling-stroke"
               />
             )}
-  
-            {active && (
+
+            {active && visible(active.d) && (
               <g>
                 <line
                   x1={x(active.d)}
@@ -343,26 +381,36 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                 <circle cx={x(active.d)} cy={y(active.e)} r={4} fill={active.color} stroke="#fff" strokeWidth={1.5} />
               </g>
             )}
-          </svg>
+          </g>
 
-          {/* Axis labels live outside the SVG: the chart is stretched to fit its
-              box, which would squash any text drawn inside it. Elevation labels
-              are sticky so they stay on screen while the chart scrolls
-              horizontally; day numbers scroll with the chart since they mark a
-              position along it. */}
-          <div className="pointer-events-none absolute inset-0">
-            {ticks.map((t) => (
-              <span
-                key={t}
-                className="absolute inset-x-0 -translate-y-1/2"
-                style={{ top: `${(y(t) / H) * 100}%` }}
-              >
-                <span className="sticky left-0 bg-paper pr-1 text-[10px] leading-none text-faint">
-                  {Math.round(t)} m
-                </span>
-              </span>
-            ))}
-            {laid.map((day) => (
+          {sel && (
+            <rect
+              x={sel[0] * W}
+              y={PAD_TOP}
+              width={(sel[1] - sel[0]) * W}
+              height={PLOT_H}
+              fill="currentColor"
+              className="text-pine"
+              opacity={0.15}
+            />
+          )}
+        </svg>
+
+        {/* Axis labels live outside the SVG: the chart is stretched to fit its
+            box, which would squash any text drawn inside it. */}
+        <div className="pointer-events-none absolute inset-0">
+          {ticks.map((t) => (
+            <span
+              key={t}
+              className="absolute left-0 -translate-y-1/2 bg-paper pr-1 text-[10px] leading-none text-faint"
+              style={{ top: `${(y(t) / H) * 100}%` }}
+            >
+              {Math.round(t)} m
+            </span>
+          ))}
+          {laid
+            .filter((day) => visible(day.startM))
+            .map((day) => (
               <span
                 key={day.dayNumber}
                 className="absolute bottom-0 text-[10px] font-bold leading-none"
@@ -371,12 +419,19 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                 {day.dayNumber}
               </span>
             ))}
-          </div>
-          </div>
         </div>
       </div>
 
-      <p className="mt-1 flex flex-wrap justify-between gap-x-4 text-xs text-faint">
+      <RangeBrush
+        total={totalM}
+        from={zoom.from}
+        to={zoom.to}
+        onChange={zoom.setWindow}
+        backdrop={brush}
+        label="Stretch of the tour on screen"
+      />
+
+      <p className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 text-xs text-faint">
         {active ? (
           <>
             <span>
@@ -387,9 +442,23 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           </>
         ) : (
           <>
-            <span>0 – {(totalM / 1000).toFixed(0)} km along the planned route</span>
-            <span className="opacity-70">drag along the line to follow the route</span>
+            <span>
+              {(zoom.from / 1000).toFixed(0)} – {(zoom.to / 1000).toFixed(0)} km along the planned route
+            </span>
+            <span className="opacity-70">
+              <span className="hidden sm:inline">drag across to zoom · </span>
+              drag the handles to zoom
+            </span>
           </>
+        )}
+        {zoom.zoomed && (
+          <button
+            type="button"
+            onClick={zoom.reset}
+            className="shrink-0 rounded-full border border-trail px-2 py-0.5 font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
+          >
+            Whole tour
+          </button>
         )}
       </p>
     </section>
