@@ -1,6 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { data, Form, useNavigation } from "react-router";
 import type { Route } from "./+types/t.$slug";
+
+const RECENT_TRIPS_KEY = "tt_recent_trips";
+const MAX_RECENT_TRIPS = 5;
+
+function saveRecentTrip(slug: string, name: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = localStorage.getItem(RECENT_TRIPS_KEY);
+    const trips: { slug: string; name: string; url: string; visitedAt: number }[] = stored ? JSON.parse(stored) : [];
+    const filtered = trips.filter((t) => t.slug !== slug);
+    filtered.unshift({ slug, name, url: `/t/${slug}`, visitedAt: Date.now() });
+    localStorage.setItem(RECENT_TRIPS_KEY, JSON.stringify(filtered.slice(0, MAX_RECENT_TRIPS)));
+  } catch {
+    // ignore localStorage errors
+  }
+}
 import { getTripBySlug, updateTrip } from "../lib/db.server";
 import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
@@ -522,7 +538,10 @@ function DayGuestbook({
   );
 }
 
-export default function TripPage({ loaderData: trip, actionData }: Route.ComponentProps) {
+export default function TripPage({ loaderData: trip, params, actionData }: Route.ComponentProps) {
+  useEffect(() => {
+    saveRecentTrip(params.slug, trip.name);
+  }, [params.slug, trip.name]);
   return <TripView trip={trip} actionData={actionData} />;
 }
 

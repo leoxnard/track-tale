@@ -84,6 +84,8 @@ const en = {
   home: {
     intro:
       "A private trip journal. If someone shared their adventure with you, use the link they sent — there's nothing to browse here.",
+    recentTrips: "Recent trips",
+    continueTrip: "Continue this trip →",
   },
   language: {
     label: "Language",
@@ -196,6 +198,8 @@ const de: Messages = {
   home: {
     intro:
       "Ein privates Reisetagebuch. Wenn jemand seine Reise mit dir geteilt hat, benutze den Link, den du bekommen hast — hier gibt es nichts zu entdecken.",
+    recentTrips: "Zuletzt besuchte Reisen",
+    continueTrip: "Reise fortsetzen →",
   },
   language: {
     label: "Sprache",
