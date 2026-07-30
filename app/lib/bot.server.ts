@@ -134,6 +134,7 @@ Reply /delete to one of my messages — removes that one
 
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
+/mergegpx "Tour Name" — merge your recent GPX uploads (last hour) into one GPX
 
 *Looking back*
 /mypage — your permanent page with every trip on it
@@ -946,6 +947,81 @@ export function createBot(): Bot {
     }
   });
 
+  bot.command("mergegpx", async (ctx) => {
+    const raw = (ctx.match as string).trim();
+    const chatId = ctx.chat!.id;
+
+    if (!raw) {
+      // No args: show usage or finalize if session exists
+      const { data: session } = await supabase()
+        .from("gpx_merge_sessions")
+        .select("name, tracks")
+        .eq("chat_id", chatId)
+        .maybeSingle();
+
+      if (!session) {
+        await ctx.reply(
+          "Usage:\n" +
+            '  /mergegpx "Tour Name" — start a new GPX merge session\n' +
+            "  (upload .gpx files)\n" +
+            "  /mergegpx — finish and send merged GPX",
+        );
+        return;
+      }
+
+      // Finalize: merge tracks from session
+      const tracks = session.tracks ?? [];
+
+      if (!tracks || tracks.length < 2) {
+        await ctx.reply("Need at least 2 GPX files in session. Upload more first.");
+        return;
+      }
+
+      const allPoints: TrackPoint[] = [];
+      const sports = new Map<string, number>();
+      for (const t of tracks) {
+        const pts = t.points ?? [];
+        allPoints.push(...pts);
+        if (t.sport) sports.set(t.sport, (sports.get(t.sport) ?? 0) + 1);
+      }
+
+      const hasTime = allPoints.every((p) => p.time !== undefined);
+      if (hasTime) allPoints.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+
+      let sport: string | undefined;
+      let maxCount = 0;
+      for (const [s, c] of sports) {
+        if (c > maxCount) {
+          maxCount = c;
+          sport = s;
+        }
+      }
+
+      computeStats(allPoints);
+      const gpx = toGpx(session.name, [allPoints]);
+
+      // Clean up session
+      await supabase().from("gpx_merge_sessions").delete().eq("chat_id", chatId);
+
+      await ctx.replyWithDocument(
+        new InputFile(Buffer.from(gpx), `${session.name.replace(/[^a-z0-9_-]/gi, "_")}.gpx`),
+        { caption: `✅ Merged ${tracks.length} GPX file(s) into ${session.name} (${(gpx.length / 1024).toFixed(1)} KB)` },
+      );
+      return;
+    }
+
+    // With args: start new session
+    const name = raw;
+    await supabase().from("gpx_merge_sessions").upsert({
+      chat_id: chatId,
+      name,
+      tracks: [],
+    });
+    await ctx.reply(
+      `📥 Started GPX merge session for "${name}".\nUpload .gpx files now.\nWhen done, send /mergegpx to finish.`,
+    );
+  });
+
   bot.command("refreshplan", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
@@ -988,8 +1064,6 @@ export function createBot(): Bot {
   });
 
   bot.on("message:document", async (ctx) => {
-    const trip = await requireTrip(ctx);
-    if (!trip) return;
     const doc = ctx.message.document;
     const name = (doc.file_name ?? "").toLowerCase();
     const isGpx = name.endsWith(".gpx");
@@ -1002,10 +1076,40 @@ export function createBot(): Bot {
       await ctx.reply("File too large — Telegram bots can only download files up to 20 MB.");
       return;
     }
+
     await ctx.reply("⏳ Parsing track…").catch(() => {});
     try {
       const buffer = await downloadTelegramFile(bot, doc.file_id);
       const track = isGpx ? parseGpx(new TextDecoder().decode(buffer)) : await parseFit(buffer);
+
+      // Check for active GPX merge session first
+      if (isGpx) {
+        const { data: session } = await supabase()
+          .from("gpx_merge_sessions")
+          .select("tracks")
+          .eq("chat_id", ctx.chat!.id)
+          .maybeSingle();
+
+        if (session) {
+          const trackData = {
+            points: track.points,
+            stats: track.stats,
+            sport: track.sport,
+            name: track.name,
+          };
+          const newTracks = [...(session.tracks ?? []), trackData];
+          await supabase()
+            .from("gpx_merge_sessions")
+            .update({ tracks: newTracks })
+            .eq("chat_id", ctx.chat!.id);
+          await ctx.reply(`✅ Added "${doc.file_name}" (${newTracks.length} file(s) in session)`);
+          return;
+        }
+      }
+
+      const trip = await requireTrip(ctx);
+      if (!trip) return;
+
       const caption = ctx.message.caption?.toLowerCase() ?? "";
       if (caption.includes("plan")) {
         await savePlanSegment(ctx, trip, track);

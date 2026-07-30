@@ -142,6 +142,13 @@ create table if not exists weather_cache (
   fetched_at timestamptz not null default now()
 );
 
+create table if not exists gpx_merge_sessions (
+  chat_id bigint primary key references chats(chat_id) on delete cascade,
+  name text not null,
+  tracks jsonb not null default '[]',
+  created_at timestamptz not null default now()
+);
+
 create index if not exists track_segments_day_idx on track_segments(day_id);
 create index if not exists days_trip_idx on days(trip_id);
 create index if not exists media_day_idx on media(day_id);
