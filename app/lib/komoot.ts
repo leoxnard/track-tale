@@ -1,4 +1,5 @@
 import { computeStats, type NormalizedTrack, type TrackPoint } from "./track";
+import { toGpx } from "./gpx-export";
 
 export interface KomootRef {
   tourId: string;
@@ -10,6 +11,99 @@ export interface KomootTour extends NormalizedTrack {
   /** "tour_recorded" = a ride that happened, "tour_planned" = a route plan */
   tourType: "tour_recorded" | "tour_planned";
   sourceUrl: string;
+}
+
+export interface MergeResult {
+  track: NormalizedTrack;
+  skipped: string[];
+}
+
+function mostCommonSport(tracks: NormalizedTrack[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const t of tracks) {
+    if (t.sport) counts.set(t.sport, (counts.get(t.sport) ?? 0) + 1);
+  }
+  let best: string | undefined;
+  let bestCount = 0;
+  for (const [sport, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = sport;
+    }
+  }
+  return best;
+}
+
+export interface MergeKomootResult {
+  gpx: string;
+  skipped: string[];
+  fetched: number;
+}
+
+export async function mergeKomootTours(urls: string[], name: string): Promise<MergeKomootResult> {
+  const refs: KomootRef[] = [];
+  const invalid: string[] = [];
+
+  for (const url of urls) {
+    const ref = parseKomootUrl(url);
+    if (ref) refs.push(ref);
+    else invalid.push(url);
+  }
+
+  if (refs.length === 0) throw new Error("No valid Komoot URLs");
+
+  const results = await Promise.allSettled(refs.map((r) => fetchKomootTour(r)));
+
+  const tours: NormalizedTrack[] = [];
+  const skipped: string[] = [...invalid];
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      tours.push(r.value);
+    } else {
+      skipped.push(refs[i].tourId);
+    }
+  }
+
+  if (tours.length === 0) throw new Error("All tours failed to fetch");
+
+  const { track, skipped: mergeSkipped } = mergeTracks(tours, name);
+  skipped.push(...mergeSkipped);
+
+  const gpx = toGpx(name, [track.points]);
+
+  return { gpx, skipped, fetched: tours.length };
+}
+
+export function mergeTracks(tracks: NormalizedTrack[], name: string): MergeResult {
+  if (tracks.length === 0) throw new Error("No tracks to merge");
+
+  const allPoints: TrackPoint[] = [];
+  const skipped: string[] = [];
+
+  for (const t of tracks) {
+    if (t.points.length === 0) {
+      skipped.push(t.name ?? "unnamed track");
+      continue;
+    }
+    allPoints.push(...t.points);
+  }
+
+  if (allPoints.length === 0) throw new Error("All tracks empty");
+
+  const hasTime = allPoints.every((p) => p.time !== undefined);
+  if (hasTime) {
+    allPoints.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+  }
+
+  const sport = mostCommonSport(tracks);
+  const stats = computeStats(allPoints);
+
+  return {
+    track: { name, sport, points: allPoints, stats },
+    skipped,
+  };
 }
 
 const TOUR_URL_RE = /komoot\.[a-z.]+\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?tour\/(\d+)/i;

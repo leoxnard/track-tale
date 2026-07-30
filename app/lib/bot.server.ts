@@ -27,10 +27,11 @@ import {
   type DbChat,
   type DbTrip,
 } from "./db.server";
-import { fetchKomootTour, findKomootUrl, parseKomootUrl } from "./komoot";
+import { fetchKomootTour, findKomootUrl, parseKomootUrl, mergeKomootTours, type MergeKomootResult } from "./komoot";
 import { findLiveTrackUrl } from "./live-link";
 import { parseFit, parseGpx } from "./gpx";
-import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson } from "./track";
+import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson, type TrackPoint, computeStats } from "./track";
+import { toGpx } from "./gpx-export";
 import { matchPhotoToTrack } from "./photo-match";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
@@ -130,6 +131,9 @@ Reply /delete to one of my messages — removes that one
 • GPX with caption "plan" → same
 /refreshplan — re-sync plan links after editing in Komoot
 /refreshweather — fill in weather for older days
+
+*Tools*
+/merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
 
 *Looking back*
 /mypage — your permanent page with every trip on it
@@ -888,6 +892,58 @@ export function createBot(): Bot {
         `_Valid for ${INVITE_TTL_DAYS} days, until ${expiresAt.toISOString().slice(0, 10)}._`,
       { parse_mode: "Markdown" },
     );
+  });
+
+  bot.command("merge", async (ctx) => {
+    const raw = (ctx.match as string).trim();
+    if (!raw) {
+      await ctx.reply(
+        "Usage: /merge <name> <url1> <url2> ...\n" +
+          'Example: /merge "Day 3" https://komoot.com/tour/123 https://komoot.com/tour/456\n' +
+          "Or without quotes: /merge Day 3 https://komoot.com/tour/123 https://komoot.com/tour/456",
+      );
+      return;
+    }
+
+    // Split by whitespace, then find first URL - everything before is the name
+    const tokens = raw.split(/\s+/);
+    const firstUrlIdx = tokens.findIndex((t) => parseKomootUrl(t));
+    if (firstUrlIdx <= 0) {
+      await ctx.reply("Need a name and at least two Komoot URLs.");
+      return;
+    }
+    const name = tokens.slice(0, firstUrlIdx).join(" ");
+    const urls = tokens.slice(firstUrlIdx);
+
+    const komootUrls = urls.filter((u) => parseKomootUrl(u));
+    if (komootUrls.length < 2) {
+      await ctx.reply("At least two valid Komoot tour URLs required.");
+      return;
+    }
+
+    const invalid = urls.filter((u) => !parseKomootUrl(u));
+    if (invalid.length > 0) {
+      await ctx.reply(
+        `⚠️ Skipping invalid URLs:\n${invalid.map((u) => `• ${u}`).join("\n")}`,
+      );
+    }
+
+    await ctx.reply("⏳ Fetching tours and merging…").catch(() => {});
+
+    try {
+      const { gpx, skipped, fetched } = await mergeKomootTours(komootUrls, name);
+      if (skipped.length > 0) {
+        await ctx.reply(
+          `⚠️ Skipped ${skipped.length} tour(s):\n${skipped.map((s) => `• ${s}`).join("\n")}`,
+        );
+      }
+      await ctx.replyWithDocument(
+        new InputFile(Buffer.from(gpx), `${name.replace(/[^a-z0-9_-]/gi, "_")}.gpx`),
+        { caption: `✅ Merged ${fetched} tour(s) into ${name} (${(gpx.length / 1024).toFixed(1)} KB)` },
+      );
+    } catch (err) {
+      await ctx.reply(`❌ Merge failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    }
   });
 
   bot.command("refreshplan", async (ctx) => {
