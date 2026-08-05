@@ -21,7 +21,13 @@ notes, stats and weather.
 - One whole-tour elevation chart shows the plan in grey with each ridden day laid over the
   stretch of route it actually covers, matched by coordinates rather than stacked in
   sequence — so a shortcut or a detour leaves a gap or an overlap instead of shifting every
-  day after it.
+  day after it. Days are matched to the nearest point *on* the planned line rather than to
+  its nearest waypoint, so a plan drawn with few waypoints places a day as accurately as a
+  dense one. The axis is distance along the plan, so a day spans the plan it covered rather
+  than its own odometer — a day that rides 95 km to advance 86 km of route sits in those
+  86 km instead of overhanging its neighbours. What was ridden is in the day's own stats.
+- Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
+  swipe to run through every photo on the trip.
 
 ## Setup
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layDays, type TourDayInput } from "./tour-layout";
-import { buildProfile, type TrackPoint } from "./track";
+import { buildProfile, haversineM, type TrackPoint } from "./track";
 
 /**
  * A due-east route at a fixed latitude, drawn with `vertices` waypoints and a
@@ -15,6 +15,17 @@ function route(vertices: number, fromDeg: number, toDeg: number): TrackPoint[] {
 
 function day(dayNumber: number, points: TrackPoint[], distanceM: number): TourDayInput {
   return { dayNumber, color: "#000", distanceM, profile: buildProfile(points) };
+}
+
+/** Push a route off its own line and back, so it rides further than it advances. */
+function wobble(points: TrackPoint[], amplitudeDeg: number): TrackPoint[] {
+  return points.map((p, i) => ({ ...p, lat: p.lat + amplitudeDeg * Math.sin(i / 2) }));
+}
+
+function measure(points: TrackPoint[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += haversineM(points[i - 1], points[i]);
+  return total;
 }
 
 /** Metres per degree of longitude at latitude 47. */
@@ -59,23 +70,49 @@ describe("layDays", () => {
     }
   });
 
-  it("anchors a day whose stated distance differs from its measured profile", () => {
-    // A day's authoritative distance comes from the full track, its profile
-    // from a thinned, altitude-only subset, so the two disagree by a percent or
-    // two. The day is drawn stretched onto the authoritative one, so an offset
-    // measured against the unstretched profile tilts the whole day — which on a
-    // long day is kilometres of spurious overlap.
-    const stretched: TourDayInput = { ...days[1], distanceM: dayLengthM * 1.05 };
+  it("gives a day the plan it covered, not the distance it rode", () => {
+    // The reported bug, in its real shape. A day rides further than the route
+    // advances — detours, wrong turns, a loop round a lake — so drawing it at
+    // its ridden width made it overhang the stretch it covered at both ends,
+    // and the front end landed on top of the day before it. Here day two
+    // wanders its way along the same third of the plan, 10% further.
+    const wandering = wobble(route(400, 11.2, 11.4), 0.002);
+    const ridden = measure(wandering);
+    expect(ridden).toBeGreaterThan(dayLengthM * 1.08);
+
+    const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, [
+      days[0],
+      day(2, wandering, ridden),
+      days[2],
+    ]);
+
+    // It occupies exactly its third of the plan, seamlessly between the others.
+    expect(laid[1].startM).toBeCloseTo(dayLengthM, -2);
+    expect(laid[1].endM).toBeCloseTo(2 * dayLengthM, -2);
+    expect(laid[1].startM).toBeGreaterThanOrEqual(laid[0].endM - 100);
+    expect(laid[2].startM).toBeGreaterThanOrEqual(laid[1].endM - 100);
+  });
+
+  it("ignores a stated distance that disagrees with the profile", () => {
+    // A day's authoritative distance comes from the full track and its profile
+    // from a thinned, altitude-only subset, so the two always disagree a
+    // little. Neither of them decides where the day goes any more.
+    const stretched: TourDayInput = { ...days[1], distanceM: dayLengthM * 1.4 };
     const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, [days[0], stretched, days[2]]);
 
-    // A day drawn 5% too long cannot line up at both ends, so it is centred on
-    // the stretch it rode: its midpoint lands on the plan's midpoint for it,
-    // and the excess hangs half over each end.
-    const middle = laid[1].startM + (laid[1].endM - laid[1].startM) / 2;
-    expect(middle).toBeCloseTo(1.5 * dayLengthM, -2);
-    // Half of 5% is all the overlap there is — not the 5% of a whole day that
-    // taking the offset against the unstretched profile used to produce.
-    expect(laid[0].endM - laid[1].startM).toBeLessThan(0.03 * dayLengthM);
+    expect(laid[1].startM).toBeCloseTo(dayLengthM, -2);
+    expect(laid[1].endM).toBeCloseTo(2 * dayLengthM, -2);
+  });
+
+  it("keeps a day it cannot squash to nothing at its ridden width", () => {
+    // An out-and-back covers no route at all: it ends where it started, so the
+    // fit says zero plan metres per ridden metre. Drawing that would collapse
+    // the day to a line, which says less than leaving it its own length.
+    const outAndBack = [...route(200, 11.0, 11.1), ...route(200, 11.1, 11.0)];
+    const ridden = measure(outAndBack);
+    const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, [day(1, outAndBack, ridden)]);
+
+    expect(laid[0].endM - laid[0].startM).toBeCloseTo(ridden, -2);
   });
 
   it("shows a real overlap as an overlap", () => {

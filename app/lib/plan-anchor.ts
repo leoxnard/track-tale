@@ -117,3 +117,28 @@ export function median(nums: number[]): number {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
+
+/**
+ * Slope of the line through a set of points, by Theil–Sen: the median of the
+ * slopes between every pair of them.
+ *
+ * Used to answer "how many metres of plan does this day cover per metre it
+ * rode" — which is rarely one. A day with a detour, a wrong turn, or a loop
+ * round a lake rides further than the route advances, and a day that took a
+ * shortcut rides less.
+ *
+ * Median-of-pairs rather than least squares for the same reason the position
+ * uses a median: one anchor that matched a stretch of route passing close by is
+ * enough to tilt a fitted line, and tilting the fit throws the whole day out at
+ * both ends. Returns NaN when there is nothing to fit.
+ */
+export function theilSenSlope(points: { x: number; y: number }[]): number {
+  const slopes: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const dx = points[j].x - points[i].x;
+      if (dx !== 0) slopes.push((points[j].y - points[i].y) / dx);
+    }
+  }
+  return slopes.length > 0 ? median(slopes) : NaN;
+}

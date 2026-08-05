@@ -1,4 +1,4 @@
-import { buildPlanIndex, median } from "./plan-anchor";
+import { buildPlanIndex, median, theilSenSlope } from "./plan-anchor";
 import type { ProfilePoint, TrackPoint } from "./track";
 
 /**
@@ -12,6 +12,19 @@ import type { ProfilePoint, TrackPoint } from "./track";
  * Which is exactly why the anchoring has to be accurate. A day pinned a few
  * kilometres early swallows the end of the day before it and invents an overlap
  * that never happened, and the reader has no way to tell that from a real one.
+ *
+ * The axis is distance along the plan, so a day occupies the stretch of plan it
+ * covered — not its own odometer reading. Those differ, always and by a lot: a
+ * real day rides 95 km to advance 86 km of route, because a detour, a wrong
+ * turn or a loop round a lake all cost distance the route does not count. Drawn
+ * at its ridden width a day therefore overhangs the stretch it covered at both
+ * ends, and the front end lands on top of the day before it. That was the bug
+ * this file was rewritten for: two days that ran seamlessly into each other,
+ * drawn overlapping by kilometres.
+ *
+ * So each day gets a robust straight-line fit from its own distance onto the
+ * plan's — position *and* scale — rather than a position alone. The ridden
+ * distance is not lost: it is what the day's own stats and the tour total say.
  */
 
 export interface TourDayInput {
@@ -56,7 +69,25 @@ const MAX_ANCHOR_GAP_M = 25_000;
  * is one independent guess and the median of nine survives a stretch where the
  * route doubles back near itself.
  */
-const ANCHOR_FRACTIONS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+const ANCHOR_FRACTIONS = [
+  0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+  0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95,
+];
+
+/** Below this many usable anchors there is nothing worth fitting a line to. */
+const MIN_ANCHORS = 3;
+
+/**
+ * Plausible range for "plan metres per ridden metre".
+ *
+ * A day always rides at least a little further than the route advances, so the
+ * honest values sit a bit under 1. The bounds are wide enough to leave those
+ * alone and only catch a fit that has gone wrong — a day that returns to where
+ * it started covers no route at all and would otherwise be squashed to nothing,
+ * and a mismatched anchor at one end can produce a slope of any size.
+ */
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 4;
 
 /**
  * @param planPoints the plan's raw coordinates — full resolution, elevation not
@@ -84,31 +115,37 @@ export function layDays(
       continue;
     }
 
-    // Where a profile point ends up on the chart. The day is drawn stretched
-    // from its measured profile length onto its authoritative distance, so an
-    // offset taken against the unstretched position would tilt the whole day by
-    // the difference — several kilometres on a long one, all of it landing on
-    // top of the day before.
-    const drawnD = (p: ProfilePoint) => (p.d / (span || 1)) * width;
-
-    const offsets: number[] = [];
+    // Each anchor pairs a distance along the day with the distance along the
+    // plan it fell at. Together they are the line to fit.
+    const anchors: { x: number; y: number }[] = [];
     for (const f of ANCHOR_FRACTIONS) {
       const p = day.profile[Math.round(f * (day.profile.length - 1))];
       const anchor = plan.anchor(p);
-      if (anchor && anchor.gap < MAX_ANCHOR_GAP_M) offsets.push(anchor.d - drawnD(p));
+      if (anchor && anchor.gap < MAX_ANCHOR_GAP_M) anchors.push({ x: p.d, y: anchor.d });
     }
 
-    // A day that never came near the plan can't be anchored to it; fall back to
-    // sitting behind the previous day.
-    const startM = offsets.length > 0 ? Math.max(0, median(offsets)) : cursor;
+    // Falling back means keeping the day's own length and sitting it behind the
+    // one before — the honest answer for a day the plan says nothing about.
+    let scale = width / (span || 1);
+    let startM = cursor;
 
+    if (anchors.length >= MIN_ANCHORS) {
+      const fitted = theilSenSlope(anchors);
+      if (Number.isFinite(fitted) && fitted >= MIN_SCALE && fitted <= MAX_SCALE) scale = fitted;
+      // Intercept of the same fit, taken as a median so one bad anchor cannot
+      // shift the day. Days are allowed to overlap — that is the point — but
+      // none of them starts before the plan does.
+      startM = Math.max(0, median(anchors.map((a) => a.y - scale * a.x)));
+    }
+
+    const drawnWidth = scale * span;
     laid.push({
       ...day,
       startM,
-      endM: startM + width,
-      points: day.profile.map((p) => ({ ...p, d: startM + drawnD(p) })),
+      endM: startM + drawnWidth,
+      points: day.profile.map((p) => ({ ...p, d: startM + scale * p.d })),
     });
-    cursor = startM + width;
+    cursor = startM + drawnWidth;
   }
 
   return { laid, riddenM, reachedM: laid.reduce((m, d) => Math.max(m, d.endM), 0) };
