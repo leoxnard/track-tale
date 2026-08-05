@@ -12,9 +12,12 @@ notes, stats and weather.
   route by timestamp (Telegram strips GPS EXIF).
 - `/day 3` sets which day uploads go to; a silent 3 AM reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
-- A Garmin LiveTrack link shows a "Live now" banner for 24 h. Paste it into the chat, or let
-  Garmin email it: add the inbound address as a LiveTrack recipient and starting a ride turns
-  the banner on by itself, with the bot confirming in the chat which trip it landed on.
+- A Garmin LiveTrack link shows a "Live now" banner for 24 h, with the ride so far drawn on
+  the map — including on day one, before any track has been uploaded. Paste it into the chat,
+  or let Garmin email it: add the inbound address as a LiveTrack recipient and starting a ride
+  turns the banner on by itself, with the bot confirming in the chat which trip it landed on.
+  `/live` reports what the server can actually read off Garmin's page, since that is the one
+  part of the app nobody can check from the family link.
 - One whole-tour elevation chart shows the plan in grey with each ridden day laid over the
   stretch of route it actually covers, matched by coordinates rather than stacked in
   sequence — so a shortcut or a detour leaves a gap or an overlap instead of shifting every
@@ -73,6 +76,8 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/deletetrip Name` | erase the trip and its photos, irreversibly |
 | `/note …` | journal entry (plain text works too) |
 | `/undo`, reply `/delete` | remove the last / a specific item |
+| `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
+| `/live` | what the live banner is showing, and why; `/live off` takes it down |
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
 | `/archive` | download the trip as a self-contained bundle |
 | `/refreshplan` | re-sync planned Komoot routes |
@@ -81,6 +86,11 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 
 Trip-level changes (`/endtrip`, `/deletetrip`, `/renametrip`, `/dates`) are limited to the
 traveller who created the trip, so a busy group chat cannot rewrite someone else's journey.
+
+`/undo` and a `/delete` reply both need the bot's confirmation message to still be in the
+chat, so they only reach things added recently. `/manage` walks the trip itself — a day
+picker, then that day's contents as buttons, then a confirmation — so a photo from last week
+is as removable as one from a minute ago. Deleting a photo takes its files out of storage too.
 
 ## Friends
 

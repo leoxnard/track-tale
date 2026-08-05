@@ -132,6 +132,52 @@ describe("parseLiveTrackHtml", () => {
     expect(noCoords!.points).toEqual([]);
   });
 
+  describe("paginated track points", () => {
+    // Garmin loads the track as a react-query *infinite* query, so the payload
+    // is {"pages":[{"trackPoints":[…]},…]} — one array per page. Reading only
+    // the first showed a long ride as its opening few minutes and no more.
+    const page = (points: string) => `{\\"trackPoints\\":[${points}]}`;
+    const pt = (iso: string, lat: number, dist: number) =>
+      `{\\"dateTime\\":\\"${iso}\\",\\"position\\":{\\"lat\\":${lat},\\"lon\\":11},` +
+      `\\"totalDistanceMeters\\":${dist},\\"totalDurationSecs\\":${dist}}`;
+    const html = (pages: string[]) =>
+      `<script>self.__next_f.push([1,"{\\"pages\\":[${pages.join(",")}],\\"pageParams\\":[\\"\\"]}"])</script>`;
+
+    it("reads every page, not just the first", () => {
+      const session = parseLiveTrackHtml(
+        html([
+          page([pt("2026-07-25T10:00:00.000Z", 47.0, 0), pt("2026-07-25T10:00:10.000Z", 47.1, 100)].join(",")),
+          page([pt("2026-07-25T10:00:20.000Z", 47.2, 200), pt("2026-07-25T10:00:30.000Z", 47.3, 300)].join(",")),
+        ]),
+      )!;
+      expect(session.points).toHaveLength(4);
+      expect(session.distanceM).toBe(300);
+      expect(session.durationS).toBe(300);
+      expect(session.current!.lat).toBeCloseTo(47.3, 6);
+    });
+
+    it("puts pages back in time order and drops the overlap between them", () => {
+      // Nothing promises the pages arrive oldest-first, and a page boundary
+      // that repeats a point would draw the route doubling back on itself.
+      const session = parseLiveTrackHtml(
+        html([
+          page([pt("2026-07-25T10:00:20.000Z", 47.2, 200), pt("2026-07-25T10:00:30.000Z", 47.3, 300)].join(",")),
+          page([pt("2026-07-25T10:00:00.000Z", 47.0, 0), pt("2026-07-25T10:00:20.000Z", 47.2, 200)].join(",")),
+        ]),
+      )!;
+      expect(session.points.map((p) => p.lat)).toEqual([47.0, 47.2, 47.3]);
+      expect(session.updatedAt).toBe("2026-07-25T10:00:30.000Z");
+    });
+
+    it("keeps the pages it could read when a later one is truncated", () => {
+      const session = parseLiveTrackHtml(
+        html([page(pt("2026-07-25T10:00:00.000Z", 47.0, 0)), '{\\"trackPoints\\":[{\\"position\\":]}'],
+        ),
+      );
+      expect(session!.points).toHaveLength(1);
+    });
+  });
+
   it("is not fooled by a bracket inside a string value", () => {
     const payload = JSON.stringify(
       '{"sessionName":"Ride [with] brackets","trackPoints":[{"position":{"lat":1,"lon":2},"totalDistanceMeters":3}]}',

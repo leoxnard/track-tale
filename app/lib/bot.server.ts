@@ -29,6 +29,7 @@ import {
 } from "./db.server";
 import { fetchKomootTour, findKomootUrl, parseKomootUrl, mergeKomootTours, type MergeKomootResult } from "./komoot";
 import { findLiveTrackUrl } from "./live-link";
+import { probeLiveSession } from "./livetrack.server";
 import { parseFit, parseGpx } from "./gpx";
 import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson, type TrackPoint, computeStats } from "./track";
 import { toGpx } from "./gpx-export";
@@ -37,8 +38,9 @@ import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
 import { escapeErr, escapeMd, slugId } from "./telegram-md";
-
-type EntityType = "note" | "media" | "track_segment" | "plan_segment" | "comment";
+import { deleteEntity, ENTITY_LABEL, type EntityType } from "./entities.server";
+import { parseAction } from "./manage";
+import { applyDelete, confirmView, dayView, overview, type View } from "./manage.server";
 
 /**
  * Remember which row a confirmation message created, so replying /delete to it
@@ -59,33 +61,34 @@ async function recordAction(
   });
 }
 
-const ENTITY_TABLE: Record<EntityType, string> = {
-  note: "notes",
-  media: "media",
-  track_segment: "track_segments",
-  plan_segment: "plan_segments",
-  comment: "comments",
-};
+/**
+ * Send a /manage screen as a new message, and swap one for the next in place.
+ *
+ * Editing keeps the whole browse-and-delete flow in a single message instead of
+ * pushing a new one into the chat on every tap. Telegram rejects an edit whose
+ * text and keyboard are both unchanged, which is a normal thing to happen when
+ * a button is tapped twice — that one is not worth surfacing.
+ */
+async function sendView(ctx: Context, view: View) {
+  await ctx.reply(view.text, {
+    reply_markup: view.keyboard,
+    ...(view.markdown ? { parse_mode: "Markdown" as const } : {}),
+    link_preview_options: { is_disabled: !view.preview },
+  });
+}
 
-const ENTITY_LABEL: Record<EntityType, string> = {
-  note: "Note",
-  media: "Photo",
-  track_segment: "Track",
-  plan_segment: "Plan segment",
-  comment: "Comment",
-};
-
-async function deleteAction(action: { entity_type: EntityType; entity_id: string }): Promise<void> {
-  if (action.entity_type === "media") {
-    const { data } = await supabase()
-      .from("media")
-      .select("storage_path, thumb_path")
-      .eq("id", action.entity_id)
-      .maybeSingle();
-    const paths = [data?.storage_path, data?.thumb_path].filter(Boolean) as string[];
-    if (paths.length > 0) await supabase().storage.from("photos").remove(paths);
+async function editView(ctx: Context, view: View) {
+  try {
+    await ctx.editMessageText(view.text, {
+      reply_markup: view.keyboard,
+      ...(view.markdown ? { parse_mode: "Markdown" as const } : {}),
+      link_preview_options: { is_disabled: !view.preview },
+    });
+  } catch {
+    // The message is too old to edit, or nothing about it changed. Either way
+    // the traveller still needs to see the screen they asked for.
+    await sendView(ctx, view).catch(() => {});
   }
-  await supabase().from(ENTITY_TABLE[action.entity_type]).delete().eq("id", action.entity_id);
 }
 
 interface BotState {
@@ -120,11 +123,17 @@ const HELP = `🚴 *TrackTale* — your trip journal
 • GPX or FIT file → route imported (several merge into one day)
 • Photos with captions → day gallery, pinned on the map
 • Any other text → journal entry
-• Garmin LiveTrack link → 🔴 live banner for 24h
 
 *Oops*
 /undo — remove the last thing added
 Reply /delete to one of my messages — removes that one
+/manage — browse the trip and delete anything on it, however old: notes,
+photos, tracks, and guestbook messages the family left
+
+*Live*
+🔴 Paste a Garmin LiveTrack link → live banner for 24h
+/live — what the family page is showing right now
+/live off — take the banner down
 
 *Plan*
 • A *planned* Komoot tour link → grey plan line + progress
@@ -618,12 +627,7 @@ export function createBot(): Bot {
       await ctx.reply("I don't have anything on record for that message.");
       return;
     }
-    await deleteAction(action);
-    await supabase()
-      .from("bot_actions")
-      .delete()
-      .eq("chat_id", ctx.chat!.id)
-      .eq("message_id", replyTo);
+    await deleteEntity(action.entity_type as EntityType, action.entity_id);
     await ctx.reply(`🗑️ ${ENTITY_LABEL[action.entity_type as EntityType]} deleted.`);
   });
 
@@ -639,13 +643,75 @@ export function createBot(): Bot {
       await ctx.reply("Nothing to undo here.");
       return;
     }
-    await deleteAction(action);
-    await supabase()
-      .from("bot_actions")
-      .delete()
-      .eq("chat_id", ctx.chat!.id)
-      .eq("message_id", action.message_id);
+    await deleteEntity(action.entity_type as EntityType, action.entity_id);
     await ctx.reply(`↩️ ${ENTITY_LABEL[action.entity_type as EntityType]} removed.`);
+  });
+
+  // Browsing the trip to delete something older than the chat's scrollback.
+  bot.command("manage", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    await sendView(ctx, await overview(trip));
+  });
+  bot.hears(/^\/(edit|items)(?:@\w+)?$/i, async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    await sendView(ctx, await overview(trip));
+  });
+
+  bot.on("callback_query:data", async (ctx) => {
+    const action = parseAction(ctx.callbackQuery.data);
+    if (!action) {
+      // A button from a deploy ago, or from a message older than the trip it
+      // belonged to. Clearing the spinner is all we owe it.
+      await ctx.answerCallbackQuery("That button is out of date — send /manage again.");
+      return;
+    }
+
+    const trip = await getActiveTrip(ctx.state.chat);
+    if (!trip) {
+      await ctx.answerCallbackQuery("No active trip in this chat any more.");
+      return;
+    }
+
+    try {
+      let view: View | null = null;
+      // Shown as the little toast above the keyboard, when there is anything
+      // worth saying that the redrawn screen doesn't already say by itself.
+      let notice: string | undefined;
+
+      switch (action.type) {
+        case "home":
+          view = await overview(trip);
+          break;
+        case "day":
+          view = await dayView(trip, action.dayNumber, action.page);
+          break;
+        case "ask":
+          view = await confirmView(trip, action.kind, action.id, action.dayNumber);
+          break;
+        case "confirm":
+          view = await applyDelete(trip, action.kind, action.id, action.dayNumber);
+          // A deleted track changes the distance the share card shows.
+          if (view && action.kind === "track_segment") {
+            await renderOgCard(trip.id).catch(() => {});
+          }
+          break;
+      }
+
+      // Both item screens return null for something that has already gone —
+      // a double tap, or two people tidying up at once. Fall back to the day.
+      if (!view) {
+        notice = "That one is already gone.";
+        view = await dayView(trip, "dayNumber" in action ? action.dayNumber : 0, 0);
+      }
+
+      await ctx.answerCallbackQuery(notice);
+      await editView(ctx, view);
+    } catch (err) {
+      console.error("manage callback failed", err);
+      await ctx.answerCallbackQuery("Something went wrong — nothing was changed.");
+    }
   });
 
   bot.command("mypage", async (ctx) => {
@@ -788,6 +854,61 @@ export function createBot(): Bot {
         `⚠️ Delete failed: ${err instanceof Error ? err.message : "unknown error"}. Nothing was removed.`,
       );
     }
+  });
+
+  /**
+   * The live banner is the one feature nobody can check for themselves: it
+   * lives on the family's page, driven by a page on Garmin's servers that we
+   * only scrape. This says what the server sees right now.
+   */
+  bot.command("live", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const arg = (ctx.match as string).trim().toLowerCase();
+
+    if (arg === "off") {
+      await updateTrip(trip.id, { live_url: null, live_expires_at: null });
+      await ctx.reply("⚫️ Live banner off. Paste a LiveTrack link to switch it back on.");
+      return;
+    }
+
+    const expiresMs = trip.live_expires_at ? Date.parse(trip.live_expires_at) : NaN;
+    if (!trip.live_url || !Number.isFinite(expiresMs) || expiresMs <= Date.now()) {
+      await ctx.reply(
+        "⚫️ No live link on this trip" +
+          (trip.live_url ? " (the last one has expired)" : "") +
+          ".\n\nPaste a Garmin LiveTrack link here, or let Garmin email it to the inbound address.",
+      );
+      return;
+    }
+
+    await ctx.reply("🔍 Asking Garmin…").catch(() => {});
+    const probe = await probeLiveSession(trip.live_url);
+    const hoursLeft = Math.max(0, Math.round((expiresMs - Date.now()) / 3600000));
+    const lines = [
+      `🔴 Live link is set, ${hoursLeft}h left on it.`,
+      trip.live_url,
+      "",
+      `Garmin: ${probe.detail}.`,
+    ];
+    if (probe.session) {
+      lines.push(
+        `Session: ${probe.session.name ?? "unnamed"} — ` +
+          `${km(probe.session.distanceM)} km, ` +
+          (probe.session.complete ? "finished" : "running") +
+          (probe.session.updatedAt ? `, last point ${probe.session.updatedAt}` : ""),
+      );
+      if (probe.session.complete) {
+        lines.push("", "The banner is hidden while Garmin reports the session as over.");
+      } else if (probe.session.points.length === 0) {
+        lines.push("", "The banner is up, but there is no position to draw yet.");
+      }
+    } else {
+      lines.push("", "The banner is up but shows no route — it just links to Garmin.");
+    }
+    lines.push("", "/live off takes the banner down.");
+    // Plain text: the session name is Garmin's, not something we can escape for.
+    await ctx.reply(lines.join("\n"), { link_preview_options: { is_disabled: true } });
   });
 
   bot.command("reminders", async (ctx) => {

@@ -130,17 +130,13 @@ function extractFlightPayload(html: string): string {
 }
 
 /**
- * Slice out a JSON array by balancing brackets from `"<key>":[`.
+ * Slice out the JSON array that starts at `start` by balancing brackets.
  *
  * Written by hand because the array sits inside a much larger blob that is not
  * itself valid JSON. String literals are skipped so a bracket inside a value
  * cannot end the scan early.
  */
-function sliceArray(blob: string, key: string): string | null {
-  const at = blob.indexOf(`"${key}":[`);
-  if (at === -1) return null;
-  const start = blob.indexOf("[", at);
-
+function sliceArrayAt(blob: string, start: number): string | null {
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -159,6 +155,28 @@ function sliceArray(blob: string, key: string): string | null {
   return null;
 }
 
+/**
+ * Every array stored under `"<key>":[`, in the order they appear.
+ *
+ * Garmin fetches the track as a react-query *infinite* query, so the payload
+ * holds `{"pages":[{"trackPoints":[…]},{"trackPoints":[…]},…]}` — one array per
+ * page, not one array. Reading only the first is why a long ride used to show
+ * as a stub of its opening minutes and then stop.
+ */
+function sliceArrays(blob: string, key: string): string[] {
+  const needle = `"${key}":[`;
+  const out: string[] = [];
+  let at = blob.indexOf(needle);
+  while (at !== -1) {
+    const start = at + needle.length - 1;
+    const slice = sliceArrayAt(blob, start);
+    if (slice === null) break;
+    out.push(slice);
+    at = blob.indexOf(needle, start + slice.length);
+  }
+  return out;
+}
+
 function sliceString(blob: string, key: string): string | null {
   const match = blob.match(new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`));
   if (!match) return null;
@@ -174,26 +192,42 @@ export function parseLiveTrackHtml(html: string, now = Date.now()): LiveSession 
   const blob = extractFlightPayload(html);
   if (blob.length === 0) return null;
 
-  const raw = sliceArray(blob, "trackPoints");
-  if (!raw) return null;
+  const pages = sliceArrays(blob, "trackPoints");
+  if (pages.length === 0) return null;
 
-  let parsed: RawPoint[];
-  try {
-    parsed = JSON.parse(raw) as RawPoint[];
-  } catch {
-    return null;
+  const parsed: RawPoint[] = [];
+  for (const page of pages) {
+    let pagePoints: RawPoint[];
+    try {
+      pagePoints = JSON.parse(page) as RawPoint[];
+    } catch {
+      // The first page failing means we read nothing usable; a later one
+      // failing still leaves a shorter but honest track.
+      if (parsed.length === 0) return null;
+      continue;
+    }
+    parsed.push(...pagePoints);
   }
 
+  // Pages arrive newest-first as often as not, and nothing guarantees they do
+  // not overlap at the seams — so order by time and drop repeats rather than
+  // trusting the sequence, which would otherwise draw the route as a zigzag.
+  parsed.sort((a, b) => timeOf(a) - timeOf(b));
+
   const points: LivePoint[] = [];
+  let lastTime = Number.NaN;
   for (const p of parsed) {
     const lat = p.position?.lat;
     const lon = p.position?.lon;
     if (typeof lat !== "number" || typeof lon !== "number") continue;
+    const time = p.dateTime ? Date.parse(p.dateTime) || undefined : undefined;
+    if (time !== undefined && time === lastTime) continue;
+    if (time !== undefined) lastTime = time;
     points.push({
       lat,
       lng: lon,
       alt: typeof p.altitude === "number" ? p.altitude : undefined,
-      time: p.dateTime ? Date.parse(p.dateTime) || undefined : undefined,
+      time,
       distanceM: typeof p.totalDistanceMeters === "number" ? p.totalDistanceMeters : 0,
       moving: p.pointStatus !== "STATIONARY",
     });
@@ -214,9 +248,20 @@ export function parseLiveTrackHtml(html: string, now = Date.now()): LiveSession 
     // hide a live ride — so only a demonstrably stale end counts.
     complete: Number.isFinite(endMs) && now - endMs > COMPLETE_AFTER_MS,
     points,
-    distanceM: points.length > 0 ? points[points.length - 1].distanceM : 0,
-    durationS: typeof last?.totalDurationSecs === "number" ? last.totalDurationSecs : 0,
+    // Garmin's totals are cumulative, so the largest is the running total even
+    // if the last point of a page happens not to carry it.
+    distanceM: Math.max(0, ...points.map((p) => p.distanceM)),
+    durationS: Math.max(
+      0,
+      ...parsed.map((p) => (typeof p.totalDurationSecs === "number" ? p.totalDurationSecs : 0)),
+    ),
     current: points.length > 0 ? points[points.length - 1] : null,
     updatedAt: last?.dateTime ?? null,
   };
+}
+
+/** Sort key for a raw point. Undated points keep their place at the front. */
+function timeOf(p: RawPoint): number {
+  const t = p.dateTime ? Date.parse(p.dateTime) : NaN;
+  return Number.isFinite(t) ? t : 0;
 }

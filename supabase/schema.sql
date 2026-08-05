@@ -192,6 +192,8 @@ alter table trips add column if not exists og_updated_at timestamptz;
 alter table trips add column if not exists archive_path text;
 alter table trips add column if not exists archived_at timestamptz;
 alter table invites add column if not exists expires_at timestamptz;
+-- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
+alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;
 -- Redemption compares against expires_at, and NULL never compares true, so give
 -- codes issued before expiry existed a deadline rather than breaking them.

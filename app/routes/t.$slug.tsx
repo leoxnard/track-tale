@@ -561,6 +561,12 @@ export function TripView({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // A ride in progress is drawn before any of it has been uploaded as a track,
+  // so day one of a trip has a live route and nothing else. Gating the map on
+  // finished days alone left that first ride with nowhere to appear.
+  const hasLiveTrack = (trip.live?.coords.length ?? 0) > 0;
+  const hasMap = trip.days.length > 0 || hasLiveTrack;
+
   const progressPct =
     trip.planKm > 0 ? Math.min(100, Math.round((trip.totalKm / trip.planKm) * 100)) : null;
 
@@ -637,7 +643,7 @@ export function TripView({
         {/* dvh, not vh: mobile Safari resolves vh against the viewport with the
             toolbars hidden, which made the map overhang the visible area. */}
         <div className="h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
-          {mounted && trip.days.length > 0 ? (
+          {mounted && hasMap ? (
             <TripMap
               days={trip.days}
               plan={trip.plan}
@@ -647,7 +653,7 @@ export function TripView({
             />
           ) : (
             <div className="flex h-full items-center justify-center text-faint">
-              {trip.days.length === 0 ? m.trip.notStarted : m.trip.loadingMap}
+              {hasMap ? m.trip.loadingMap : m.trip.notStarted}
             </div>
           )}
         </div>
@@ -655,7 +661,7 @@ export function TripView({
         {/* Stage ribbon: legend + navigation in one. Opaque rather than
             translucent — a backdrop-filter inside a sticky element makes Safari
             composite the map canvas through it. */}
-        {trip.days.length > 0 && (
+        {hasMap && (
           <nav className="border-b border-trail bg-paper">
             <div className="mx-auto flex max-w-5xl flex-wrap gap-2 px-4 py-2">
               <button
