@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { data, Form, useNavigation } from "react-router";
 import type { Route } from "./+types/t.$slug";
 
@@ -26,6 +26,7 @@ import { fetchLiveSession } from "../lib/livetrack.server";
 import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
+import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import {
   formatDayDate,
@@ -263,12 +264,15 @@ function TripMap({
   plan,
   live,
   handleRef,
+  onPhoto,
   m,
 }: {
   days: ViewerDay[];
   plan: TrackGeoJson[];
   live?: ViewerLive | null;
   handleRef: React.MutableRefObject<MapHandle | null>;
+  /** Open a photo marker in the lightbox instead of navigating to the file. */
+  onPhoto: (photo: ViewerPhoto) => void;
   m: Messages;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -335,11 +339,18 @@ function TripMap({
 
           for (const photo of day.photos) {
             if (photo.lat === null || photo.lng === null) continue;
+            // Still an anchor, so a middle-click or long-press offers the file
+            // the way any other link would — the plain click opens the viewer.
             const el = document.createElement("a");
             el.href = photo.url;
             el.target = "_blank";
             el.rel = "noreferrer";
             el.title = photo.caption ?? m.trip.photo;
+            el.addEventListener("click", (event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+              event.preventDefault();
+              onPhoto(photo);
+            });
             el.style.cssText = `display:block;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);background:url(${JSON.stringify(photo.thumbUrl)}) center/cover;`;
             new maplibregl.Marker({ element: el }).setLngLat([photo.lng, photo.lat]).addTo(map!);
           }
@@ -423,7 +434,7 @@ function TripMap({
       map?.remove();
       handleRef.current = null;
     };
-  }, [days, plan, live, handleRef, m]);
+  }, [days, plan, live, handleRef, onPhoto, m]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -567,6 +578,33 @@ export function TripView({
   const hasLiveTrack = (trip.live?.coords.length ?? 0) > 0;
   const hasMap = trip.days.length > 0 || hasLiveTrack;
 
+  // Every photo on the trip, in the order the page tells the story, so the
+  // viewer runs straight from one day into the next instead of stopping at the
+  // end of whichever gallery it was opened from.
+  const photos = useMemo<LightboxPhoto[]>(
+    () =>
+      trip.days.flatMap((day) =>
+        day.photos.map((photo) => ({
+          url: photo.url,
+          thumbUrl: photo.thumbUrl,
+          caption: photo.caption,
+          author: photo.author,
+          dayNumber: day.dayNumber,
+        })),
+      ),
+    [trip.days],
+  );
+  const [openPhoto, setOpenPhoto] = useState<number | null>(null);
+  // Markers carry the photo, not its place in the flat list; the URL is what
+  // the two sides have in common.
+  const openByUrl = useCallback(
+    (photo: { url: string }) => {
+      const at = photos.findIndex((p) => p.url === photo.url);
+      if (at !== -1) setOpenPhoto(at);
+    },
+    [photos],
+  );
+
   const progressPct =
     trip.planKm > 0 ? Math.min(100, Math.round((trip.totalKm / trip.planKm) * 100)) : null;
 
@@ -649,6 +687,7 @@ export function TripView({
               plan={trip.plan}
               live={trip.live}
               handleRef={mapHandle}
+              onPhoto={openByUrl}
               m={m}
             />
           ) : (
@@ -807,7 +846,15 @@ export function TripView({
                         href={photo.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="group relative block overflow-hidden rounded-lg bg-trail/50"
+                        aria-label={m.lightbox.open(day.dayNumber)}
+                        onClick={(e) => {
+                          // Leave the modified clicks alone: opening a photo in
+                          // a new tab is a thing people do, and the href is real.
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                          e.preventDefault();
+                          openByUrl(photo);
+                        }}
+                        className="group relative block cursor-zoom-in overflow-hidden rounded-lg bg-trail/50"
                       >
                         <img
                           src={photo.thumbUrl}
@@ -846,6 +893,14 @@ export function TripView({
           <LanguageSwitcher />
         </footer>
       </main>
+
+      <PhotoLightbox
+        photos={photos}
+        index={openPhoto}
+        onIndex={setOpenPhoto}
+        onClose={() => setOpenPhoto(null)}
+        showAuthors={trip.showAuthors}
+      />
     </div>
   );
 }

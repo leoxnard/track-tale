@@ -124,6 +124,16 @@ const en = {
     photo: "Photo",
     photoAlt: (day: number) => `Day ${day} photo`,
   },
+  lightbox: {
+    label: "Photos",
+    open: (day: number) => `Open day ${day} photo full size`,
+    close: "Close",
+    previous: "Previous photo",
+    next: "Next photo",
+    position: (n: number, total: number) => `${n} of ${total}`,
+    hint: "Arrow keys to browse, Esc to close",
+    openOriginal: "Open the original",
+  },
   guestbook: {
     yourName: "Your name",
     yourNameFor: (day: number) => `Your name, day ${day}`,
@@ -235,6 +245,16 @@ const de: Messages = {
     segments: (n: number) => `${n} Abschnitte`,
     photo: "Foto",
     photoAlt: (day: number) => `Foto von Tag ${day}`,
+  },
+  lightbox: {
+    label: "Fotos",
+    open: (day: number) => `Foto von Tag ${day} groß öffnen`,
+    close: "Schließen",
+    previous: "Vorheriges Foto",
+    next: "Nächstes Foto",
+    position: (n: number, total: number) => `${n} von ${total}`,
+    hint: "Pfeiltasten zum Blättern, Esc zum Schließen",
+    openOriginal: "Original öffnen",
   },
   guestbook: {
     yourName: "Dein Name",

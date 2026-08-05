@@ -1,5 +1,6 @@
 import { useCallback, useId, useMemo, useRef, useState } from "react";
-import { buildProfile, fromGeoJson, haversineM, type ProfilePoint, type TrackGeoJson } from "../lib/track";
+import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
+import { layDays, type TourDayInput } from "../lib/tour-layout";
 import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
@@ -12,12 +13,7 @@ const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
 
 const PLAN_COLOR = "#9aa59e";
 
-export interface TourDayInput {
-  dayNumber: number;
-  color: string;
-  distanceM: number;
-  profile: ProfilePoint[];
-}
+export type { TourDayInput };
 
 interface Props {
   /** Planned route, already on the page for the map — re-used here as the grey line. */
@@ -33,38 +29,12 @@ interface Props {
   onSelectDay?: (dayNumber: number) => void;
 }
 
-interface LaidDay extends TourDayInput {
-  startM: number;
-  endM: number;
-  points: ProfilePoint[];
-}
-
-/**
- * Past this, the nearest planned coordinate to a day's endpoint is too far away
- * to mean anything — a rest day in a city, or a plan that was abandoned.
- */
-const MAX_ANCHOR_GAP_M = 25_000;
-
 /** Round tick spacing that lands on a value people read without thinking. */
 const TICK_STEPS = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
 
 function tickStep(range: number): number {
   const target = range / 4;
   return TICK_STEPS.find((s) => s >= target) ?? TICK_STEPS[TICK_STEPS.length - 1];
-}
-
-/**
- * Fractions along a day's own profile used to anchor it to the plan.
- * Deliberately excludes 0 and 1: the start and end of a day are often off
- * the planned route (a bed for the night rarely sits on the tour line),
- * while the middle of the day is usually still on it.
- */
-const ANCHOR_FRACTIONS = [0.25, 0.5, 0.75];
-
-function median(nums: number[]): number {
-  const sorted = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /**
@@ -95,62 +65,12 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         ? planPoints.map((p) => ({ ...p, d: (p.d / planSpan) * planM }))
         : [];
 
-    /** How far along the plan the nearest planned point to this coordinate sits. */
-    const anchorOf = (p: ProfilePoint): { d: number; gap: number } | null => {
-      if (planLine.length === 0) return null;
-      let best = planLine[0];
-      let bestGap = Infinity;
-      for (const q of planLine) {
-        const gap = haversineM(q, p);
-        if (gap < bestGap) {
-          bestGap = gap;
-          best = q;
-        }
-      }
-      return { d: best.d, gap: bestGap };
-    };
+    // Anchoring reads the plan's raw geometry rather than the grey line above,
+    // which is thinned to 600 points for drawing and drops any coordinate that
+    // carries no elevation. Neither loss is acceptable for matching: it is what
+    // decides where a whole day sits.
+    const { laid, riddenM, reachedM } = layDays(plan.flatMap(fromGeoJson), planM, days);
 
-    // Each day is pinned to where it actually ran along the plan rather than
-    // stacked behind the day before it, so one detour or shortcut no longer
-    // shifts every following day. The day keeps its own length, and it's
-    // anchored from a few points partway through it — the median of their
-    // offsets positions it. Days may then overlap or leave a gap, which is
-    // exactly the shortcut or detour showing up.
-    const laid: LaidDay[] = [];
-    let cursor = 0;
-    let riddenM = 0;
-    for (const day of days) {
-      const span = day.profile[day.profile.length - 1]?.d ?? 0;
-      const width = day.distanceM > 0 ? day.distanceM : span;
-      riddenM += width;
-      if (day.profile.length < 2 || width <= 0) {
-        cursor += width;
-        continue;
-      }
-
-      const offsets: number[] = [];
-      for (const f of ANCHOR_FRACTIONS) {
-        const idx = Math.round(f * (day.profile.length - 1));
-        const p = day.profile[idx];
-        const anchor = anchorOf(p);
-        if (anchor && anchor.gap < MAX_ANCHOR_GAP_M) offsets.push(anchor.d - p.d);
-      }
-      // A day that never came near the plan can't be anchored to it; fall back
-      // to sitting behind the previous day.
-      const startM = offsets.length > 0 ? Math.max(0, median(offsets)) : cursor;
-
-      laid.push({
-        ...day,
-        startM,
-        endM: startM + width,
-        points: day.profile.map((p) => ({ ...p, d: startM + (p.d / (span || 1)) * width })),
-      });
-      cursor = startM + width;
-    }
-
-    // The furthest point reached along the plan, which with anchoring is not the
-    // same as the total distance ridden.
-    const reachedM = laid.reduce((m, d) => Math.max(m, d.endM), 0);
     const totalM = Math.max(planM, reachedM, 1);
 
     const es = [...planLine.map((p) => p.e), ...laid.flatMap((d) => d.points.map((p) => p.e))];

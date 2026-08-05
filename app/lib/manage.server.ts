@@ -200,6 +200,82 @@ export async function dayView(trip: DbTrip, dayNumber: number, page: number): Pr
   };
 }
 
+export interface DayTally {
+  notes: number;
+  photos: number;
+  tracks: number;
+  /** Left alone by a clear: the family wrote these, not the traveller. */
+  comments: number;
+}
+
+export function tallyTotal(tally: DayTally): number {
+  return tally.notes + tally.photos + tally.tracks;
+}
+
+/** What `/clearday` would take off a day, without taking it off. */
+export async function dayTally(trip: DbTrip, dayNumber: number): Promise<DayTally | null> {
+  const contents = await loadDayContents(trip, dayNumber);
+  if (!contents) return null;
+  const count = (kind: ItemKind) => contents.items.filter((i) => i.kind === kind).length;
+  return {
+    notes: count("note"),
+    photos: count("media"),
+    tracks: count("track_segment"),
+    comments: count("comment"),
+  };
+}
+
+/**
+ * Empty a day: every note, photo and track on it, in one go.
+ *
+ * Deleting a day's worth of items one button at a time is the wrong tool for
+ * re-doing a day that was uploaded against the wrong day number, or built up
+ * from files that turned out to be the wrong ones.
+ *
+ * Guestbook messages are deliberately left: they are the family's, not the
+ * traveller's, and nothing about a re-upload makes them wrong. The day row
+ * stays too, so the same day number keeps its date and colour when the
+ * replacement lands on it.
+ */
+export async function clearDay(trip: DbTrip, dayNumber: number): Promise<DayTally | null> {
+  const { data: day } = await supabase()
+    .from("days")
+    .select("id")
+    .eq("trip_id", trip.id)
+    .eq("day_number", dayNumber)
+    .maybeSingle();
+  if (!day) return null;
+
+  const tally = await dayTally(trip, dayNumber);
+
+  // Blobs before rows, so nothing is ever orphaned in the bucket with no row
+  // left to name it.
+  const { data: media } = await supabase()
+    .from("media")
+    .select("id, storage_path, thumb_path")
+    .eq("day_id", day.id);
+  const paths = (media ?? []).flatMap((m) =>
+    [m.storage_path, m.thumb_path].filter(Boolean),
+  ) as string[];
+  if (paths.length > 0) await supabase().storage.from("photos").remove(paths);
+
+  const ids: string[] = (media ?? []).map((m) => m.id);
+  for (const table of ["media", "notes", "track_segments"] as const) {
+    const { data: removed, error } = await supabase()
+      .from(table)
+      .delete()
+      .eq("day_id", day.id)
+      .select("id");
+    if (error) throw error;
+    for (const row of removed ?? []) if (!ids.includes(row.id)) ids.push(row.id);
+  }
+
+  // The confirmations in the chat now point at nothing.
+  if (ids.length > 0) await supabase().from("bot_actions").delete().in("entity_id", ids);
+
+  return tally;
+}
+
 /**
  * Is this id really one of the things listed on this trip's day?
  *

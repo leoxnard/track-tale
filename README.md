@@ -77,6 +77,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/note …` | journal entry (plain text works too) |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
+| `/clearday 3` | empty a whole day: every note, photo and track on it |
 | `/live` | what the live banner is showing, and why; `/live off` takes it down |
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
 | `/archive` | download the trip as a self-contained bundle |
@@ -91,6 +92,9 @@ traveller who created the trip, so a busy group chat cannot rewrite someone else
 chat, so they only reach things added recently. `/manage` walks the trip itself — a day
 picker, then that day's contents as buttons, then a confirmation — so a photo from last week
 is as removable as one from a minute ago. Deleting a photo takes its files out of storage too.
+`/clearday 3` empties a whole day in one go, for a day uploaded against the wrong day number
+or built from the wrong files; it asks for a confirmation first and leaves the family's
+guestbook messages alone.
 
 ## Friends
 

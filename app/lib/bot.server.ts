@@ -40,7 +40,16 @@ import { buildArchive } from "./archive.server";
 import { escapeErr, escapeMd, slugId } from "./telegram-md";
 import { deleteEntity, ENTITY_LABEL, type EntityType } from "./entities.server";
 import { parseAction } from "./manage";
-import { applyDelete, confirmView, dayView, overview, type View } from "./manage.server";
+import {
+  applyDelete,
+  clearDay,
+  confirmView,
+  dayTally,
+  dayView,
+  overview,
+  tallyTotal,
+  type View,
+} from "./manage.server";
 
 /**
  * Remember which row a confirmation message created, so replying /delete to it
@@ -129,6 +138,7 @@ const HELP = `🚴 *TrackTale* — your trip journal
 Reply /delete to one of my messages — removes that one
 /manage — browse the trip and delete anything on it, however old: notes,
 photos, tracks, and guestbook messages the family left
+/clearday 3 — empty a whole day: every note, photo and track on it
 
 *Live*
 🔴 Paste a Garmin LiveTrack link → live banner for 24h
@@ -645,6 +655,61 @@ export function createBot(): Bot {
     }
     await deleteEntity(action.entity_type as EntityType, action.entity_id);
     await ctx.reply(`↩️ ${ENTITY_LABEL[action.entity_type as EntityType]} removed.`);
+  });
+
+  /**
+   * Empty a whole day at once — the tool for a day uploaded against the wrong
+   * day number, or built from the wrong files. Two steps, because it takes off
+   * more in one command than anything else the bot does short of /deletetrip.
+   */
+  bot.command("clearday", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const parts = (ctx.match as string).trim().split(/\s+/).filter(Boolean);
+    const n = parseInt(parts[0] ?? "", 10);
+    const max = tripDayCount(trip);
+    if (!Number.isInteger(n) || n < 1 || n > max) {
+      await ctx.reply(`Usage: /clearday <${dayRange(max)}> — empties that day.`);
+      return;
+    }
+
+    const tally = await dayTally(trip, n);
+    if (!tally || tallyTotal(tally) === 0) {
+      await ctx.reply(`Day ${n} has nothing on it.`);
+      return;
+    }
+
+    const what = [
+      tally.tracks > 0 ? `${tally.tracks} track(s)` : null,
+      tally.photos > 0 ? `${tally.photos} photo(s)` : null,
+      tally.notes > 0 ? `${tally.notes} note(s)` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    if (parts[1]?.toLowerCase() !== "confirm") {
+      await ctx.reply(
+        `Day ${n} holds ${what}. Clearing takes all of it off for good, photos and all.\n\n` +
+          (tally.comments > 0
+            ? `The ${tally.comments} guestbook message(s) stay — /manage removes those one at a time.\n\n`
+            : "") +
+          `Confirm with:\n/clearday ${n} confirm`,
+      );
+      return;
+    }
+
+    await ctx.reply("🗑️ Clearing…").catch(() => {});
+    try {
+      await clearDay(trip, n);
+      await ctx.reply(`🗑️ Day ${n} is empty — ${what} removed. Send /day ${n} to start it again.`);
+      // The day's distance was part of what the share card showed.
+      await renderOgCard(trip.id).catch(() => {});
+    } catch (err) {
+      await ctx.reply(
+        `⚠️ Clearing day ${n} failed: ${err instanceof Error ? err.message : "unknown error"}.`,
+      );
+    }
   });
 
   // Browsing the trip to delete something older than the chat's scrollback.
