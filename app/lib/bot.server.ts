@@ -484,8 +484,27 @@ export function createBot(): Bot {
   const bot = new Bot(env.telegramBotToken);
 
   bot.use(async (ctx, next) => {
-    const state = await authorize(ctx);
-    if (!state) return;
+    let state: BotState | null;
+    try {
+      state = await authorize(ctx);
+    } catch (err) {
+      // Looking the sender up is itself a database call, and a button tap is
+      // waiting on an answer from the moment it is made. Letting this throw
+      // past grammy left Telegram's "Loading…" bar running over the chat with
+      // nothing to explain it — the one failure mode with no visible trace.
+      console.error("could not authorize update", err);
+      if (ctx.callbackQuery) {
+        await ctx.answerCallbackQuery("Database unreachable — try again.").catch(() => {});
+      }
+      return;
+    }
+
+    if (!state) {
+      // Staying quiet is right for a message from a chat we do not serve, but
+      // a refusal still has to end the bar — just not out loud.
+      if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
+      return;
+    }
     ctx.state = state;
     await next();
   });
@@ -725,26 +744,37 @@ export function createBot(): Bot {
   });
 
   bot.on("callback_query:data", async (ctx) => {
+    // Answer before anything else.
+    //
+    // Telegram lays a "Loading…" bar over the whole chat from the moment a
+    // button is tapped until this call lands, and gives up on its own after a
+    // while. Every screen below costs a database round trip or three, and the
+    // delete paths cost more — so the answer used to be spending that budget
+    // before saying a word, and anything that threw on the way left the bar
+    // running with nothing to show for it.
+    //
+    // Nothing about the acknowledgement depends on the work succeeding, so it
+    // goes first and failures get a visible home instead: a message in the
+    // chat, which is also the only place the traveller can see them when the
+    // server is somewhere they are not.
+    await ctx.answerCallbackQuery().catch(() => {});
+
     const action = parseAction(ctx.callbackQuery.data);
     if (!action) {
       // A button from a deploy ago, or from a message older than the trip it
-      // belonged to. Clearing the spinner is all we owe it.
-      await ctx.answerCallbackQuery("That button is out of date — send /manage again.");
-      return;
-    }
-
-    const trip = await getActiveTrip(ctx.state.chat);
-    if (!trip) {
-      await ctx.answerCallbackQuery("No active trip in this chat any more.");
+      // belonged to.
+      await ctx.reply("That button is out of date — send /manage again.").catch(() => {});
       return;
     }
 
     try {
-      let view: View | null = null;
-      // Shown as the little toast above the keyboard, when there is anything
-      // worth saying that the redrawn screen doesn't already say by itself.
-      let notice: string | undefined;
+      const trip = await getActiveTrip(ctx.state.chat);
+      if (!trip) {
+        await ctx.reply("No active trip in this chat any more — /trips lists them.");
+        return;
+      }
 
+      let view: View | null = null;
       switch (action.type) {
         case "home":
           view = await overview(trip);
@@ -764,18 +794,24 @@ export function createBot(): Bot {
           break;
       }
 
-      // Both item screens return null for something that has already gone —
-      // a double tap, or two people tidying up at once. Fall back to the day.
+      // Both item screens return null for something that has already gone — a
+      // double tap, or two people tidying up at once. Fall back to the day, and
+      // say why in the message: the toast is spent by now.
+      let notice = "";
       if (!view) {
-        notice = "That one is already gone.";
+        notice = "That one is already gone.\n\n";
         view = await dayView(trip, "dayNumber" in action ? action.dayNumber : 0, 0);
       }
 
-      await ctx.answerCallbackQuery(notice);
-      await editView(ctx, view);
+      await editView(ctx, { ...view, text: notice + view.text });
     } catch (err) {
       console.error("manage callback failed", err);
-      await ctx.answerCallbackQuery("Something went wrong — nothing was changed.");
+      await ctx
+        .reply(
+          `⚠️ That didn't work: ${err instanceof Error ? err.message : "unknown error"}\n\n` +
+            `Nothing was changed. /manage starts again.`,
+        )
+        .catch(() => {});
     }
   });
 
