@@ -491,6 +491,22 @@ function DayGuestbook({
   const [open, setOpen] = useState(false);
   const showForm = open || comments.length > 0 || result !== undefined;
 
+  // The name is worth keeping — the same visitor usually writes again — but the
+  // message has already been said, so a posted one must not linger in the box
+  // where it looks unsent and invites a double post.
+  const [text, setText] = useState("");
+  const textRef = useRef<HTMLInputElement | null>(null);
+  const [justSent, setJustSent] = useState(false);
+  useEffect(() => {
+    if (!result?.ok) {
+      if (result) setJustSent(false);
+      return;
+    }
+    setText("");
+    setJustSent(true);
+    textRef.current?.focus();
+  }, [result]);
+
   return (
     <section className="mt-5">
       {comments.length > 0 && (
@@ -519,9 +535,15 @@ function DayGuestbook({
             className="rounded-lg border border-trail bg-paper px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-pine sm:w-40"
           />
           <input
+            ref={textRef}
             name="text"
             required
             maxLength={800}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setJustSent(false);
+            }}
             placeholder={m.guestbook.messagePlaceholder(dayNumber)}
             aria-label={m.guestbook.messageFor(dayNumber)}
             className="flex-1 rounded-lg border border-trail bg-paper px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-pine"
@@ -544,7 +566,12 @@ function DayGuestbook({
       )}
 
       {result?.error && <p className="mt-2 text-sm text-live">{result.error}</p>}
-      {result?.ok && <p className="mt-2 text-sm text-pine-soft">{m.guestbook.sent}</p>}
+      {justSent && (
+        <p role="status" className="mt-2 flex items-center gap-1.5 text-sm font-bold text-pine-soft">
+          <span aria-hidden="true">✓</span>
+          {m.guestbook.sent}
+        </p>
+      )}
     </section>
   );
 }
