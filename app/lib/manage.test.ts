@@ -13,6 +13,7 @@ describe("manage callback payloads", () => {
   const uuid = "3f1b8c2e-4d5a-4b7c-9e0f-1a2b3c4d5e6f";
   const actions: ManageAction[] = [
     { type: "home" },
+    { type: "ping" },
     { type: "day", dayNumber: 7, page: 0 },
     { type: "day", dayNumber: 12, page: 3 },
     { type: "ask", kind: "media", id: uuid, dayNumber: 4 },

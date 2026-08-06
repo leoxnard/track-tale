@@ -42,8 +42,13 @@ notes, stats and weather.
    ```sh
    curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
      -d "url=$APP_ORIGIN/api/telegram" \
-     -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+     -d "secret_token=$TELEGRAM_WEBHOOK_SECRET" \
+     -d 'allowed_updates=["message","edited_message","callback_query","my_chat_member"]'
    ```
+   `callback_query` is what carries a tap on one of the bot's buttons. Leave it out of
+   an explicit `allowed_updates` and the `/manage` keyboard hangs on "Loading…" forever
+   while ordinary messages keep working. `/diag` in the chat says what Telegram is
+   actually delivering, and `/diag fix` re-registers the webhook with the list above.
 5. **Vercel**: deploy; set the env vars; `vercel.json` schedules the daily cron (01:00 UTC —
    the reminder + plan refresh + live-link expiry).
 
