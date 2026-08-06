@@ -56,6 +56,13 @@ export const PAGE_SIZE = 12;
 
 export type ManageAction =
   | { type: "home" }
+  /**
+   * Not a screen: the self-test button `/diag` hands out. A tap that never
+   * arrives looks exactly like a tap the bot mishandled — Telegram's spinner
+   * and nothing else — and this is the one payload whose handling touches no
+   * trip, no day and no database, so an answer means delivery works.
+   */
+  | { type: "ping" }
   | { type: "day"; dayNumber: number; page: number }
   /** Selected, awaiting the second tap — deleting is not undoable. */
   | { type: "ask"; kind: ItemKind; id: string; dayNumber: number }
@@ -67,6 +74,8 @@ export function encodeAction(action: ManageAction): string {
   switch (action.type) {
     case "home":
       return `${PREFIX}:h`;
+    case "ping":
+      return `${PREFIX}:k`;
     case "day":
       return `${PREFIX}:d:${action.dayNumber}:${action.page}`;
     case "ask":
@@ -87,6 +96,8 @@ export function parseAction(data: string): ManageAction | null {
   switch (parts[1]) {
     case "h":
       return { type: "home" };
+    case "k":
+      return { type: "ping" };
     case "d": {
       const dayNumber = Number(parts[2]);
       const page = Number(parts[3]);

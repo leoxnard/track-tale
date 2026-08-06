@@ -1,4 +1,4 @@
-import { Bot, InputFile, type Context } from "grammy";
+import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { env } from "./env.server";
 import { supabase } from "./supabase.server";
@@ -39,7 +39,7 @@ import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
 import { escapeErr, escapeMd, slugId } from "./telegram-md";
 import { deleteEntity, ENTITY_LABEL, type EntityType } from "./entities.server";
-import { parseAction } from "./manage";
+import { encodeAction, parseAction } from "./manage";
 import {
   applyDelete,
   clearDay,
@@ -86,6 +86,16 @@ async function sendView(ctx: Context, view: View) {
   });
 }
 
+/**
+ * Swap the current screen for the next one, and never fail silently.
+ *
+ * A tapped button that produces no visible change at all is the worst outcome
+ * here: the traveller cannot tell a broken bot from a slow one. So the screen
+ * gets three chances — edited in place, sent as a new message, then sent again
+ * with the formatting stripped, since an unbalanced `_` or `*` in a note the
+ * screen quotes is enough for Telegram to reject the same text twice — and if
+ * none of them land, the reason itself goes into the chat.
+ */
 async function editView(ctx: Context, view: View) {
   try {
     await ctx.editMessageText(view.text, {
@@ -93,12 +103,52 @@ async function editView(ctx: Context, view: View) {
       ...(view.markdown ? { parse_mode: "Markdown" as const } : {}),
       link_preview_options: { is_disabled: !view.preview },
     });
+    return;
   } catch {
     // The message is too old to edit, or nothing about it changed. Either way
     // the traveller still needs to see the screen they asked for.
-    await sendView(ctx, view).catch(() => {});
+  }
+
+  try {
+    await sendView(ctx, view);
+    return;
+  } catch (err) {
+    if (!view.markdown) {
+      await reportViewFailure(ctx, err);
+      return;
+    }
+  }
+
+  try {
+    await sendView(ctx, { ...view, markdown: false });
+  } catch (err) {
+    await reportViewFailure(ctx, err);
   }
 }
+
+async function reportViewFailure(ctx: Context, err: unknown) {
+  console.error("could not show a /manage screen", err);
+  await ctx
+    .reply(
+      `⚠️ I couldn't show that screen: ${err instanceof Error ? err.message : "unknown error"}\n\n` +
+        `Nothing was changed. /manage starts again.`,
+      { link_preview_options: { is_disabled: true } },
+    )
+    .catch(() => {});
+}
+
+/**
+ * What the webhook must be subscribed to. Telegram's own default is wider than
+ * this, but a webhook registered with an explicit list keeps whatever list it
+ * was given — including one that forgot `callback_query` and so drops every
+ * button tap in silence.
+ */
+const WEBHOOK_UPDATES = [
+  "message",
+  "edited_message",
+  "callback_query",
+  "my_chat_member",
+] as const;
 
 interface BotState {
   chat: DbChat;
@@ -160,6 +210,7 @@ photos, tracks, and guestbook messages the family left
 /archive — download this trip as a self-contained file
 
 /invite — invite code for a friend (valid 7 days)
+/diag — buttons not responding? this says whether Telegram is delivering taps
 
 _Add me to a group and everyone travelling can contribute — photos and notes are credited by name._
 _Invited friends run their own trips in their own chats — you don't need to be there._`;
@@ -743,6 +794,83 @@ export function createBot(): Bot {
     await sendView(ctx, await overview(trip));
   });
 
+  /**
+   * Why a button tap did nothing.
+   *
+   * Everything the bot can say about a tap it never received is nothing, so
+   * when the buttons hang there is no way to tell a broken screen from an
+   * update Telegram is not sending us at all. This asks Telegram instead:
+   * what it is delivering, what it has been failing to deliver, and how far
+   * behind it is. The button underneath closes the loop from the other end.
+   *
+   * `allowed_updates` is the usual culprit. Set once without `callback_query`
+   * — by hand, or by a setWebhook call that listed only what it needed at the
+   * time — and taps are dropped before they ever leave Telegram, while
+   * messages keep working and hide it.
+   */
+  bot.command("diag", async (ctx) => {
+    if (!ctx.state.isOwner) {
+      await ctx.reply("Only the owner can run /diag.");
+      return;
+    }
+
+    let info;
+    try {
+      info = await ctx.api.getWebhookInfo();
+    } catch (err) {
+      await ctx.reply(
+        `⚠️ Telegram wouldn't say: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+      return;
+    }
+
+    const wanted = `${env.appOrigin}/api/telegram`;
+    const allowed = info.allowed_updates;
+    const tapsDelivered = !allowed || allowed.includes("callback_query");
+
+    if ((ctx.match as string).trim().toLowerCase() === "fix") {
+      try {
+        await ctx.api.setWebhook(info.url || wanted, {
+          secret_token: env.telegramWebhookSecret,
+          allowed_updates: WEBHOOK_UPDATES,
+        });
+      } catch (err) {
+        await ctx.reply(
+          `⚠️ Re-registering failed: ${err instanceof Error ? err.message : "unknown error"}`,
+        );
+        return;
+      }
+      await ctx.reply(
+        `🔧 Webhook re-registered at ${info.url || wanted}, now delivering: ${WEBHOOK_UPDATES.join(", ")}.\n\n` +
+          `Send /manage and tap a day — it should answer this time.`,
+      );
+      return;
+    }
+
+    const lines = [
+      "🩺 Webhook",
+      `URL: ${info.url || "(none — Telegram is sending nothing anywhere)"}`,
+      info.url && info.url !== wanted ? `⚠️ This deploy expects ${wanted}` : null,
+      `Delivers: ${allowed ? allowed.join(", ") : "everything (Telegram's default)"}`,
+      tapsDelivered
+        ? "Button taps: delivered ✅"
+        : "Button taps: NOT delivered ❌ — that is why /manage buttons hang. Send /diag fix.",
+      `Waiting to be delivered: ${info.pending_update_count}`,
+      info.last_error_message
+        ? `Last delivery error (${new Date((info.last_error_date ?? 0) * 1000).toISOString()}): ${info.last_error_message}`
+        : "No delivery errors on record.",
+      "",
+      "Tap the button below: if nothing happens, taps are not getting here.",
+    ].filter((line): line is string => line !== null);
+
+    // Plain text on purpose — a URL or a Telegram error message is not
+    // something to hand to a Markdown parser that can refuse the whole thing.
+    await ctx.reply(lines.join("\n"), {
+      reply_markup: new InlineKeyboard().text("🔔 Test a button tap", encodeAction({ type: "ping" })),
+      link_preview_options: { is_disabled: true },
+    });
+  });
+
   bot.on("callback_query:data", async (ctx) => {
     // Answer before anything else.
     //
@@ -757,6 +885,7 @@ export function createBot(): Bot {
     // goes first and failures get a visible home instead: a message in the
     // chat, which is also the only place the traveller can see them when the
     // server is somewhere they are not.
+    const tappedAt = Date.now();
     await ctx.answerCallbackQuery().catch(() => {});
 
     const action = parseAction(ctx.callbackQuery.data);
@@ -764,6 +893,20 @@ export function createBot(): Bot {
       // A button from a deploy ago, or from a message older than the trip it
       // belonged to.
       await ctx.reply("That button is out of date — send /manage again.").catch(() => {});
+      return;
+    }
+
+    // The self-test from /diag, answered before anything that could fail: it
+    // exists to say "the tap got here", so it must not depend on a trip, a day
+    // or a single database read.
+    if (action.type === "ping") {
+      await ctx
+        .reply(
+          `✅ Button taps reach the bot — answered in ${Date.now() - tappedAt} ms.\n\n` +
+            `So if a /manage button leaves the chat loading, the tap is not being ` +
+            `delivered at all. /diag says what Telegram thinks of the webhook.`,
+        )
+        .catch(() => {});
       return;
     }
 
