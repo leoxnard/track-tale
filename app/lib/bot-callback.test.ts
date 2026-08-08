@@ -269,3 +269,86 @@ describe("/diag", () => {
     expect(apiPayloads.some((c) => c.method === "getWebhookInfo")).toBe(false);
   });
 });
+
+/**
+ * The half of the fault no amount of handler code could reach.
+ *
+ * `allowed_updates` lives on Telegram's side and outlives every deploy, so a
+ * webhook registered before the `/manage` keyboard existed goes on delivering
+ * messages while dropping taps — and the bot cannot tell, because a dropped tap
+ * arrives as nothing at all. Repairing it has to happen without anyone knowing
+ * to ask for it, and it has to stop once it has, or every cold start writes to
+ * Telegram again.
+ */
+describe("keeping the webhook subscribed to taps", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    deadTable = null;
+    apiResults = {};
+    apiPayloads = [];
+    rows = {};
+  });
+
+  async function check(info: Record<string, unknown>) {
+    const { createBot, ensureTapsDelivered } = await import("./bot.server");
+    const bot = createBot();
+    bot.api.config.use(async (_prev, method, payload) => {
+      apiPayloads.push({ method, payload: payload as Record<string, unknown> });
+      return { ok: true, result: apiResults[method] ?? true } as never;
+    });
+    apiResults.getWebhookInfo = info;
+    return ensureTapsDelivered(bot);
+  }
+
+  const sent = (method: string) => apiPayloads.find((c) => c.method === method)?.payload;
+
+  it("re-subscribes a webhook that was never asked for button taps", async () => {
+    const result = await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 0,
+      allowed_updates: ["message", "edited_message"],
+    });
+
+    expect(result).toBe("repaired");
+    expect(sent("setWebhook")?.allowed_updates).toContain("callback_query");
+    // Telegram's URL, not one rebuilt from this deploy's env — the webhook may
+    // well point at a different deployment than the one running this check.
+    expect(sent("setWebhook")?.url).toBe("https://tracktale.example/api/telegram");
+  });
+
+  it("says so in the chat, since the fault itself was silent", async () => {
+    await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 0,
+      allowed_updates: ["message"],
+    });
+
+    expect(String(sent("sendMessage")?.text ?? "")).toContain("/manage");
+    expect(sent("sendMessage")?.chat_id).toBe(42);
+  });
+
+  it("leaves Telegram's own default alone", async () => {
+    // No allowed_updates means everything bar the chat-member types, taps
+    // included. Rewriting that would be a change for its own sake.
+    const result = await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 3,
+    });
+
+    expect(result).toBe("ok");
+    expect(apiPayloads.some((c) => c.method === "setWebhook")).toBe(false);
+  });
+
+  it("leaves a subscription that already covers everything alone", async () => {
+    // The state a repair leaves behind: it has to read as fine on the next cold
+    // start, or every one of them writes to Telegram again.
+    const result = await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 0,
+      allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member"],
+    });
+
+    expect(result).toBe("ok");
+    expect(apiPayloads.some((c) => c.method === "setWebhook")).toBe(false);
+  });
+});

@@ -150,6 +150,56 @@ const WEBHOOK_UPDATES = [
   "my_chat_member",
 ] as const;
 
+/**
+ * Make sure Telegram is actually sending us button taps, and put it right if
+ * not.
+ *
+ * The subscription lives on Telegram's side, not in this repository: it is
+ * whatever the last `setWebhook` call said, months ago, from a shell. Nothing a
+ * deploy does can change it. So a webhook registered with an `allowed_updates`
+ * list that predates the `/manage` keyboard keeps delivering messages happily
+ * while dropping every tap before it leaves Telegram — and no amount of fixing
+ * the handler helps, because the handler is never reached. That is invisible
+ * from the chat, and it survives exactly the kind of "fixed it, still broken"
+ * loop that costs an afternoon.
+ *
+ * `/diag fix` says the same thing out loud, but it has to be run by the owner
+ * who already knows to suspect this. Doing it here means the deploy that ships
+ * a new kind of update also subscribes to it.
+ *
+ * A missing `allowed_updates` is Telegram's default, which already includes
+ * everything we want — so it is left alone, and this only ever writes when the
+ * list is present and short. That makes it converge after one call rather than
+ * re-registering on every cold start.
+ */
+export async function ensureTapsDelivered(bot: Bot): Promise<"ok" | "repaired"> {
+  const info = await bot.api.getWebhookInfo();
+  const allowed = info.allowed_updates;
+  if (!allowed || WEBHOOK_UPDATES.every((u) => allowed.includes(u))) return "ok";
+
+  // The URL Telegram already has, not one built from an env var: this deploy is
+  // not necessarily the one the webhook points at, and pointing it here would
+  // be a much bigger change than the one being made.
+  await bot.api.setWebhook(info.url || `${env.appOrigin}/api/telegram`, {
+    secret_token: env.telegramWebhookSecret,
+    allowed_updates: [...WEBHOOK_UPDATES],
+  });
+
+  // Say so, or the repair is as invisible as the fault was. The owner is the
+  // one who has been tapping buttons that did nothing.
+  await bot.api
+    .sendMessage(
+      env.ownerTelegramId,
+      `🔧 Telegram was only delivering: ${allowed.join(", ")}.\n\n` +
+        `Button taps were being dropped before they reached the bot, which is why ` +
+        `/manage buttons hung on "Loading…". Fixed — it now delivers ` +
+        `${WEBHOOK_UPDATES.join(", ")}.\n\nSend /manage and tap a day.`,
+    )
+    .catch(() => {});
+
+  return "repaired";
+}
+
 interface BotState {
   chat: DbChat;
   senderId: number;

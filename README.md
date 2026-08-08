@@ -47,8 +47,14 @@ notes, stats and weather.
    ```
    `callback_query` is what carries a tap on one of the bot's buttons. Leave it out of
    an explicit `allowed_updates` and the `/manage` keyboard hangs on "Loading…" forever
-   while ordinary messages keep working. `/diag` in the chat says what Telegram is
-   actually delivering, and `/diag fix` re-registers the webhook with the list above.
+   while ordinary messages keep working — the handler is never reached, so no amount of
+   fixing it helps.
+
+   That subscription lives on Telegram's side and no deploy can change it, so the bot
+   checks it itself: once per cold start and again in the nightly cron, it asks Telegram
+   what it is delivering and re-registers with the list above if button taps are missing,
+   telling the owner in the chat when it did. `/diag` reports the same thing on demand,
+   and `/diag fix` forces the re-registration.
 5. **Vercel**: deploy; set the env vars; `vercel.json` schedules the daily cron (01:00 UTC —
    the reminder + plan refresh + live-link expiry).
 

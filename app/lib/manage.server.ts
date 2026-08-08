@@ -46,11 +46,12 @@ interface DayRow {
 
 /** Days that hold something, newest day last — the order the trip happened in. */
 async function loadDays(tripId: string): Promise<DayRow[]> {
-  const { data } = await supabase()
+  const { data, error } = await supabase()
     .from("days")
     .select("id, day_number, date, notes(id), media(id), track_segments(id), comments(id)")
     .eq("trip_id", tripId)
     .order("day_number");
+  if (error) throw new Error(`could not load the trip's days: ${error.message}`);
 
   return ((data ?? []) as DayRow[]).filter(
     (d) => d.notes.length + d.media.length + d.track_segments.length + d.comments.length > 0,
@@ -102,7 +103,7 @@ interface DayContents {
 }
 
 async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayContents | null> {
-  const { data: day } = await supabase()
+  const { data: day, error } = await supabase()
     .from("days")
     .select(
       "id, date, notes(id, text, created_at), media(id, caption, telegram_date), track_segments(id, name, distance_m, sport, started_at, created_at), comments(id, author_name, text, created_at)",
@@ -110,6 +111,10 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
     .eq("trip_id", trip.id)
     .eq("day_number", dayNumber)
     .maybeSingle();
+  // Not the same as a day that isn't there. A refused query used to fall
+  // through to "Day N is empty now." — a wrong answer, delivered confidently,
+  // that looks from the chat exactly like the button doing nothing.
+  if (error) throw new Error(`could not load day ${dayNumber}: ${error.message}`);
   if (!day) return null;
 
   const d = day as unknown as {
