@@ -66,7 +66,18 @@ export type ManageAction =
   | { type: "day"; dayNumber: number; page: number }
   /** Selected, awaiting the second tap — deleting is not undoable. */
   | { type: "ask"; kind: ItemKind; id: string; dayNumber: number }
-  | { type: "confirm"; kind: ItemKind; id: string; dayNumber: number };
+  | { type: "confirm"; kind: ItemKind; id: string; dayNumber: number }
+  /**
+   * The `/replace` browser. Same two screens as above, but photos only and
+   * with no confirmation step: swapping the file behind a photo keeps the
+   * caption, the map pin and the place in the day, so a wrong tap costs
+   * another tap rather than something that cannot be got back.
+   */
+  | { type: "replaceHome" }
+  | { type: "replaceDay"; dayNumber: number; page: number }
+  /** Picked. From here the bot is waiting for the next photo in the chat. */
+  | { type: "replacePick"; id: string; dayNumber: number }
+  | { type: "replaceCancel"; dayNumber: number };
 
 const PREFIX = "mg";
 
@@ -82,6 +93,14 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:a:${KIND_CODE[action.kind]}:${action.dayNumber}:${action.id}`;
     case "confirm":
       return `${PREFIX}:y:${KIND_CODE[action.kind]}:${action.dayNumber}:${action.id}`;
+    case "replaceHome":
+      return `${PREFIX}:rh`;
+    case "replaceDay":
+      return `${PREFIX}:rd:${action.dayNumber}:${action.page}`;
+    case "replacePick":
+      return `${PREFIX}:rp:${action.dayNumber}:${action.id}`;
+    case "replaceCancel":
+      return `${PREFIX}:rx:${action.dayNumber}`;
   }
 }
 
@@ -112,6 +131,25 @@ export function parseAction(data: string): ManageAction | null {
       const id = parts.slice(4).join(":");
       if (!kind || !Number.isInteger(dayNumber) || id.length === 0) return null;
       return { type: parts[1] === "a" ? "ask" : "confirm", kind, id, dayNumber };
+    }
+    case "rh":
+      return { type: "replaceHome" };
+    case "rd": {
+      const dayNumber = Number(parts[2]);
+      const page = Number(parts[3]);
+      if (!Number.isInteger(dayNumber) || !Number.isInteger(page) || page < 0) return null;
+      return { type: "replaceDay", dayNumber, page };
+    }
+    case "rp": {
+      const dayNumber = Number(parts[2]);
+      const id = parts.slice(3).join(":");
+      if (!Number.isInteger(dayNumber) || id.length === 0) return null;
+      return { type: "replacePick", id, dayNumber };
+    }
+    case "rx": {
+      const dayNumber = Number(parts[2]);
+      if (!Number.isInteger(dayNumber)) return null;
+      return { type: "replaceCancel", dayNumber };
     }
     default:
       return null;

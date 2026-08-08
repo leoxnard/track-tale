@@ -20,6 +20,11 @@ describe("manage callback payloads", () => {
     { type: "ask", kind: "note", id: uuid, dayNumber: 4 },
     { type: "confirm", kind: "track_segment", id: uuid, dayNumber: 21 },
     { type: "confirm", kind: "comment", id: uuid, dayNumber: 21 },
+    { type: "replaceHome" },
+    { type: "replaceDay", dayNumber: 7, page: 0 },
+    { type: "replaceDay", dayNumber: 12, page: 3 },
+    { type: "replacePick", id: uuid, dayNumber: 4 },
+    { type: "replaceCancel", dayNumber: 4 },
   ];
 
   it("round-trips every screen", () => {
@@ -46,6 +51,21 @@ describe("manage callback payloads", () => {
     // An unknown kind code, and a delete with no id to delete.
     expect(parseAction(`mg:a:q:3:${uuid}`)).toBeNull();
     expect(parseAction("mg:a:p:3:")).toBeNull();
+    // The same holes on the /replace side.
+    expect(parseAction("mg:rd:3:-1")).toBeNull();
+    expect(parseAction("mg:rp:3:")).toBeNull();
+    expect(parseAction("mg:rx:nope")).toBeNull();
+  });
+
+  it("keeps deleting and replacing on separate payloads", () => {
+    // The two browsers look alike and sit one tap apart. A /replace button that
+    // decoded as a delete would be the worst possible collision, so this pins
+    // down that no replace payload reads as anything but itself.
+    for (const action of actions.filter((a) => a.type.startsWith("replace"))) {
+      expect(parseAction(encodeAction(action))?.type).toBe(action.type);
+    }
+    expect(parseAction("mg:rh")).toEqual({ type: "replaceHome" });
+    expect(parseAction("mg:h")).toEqual({ type: "home" });
   });
 });
 

@@ -47,9 +47,18 @@ import {
   dayTally,
   dayView,
   overview,
+  replaceDayView,
+  replaceOverview,
+  replacePromptView,
   tallyTotal,
   type View,
 } from "./manage.server";
+import {
+  armReplacement,
+  clearReplacement,
+  pendingReplacement,
+  replacePhoto,
+} from "./media-replace.server";
 
 /**
  * Remember which row a confirmation message created, so replying /delete to it
@@ -238,6 +247,8 @@ const HELP = `🚴 *TrackTale* — your trip journal
 Reply /delete to one of my messages — removes that one
 /manage — browse the trip and delete anything on it, however old: notes,
 photos, tracks, and guestbook messages the family left
+/replace — swap the picture behind a photo: pick it, send the new one. Caption,
+map pin and place in the day all stay — handy after running a filter over them
 /clearday 3 — empty a whole day: every note, photo and track on it
 
 *Live*
@@ -845,6 +856,21 @@ export function createBot(): Bot {
   });
 
   /**
+   * Swap the picture behind a photo, keeping everything the photo means: its
+   * caption, the pin it earned off the day's track, its place in the day and
+   * who took it. Re-editing a trip's photos is otherwise a delete-and-resend
+   * that throws all of that away and puts the picture back at the end of the
+   * day it belonged in the middle of.
+   */
+  bot.command("replace", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    // A half-finished pick from before is not what this tap meant.
+    await clearReplacement(ctx.chat!.id);
+    await sendView(ctx, await replaceOverview(trip));
+  });
+
+  /**
    * Why a button tap did nothing.
    *
    * Everything the bot can say about a tap it never received is nothing, so
@@ -985,6 +1011,29 @@ export function createBot(): Bot {
             await renderOgCard(trip.id).catch(() => {});
           }
           break;
+        case "replaceHome":
+          await clearReplacement(ctx.chat!.id);
+          view = await replaceOverview(trip);
+          break;
+        case "replaceDay":
+          // Backing out to the list un-picks whatever was picked: the next
+          // photo sent should not land on a choice already navigated away from.
+          await clearReplacement(ctx.chat!.id);
+          view = await replaceDayView(trip, action.dayNumber, action.page);
+          break;
+        case "replacePick":
+          view = await replacePromptView(trip, action.id, action.dayNumber);
+          // Only once the photo is known to still be there and the screen has
+          // been built — arming first would leave the chat waiting on a pick
+          // it was never shown.
+          if (view) {
+            await armReplacement(ctx.chat!.id, action.id, action.dayNumber, ctx.state.senderId);
+          }
+          break;
+        case "replaceCancel":
+          await clearReplacement(ctx.chat!.id);
+          view = await replaceDayView(trip, action.dayNumber, 0);
+          break;
       }
 
       // Both item screens return null for something that has already gone — a
@@ -993,7 +1042,14 @@ export function createBot(): Bot {
       let notice = "";
       if (!view) {
         notice = "That one is already gone.\n\n";
-        view = await dayView(trip, "dayNumber" in action ? action.dayNumber : 0, 0);
+        const dayNumber = "dayNumber" in action ? action.dayNumber : 0;
+        // Back to the browser the tap came from. Dropping someone out of
+        // /replace into the delete screen would be a bad place to put them by
+        // accident, of all the screens to land on.
+        view =
+          action.type === "replacePick"
+            ? await replaceDayView(trip, dayNumber, 0)
+            : await dayView(trip, dayNumber, 0);
       }
 
       await editView(ctx, { ...view, text: notice + view.text });
@@ -1539,14 +1595,61 @@ export function createBot(): Bot {
   bot.on("message:photo", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    const day = await requireDay(ctx, trip);
-    if (!day) return;
 
     // Telegram already ships several resolutions — use a small one for the grid
     // so the family page stays cheap to load, and the largest for the lightbox.
     const sizes = [...ctx.message.photo].sort((a, b) => a.width - b.width);
     const full = sizes[sizes.length - 1];
     const thumb = sizes.find((s) => s.width >= 320) ?? full;
+
+    // Did a /replace button pick a photo for this one to take the place of?
+    // Ahead of the current day on purpose: a replacement belongs to the day of
+    // the photo it replaces, which need not be the day uploads are landing on.
+    const pending = await pendingReplacement(ctx.chat!.id);
+    if (pending) {
+      try {
+        const swapped = await replacePhoto(pending.mediaId, {
+          full: await downloadTelegramFile(bot, full.file_id),
+          thumb:
+            thumb.file_id !== full.file_id
+              ? await downloadTelegramFile(bot, thumb.file_id)
+              : null,
+          caption: ctx.message.caption ?? null,
+        });
+        await clearReplacement(ctx.chat!.id);
+
+        if (!swapped) {
+          await ctx.reply(
+            `⚠️ That photo was deleted while I was waiting for the new one, so I left ` +
+              `this picture out rather than putting it somewhere you didn't ask for.\n\n` +
+              `/replace starts again.`,
+          );
+          return;
+        }
+
+        // A share card built from a photo is now built from the old one.
+        await renderOgCard(trip.id).catch(() => {});
+
+        // Straight back to the day's photos: swapping one is rarely the whole
+        // job — a filter run over a trip means doing this a dozen times, and
+        // the next one should be one tap away rather than another /replace.
+        const view = await replaceDayView(trip, pending.dayNumber, 0);
+        await sendView(ctx, {
+          ...view,
+          text: `🔄 Photo swapped on day ${pending.dayNumber}.\n\n${view.text}`,
+        });
+      } catch (err) {
+        await clearReplacement(ctx.chat!.id);
+        await ctx.reply(
+          `⚠️ Swapping that photo failed: ${err instanceof Error ? err.message : "unknown error"}\n\n` +
+            `The old picture is untouched. /replace starts again.`,
+        );
+      }
+      return;
+    }
+
+    const day = await requireDay(ctx, trip);
+    if (!day) return;
 
     try {
       const id = nanoid(8);

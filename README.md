@@ -94,6 +94,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/note …` | journal entry (plain text works too) |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
+| `/replace` | swap the picture behind a photo, keeping its caption, map pin and place in the day |
 | `/clearday 3` | empty a whole day: every note, photo and track on it |
 | `/live` | what the live banner is showing, and why; `/live off` takes it down |
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
@@ -112,6 +113,17 @@ is as removable as one from a minute ago. Deleting a photo takes its files out o
 `/clearday 3` empties a whole day in one go, for a day uploaded against the wrong day number
 or built from the wrong files; it asks for a confirmation first and leaves the family's
 guestbook messages alone.
+
+`/replace` is the same browser again, photos only: pick a day, tap a photo, send the new
+picture. The row survives the swap, so the caption, the pin the photo earned by matching the
+day's track, its place in the day's order and who took it all stay as they were — only the
+file changes. That matters when the whole trip's photos come back from an edit: deleting and
+re-sending them would strip every caption and drop each one at the end of the day it used to
+sit in the middle of. After a swap the day's photo list comes straight back, so working
+through a trip is one tap per picture. The new files are written under fresh names rather
+than over the old ones, because the page, Telegram's previews and any CDN in between cache by
+URL; the old files are removed once the row no longer points at them. A pick expires after an
+hour, so a forgotten `/replace` cannot swallow the next photo sent into the chat.
 
 ## Friends
 
