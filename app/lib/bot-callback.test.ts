@@ -204,6 +204,117 @@ describe("the /manage keyboard", () => {
 });
 
 /**
+ * The screens that replaced a command's syntax with a keyboard. What matters
+ * about each is that the tap comes back with something to tap next — a picker
+ * that offers the wrong days, or a screen that needs a trip it hasn't got, is
+ * the same dead end the buttons exist to remove.
+ */
+describe("the trip and day pickers", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    deadTable = null;
+    apiResults = {};
+    apiPayloads = [];
+    rows = {
+      users: { telegram_id: 42, display_name: "Leonard", is_owner: true },
+      chats: { chat_id: CHAT_ID, type: "supergroup", title: "TrackTale", active_trip_id: "trip-1" },
+      trips: {
+        id: "trip-1",
+        name: "HochlandKinder",
+        start_date: "2026-07-25",
+        end_date: null,
+        current_day_number: 2,
+        owner_telegram_id: 42,
+        reminders_enabled: false,
+        share_slug: "abc",
+      },
+      days: [
+        {
+          id: "day-1",
+          day_number: 1,
+          date: "2026-07-25",
+          notes: [{ id: "n1" }],
+          media: [],
+          track_segments: [],
+          comments: [],
+        },
+        {
+          id: "day-2",
+          day_number: 2,
+          date: "2026-07-26",
+          notes: [],
+          media: [],
+          track_segments: [{ id: "t1" }],
+          comments: [],
+        },
+      ],
+    };
+  });
+
+  const keyboard = (method = "editMessageText") =>
+    JSON.stringify(apiPayloads.find((c) => c.method === method)?.payload.reply_markup ?? {});
+
+  it("offers the day after the last one, so a new day can be started from the picker", async () => {
+    // The trip has no end date, so there is no last day to list — days 1 and 2
+    // exist, and day 3 is the one about to happen.
+    await runCallback("mg:dp:0:s");
+
+    expect(keyboard()).toContain("Day 3");
+    expect(keyboard()).not.toContain("Day 4");
+  });
+
+  it("marks the current day and the ones that already hold something", async () => {
+    await runCallback("mg:dp:0:s");
+
+    expect(keyboard()).toContain("✅ Day 2");
+    expect(keyboard()).toContain("• Day 1");
+  });
+
+  it("switches the day from a tap and comes back with the picker", async () => {
+    const calls = await runCallback("mg:sd:3");
+
+    expect(calls[0]).toBe("answerCallbackQuery");
+    const text = String(
+      apiPayloads.find((c) => c.method === "editMessageText")?.payload.text ?? "",
+    );
+    expect(text).toContain("is now current");
+  });
+
+  it("lists the trips even when the chat has no active one", async () => {
+    // The one screen that must not need a trip: it is how you get one back.
+    rows.chats = { chat_id: CHAT_ID, type: "supergroup", title: "TrackTale", active_trip_id: null };
+    rows.trips = [
+      { id: "trip-1", name: "HochlandKinder", start_date: "2026-07-25", end_date: null },
+      { id: "trip-2", name: "Alpen", start_date: "2025-06-01", end_date: "2025-06-10", finished_at: "2025-06-10" },
+    ];
+    const calls = await runCallback("mg:tp");
+
+    expect(calls[0]).toBe("answerCallbackQuery");
+    expect(keyboard()).toContain("Alpen");
+  });
+
+  it("asks before deleting a trip, and only deletes on the second tap", async () => {
+    rows.trips = [{ id: "trip-1", name: "HochlandKinder", start_date: "2026-07-25", end_date: null, owner_telegram_id: 42 }];
+    await runCallback("mg:dx:0:trip-1");
+
+    const text = String(
+      apiPayloads.find((c) => c.method === "editMessageText")?.payload.text ?? "",
+    );
+    expect(text).toContain("no undo");
+    // The confirming button is the only one that carries the id back.
+    expect(keyboard()).toContain("mg:dx:1:trip-1");
+  });
+
+  it("keeps a trip button from another chat from resolving", async () => {
+    rows.trips = [{ id: "trip-1", name: "HochlandKinder", start_date: "2026-07-25", end_date: null }];
+    await runCallback("mg:ut:trip-from-elsewhere");
+
+    // Falls back to this chat's own list rather than switching to it.
+    expect(keyboard()).not.toContain("trip-from-elsewhere");
+  });
+});
+
+/**
  * The other half of the same failure: a tap Telegram never delivers looks, from
  * the chat, exactly like a tap the bot fumbled. `/diag` is what tells them apart,
  * so what it reports has to be right about the case that matters.

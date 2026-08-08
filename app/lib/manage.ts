@@ -54,6 +54,12 @@ export const KIND_NOUN: Record<ItemKind, string> = {
  */
 export const PAGE_SIZE = 12;
 
+/**
+ * Which list a day picker is driving: the day uploads land on, or the day
+ * `/clearday` is about to empty. Same screen, two very different second taps.
+ */
+export type DayPickerMode = "set" | "clear";
+
 export type ManageAction =
   | { type: "home" }
   /**
@@ -66,9 +72,41 @@ export type ManageAction =
   | { type: "day"; dayNumber: number; page: number }
   /** Selected, awaiting the second tap — deleting is not undoable. */
   | { type: "ask"; kind: ItemKind; id: string; dayNumber: number }
-  | { type: "confirm"; kind: ItemKind; id: string; dayNumber: number };
+  | { type: "confirm"; kind: ItemKind; id: string; dayNumber: number }
+  /** The day picker itself: every day the trip has, plus the next one. */
+  | { type: "days"; page: number; mode: DayPickerMode }
+  | { type: "setday"; dayNumber: number }
+  | { type: "trips" }
+  | { type: "usetrip"; id: string }
+  /** The /trip screen, which is also where the other screens come back to. */
+  | { type: "status" }
+  | { type: "reminders"; on: boolean }
+  | { type: "endtrip"; confirmed: boolean }
+  | { type: "clearday"; dayNumber: number; confirmed: boolean }
+  | { type: "deletetrips" }
+  | { type: "deletetrip"; id: string; confirmed: boolean }
+  | { type: "liveoff" }
+  /** Both of these kill a link someone may already have been given. */
+  | { type: "relink"; confirmed: boolean }
+  | { type: "mypagelink"; confirmed: boolean }
+  | { type: "mergefinish" }
+  | { type: "mergecancel" };
 
 const PREFIX = "mg";
+
+const MODE_CODE: Record<DayPickerMode, string> = { set: "s", clear: "c" };
+const CODE_MODE: Record<string, DayPickerMode> = { s: "set", c: "clear" };
+
+/** "1" or "0" — a confirmed second tap, or the question that precedes it. */
+function flag(on: boolean): string {
+  return on ? "1" : "0";
+}
+
+function readFlag(part: string | undefined): boolean | null {
+  if (part === "1") return true;
+  if (part === "0") return false;
+  return null;
+}
 
 export function encodeAction(action: ManageAction): string {
   switch (action.type) {
@@ -82,6 +120,36 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:a:${KIND_CODE[action.kind]}:${action.dayNumber}:${action.id}`;
     case "confirm":
       return `${PREFIX}:y:${KIND_CODE[action.kind]}:${action.dayNumber}:${action.id}`;
+    case "days":
+      return `${PREFIX}:dp:${action.page}:${MODE_CODE[action.mode]}`;
+    case "setday":
+      return `${PREFIX}:sd:${action.dayNumber}`;
+    case "trips":
+      return `${PREFIX}:tp`;
+    case "usetrip":
+      return `${PREFIX}:ut:${action.id}`;
+    case "status":
+      return `${PREFIX}:ts`;
+    case "reminders":
+      return `${PREFIX}:rm:${flag(action.on)}`;
+    case "endtrip":
+      return `${PREFIX}:et:${flag(action.confirmed)}`;
+    case "clearday":
+      return `${PREFIX}:cd:${action.dayNumber}:${flag(action.confirmed)}`;
+    case "deletetrips":
+      return `${PREFIX}:dt`;
+    case "deletetrip":
+      return `${PREFIX}:dx:${flag(action.confirmed)}:${action.id}`;
+    case "liveoff":
+      return `${PREFIX}:lo`;
+    case "relink":
+      return `${PREFIX}:rl:${flag(action.confirmed)}`;
+    case "mypagelink":
+      return `${PREFIX}:mp:${flag(action.confirmed)}`;
+    case "mergefinish":
+      return `${PREFIX}:mf`;
+    case "mergecancel":
+      return `${PREFIX}:mx`;
   }
 }
 
@@ -113,6 +181,61 @@ export function parseAction(data: string): ManageAction | null {
       if (!kind || !Number.isInteger(dayNumber) || id.length === 0) return null;
       return { type: parts[1] === "a" ? "ask" : "confirm", kind, id, dayNumber };
     }
+    case "dp": {
+      const page = Number(parts[2]);
+      const mode = CODE_MODE[parts[3]];
+      if (!Number.isInteger(page) || page < 0 || !mode) return null;
+      return { type: "days", page, mode };
+    }
+    case "sd": {
+      const dayNumber = Number(parts[2]);
+      if (!Number.isInteger(dayNumber) || dayNumber < 1) return null;
+      return { type: "setday", dayNumber };
+    }
+    case "tp":
+      return { type: "trips" };
+    case "ut": {
+      const id = parts.slice(2).join(":");
+      return id.length > 0 ? { type: "usetrip", id } : null;
+    }
+    case "ts":
+      return { type: "status" };
+    case "rm": {
+      const on = readFlag(parts[2]);
+      return on === null ? null : { type: "reminders", on };
+    }
+    case "et": {
+      const confirmed = readFlag(parts[2]);
+      return confirmed === null ? null : { type: "endtrip", confirmed };
+    }
+    case "cd": {
+      const dayNumber = Number(parts[2]);
+      const confirmed = readFlag(parts[3]);
+      if (!Number.isInteger(dayNumber) || dayNumber < 1 || confirmed === null) return null;
+      return { type: "clearday", dayNumber, confirmed };
+    }
+    case "dt":
+      return { type: "deletetrips" };
+    case "dx": {
+      const confirmed = readFlag(parts[2]);
+      const id = parts.slice(3).join(":");
+      if (confirmed === null || id.length === 0) return null;
+      return { type: "deletetrip", id, confirmed };
+    }
+    case "lo":
+      return { type: "liveoff" };
+    case "rl": {
+      const confirmed = readFlag(parts[2]);
+      return confirmed === null ? null : { type: "relink", confirmed };
+    }
+    case "mp": {
+      const confirmed = readFlag(parts[2]);
+      return confirmed === null ? null : { type: "mypagelink", confirmed };
+    }
+    case "mf":
+      return { type: "mergefinish" };
+    case "mx":
+      return { type: "mergecancel" };
     default:
       return null;
   }

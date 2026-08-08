@@ -10,7 +10,8 @@ notes, stats and weather.
 - Send a **GPX/FIT file** → parsed directly; several uploads merge into one day.
 - Send **photos** (with captions) and **text** → the day's journal; photos are pinned to the
   route by timestamp (Telegram strips GPS EXIF).
-- `/day 3` sets which day uploads go to; a silent 3 AM reminder pings you if a day has no track.
+- `/day` picks which day uploads go to, from a keyboard of the trip's days; a silent 3 AM
+  reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
 - A Garmin LiveTrack link shows a "Live now" banner for 24 h, with the ride so far drawn on
   the map — including on day one, before any track has been uploaded. Paste it into the chat,
@@ -78,17 +79,18 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | Command | What it does |
 |---|---|
 | `/newtrip Name \| 2026-08-01 \| 2026-08-10` | create a trip in this chat |
-| `/trips`, `/usetrip 2` | list and switch trips; `/usetrip` reopens a finished one |
-| `/day 3` | set the day uploads land on |
-| `/trip` | status and family link |
+| `/trips` | every trip as a button — tap one to switch, a finished one reopens |
+| `/day` | pick the day uploads land on: every day the trip has, plus the next one |
+| `/day 3`, `/nextday`, `/previousday` | same, without the picker |
+| `/trip` | status, family link, and buttons for everything else on this list |
 | `/renametrip …`, `/dates … \| …` | fix the name or the date range |
-| `/reminders on\|off` | per-trip nightly reminder |
+| `/reminders` | per-trip nightly reminder, toggled from a button |
 | `/endtrip` | mark finished — pages stay, uploads stop |
-| `/deletetrip Name` | erase the trip and its photos, irreversibly |
+| `/deletetrip` | pick a trip and confirm; erases it and its photos, irreversibly |
 | `/note …` | journal entry (plain text works too) |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
-| `/clearday 3` | empty a whole day: every note, photo and track on it |
+| `/clearday` | pick a day and empty it: every note, photo and track on it |
 | `/live` | what the live banner is showing, and why; `/live off` takes it down |
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
 | `/archive` | download the trip as a self-contained bundle |
@@ -99,13 +101,15 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 Trip-level changes (`/endtrip`, `/deletetrip`, `/renametrip`, `/dates`) are limited to the
 traveller who created the trip, so a busy group chat cannot rewrite someone else's journey.
 
-`/undo` and a `/delete` reply both need the bot's confirmation message to still be in the
-chat, so they only reach things added recently. `/manage` walks the trip itself — a day
-picker, then that day's contents as buttons, then a confirmation — so a photo from last week
-is as removable as one from a minute ago. Deleting a photo takes its files out of storage too.
-`/clearday 3` empties a whole day in one go, for a day uploaded against the wrong day number
-or built from the wrong files; it asks for a confirmation first and leaves the family's
-guestbook messages alone.
+Every confirmation the bot sends carries a 🗑 button that opens the confirmation for exactly
+that item, so the usual way to take something back off is one tap. `/undo` and a `/delete`
+reply both need the bot's confirmation message to still be in the chat, so they only reach
+things added recently. `/manage` walks the trip itself — a day picker, then that day's
+contents as buttons, then a confirmation — so a photo from last week is as removable as one
+from a minute ago. Deleting a photo takes its files out of storage too.
+`/clearday` empties a whole day in one go, for a day uploaded against the wrong day number
+or built from the wrong files; it lists the days that hold something, asks for a confirmation
+first, and leaves the family's guestbook messages alone.
 
 ## Friends
 

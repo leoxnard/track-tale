@@ -39,7 +39,7 @@ import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
 import { escapeErr, escapeMd, slugId } from "./telegram-md";
 import { deleteEntity, ENTITY_LABEL, type EntityType } from "./entities.server";
-import { encodeAction, parseAction } from "./manage";
+import { encodeAction, parseAction, type ItemKind } from "./manage";
 import {
   applyDelete,
   clearDay,
@@ -50,6 +50,23 @@ import {
   tallyTotal,
   type View,
 } from "./manage.server";
+import {
+  backToStatus,
+  clearDayConfirmView,
+  dayNavKeyboard,
+  dayPickerView,
+  describeTally,
+  deleteTripConfirmView,
+  endTripConfirmView,
+  km,
+  myPageConfirmView,
+  pageOfDay,
+  relinkConfirmView,
+  tripFinishedView,
+  tripLink,
+  tripPickerView,
+  tripStatusView,
+} from "./screens.server";
 
 /**
  * Remember which row a confirmation message created, so replying /delete to it
@@ -68,6 +85,20 @@ async function recordAction(
     entity_type: entityType,
     entity_id: entityId,
   });
+}
+
+/**
+ * What every confirmation carries: the way to take that one thing back off.
+ *
+ * The reply-`/delete` route still works, but it asks the traveller to remember
+ * a command and to reply to the right message. The button is the same journey
+ * through the /manage screens — tapping it opens the confirmation for exactly
+ * this item, in place of the confirmation it was attached to.
+ */
+function undoKeyboard(kind: ItemKind, id: string, dayNumber: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("🗑 Delete this", encodeAction({ type: "ask", kind, id, dayNumber }))
+    .text(`📅 Day ${dayNumber}`, encodeAction({ type: "day", dayNumber, page: 0 }));
 }
 
 /**
@@ -161,21 +192,22 @@ interface BotState {
 
 const HELP = `🚴 *TrackTale* — your trip journal
 
+_Most of these open a keyboard — /trip is the hub, and every screen carries the next step as a button._
+
 *Trip setup*
 /newtrip Name | 2026-08-01 — end date optional, add it with | 2026-08-10
-/trips — list this chat's trips
-/usetrip 2 — switch active trip (reopens a finished one)
-/day 3 — set the day uploads go to
-/day3, /nextday, /previousday — same, quicker
-/trip — status + family link
-/regeneratelink — new family link
+/trip — status, and buttons for everything below
+/trips — tap a trip to switch to it (a finished one reopens)
+/day — pick the day uploads land on, from every day the trip has
+/day 3, /day3, /nextday, /previousday — same, without the picker
 
 *Changing a trip*
 /renametrip New name
 /dates 2026-08-01 | 2026-08-12
-/reminders on — or off, per trip
+/reminders — on or off, per trip
+/regeneratelink — new family link, old one dies
 /endtrip — mark it finished; pages stay, uploads stop
-/deletetrip Name — erase it and its photos, forever
+/deletetrip — pick one and confirm; erases it and its photos, forever
 
 *During the trip* (everything lands on the current /day)
 • Komoot share link → route imported
@@ -184,11 +216,12 @@ const HELP = `🚴 *TrackTale* — your trip journal
 • Any other text → journal entry
 
 *Oops*
+Every confirmation carries a 🗑 button — one tap takes that thing back off
 /undo — remove the last thing added
 Reply /delete to one of my messages — removes that one
 /manage — browse the trip and delete anything on it, however old: notes,
 photos, tracks, and guestbook messages the family left
-/clearday 3 — empty a whole day: every note, photo and track on it
+/clearday — pick a day and empty it: every note, photo and track on it
 
 *Live*
 🔴 Paste a Garmin LiveTrack link → live banner for 24h
@@ -312,60 +345,186 @@ async function requireDay(ctx: Context, trip: DbTrip) {
   return ensureDay(trip, trip.current_day_number);
 }
 
+function remindersMessage(on: boolean): string {
+  return on
+    ? "🔔 Reminders on — I'll ping this chat quietly when a day has no track."
+    : "🔕 Reminders off for this trip. Everything else works as before.";
+}
+
 /** tripDayCount is Infinity for a trip with no end date yet — /day is unbounded until /endtrip. */
 function dayRange(max: number): string {
   return Number.isFinite(max) ? `1–${max}` : "1 or more";
 }
 
 /**
+ * Make this trip the one uploads land on. Picking a finished trip is how you
+ * reopen one that ended too early, so that is what tapping it does.
+ */
+async function activateTrip(chatId: number, trip: DbTrip): Promise<DbTrip> {
+  if (trip.finished_at) {
+    await reopenTrip(trip);
+    return { ...trip, finished_at: null };
+  }
+  await setActiveTrip(chatId, trip.id);
+  return trip;
+}
+
+/** Switch, then show where that trip stands — the screen you wanted anyway. */
+async function tripSwitchedView(chatId: number, trip: DbTrip): Promise<View> {
+  const wasFinished = trip.finished_at !== null;
+  const active = await activateTrip(chatId, trip);
+  const view = await tripStatusView(active);
+  return {
+    ...view,
+    text:
+      `✅ Active trip: *${escapeMd(active.name)}*${wasFinished ? " — reopened, so uploads land here again" : ""}\n\n` +
+      view.text,
+  };
+}
+
+async function switchToTrip(ctx: Context, trip: DbTrip) {
+  await sendView(ctx, await tripSwitchedView(ctx.state.chat.chat_id, trip));
+}
+
+/**
+ * Empty a day and say what went, from either the command or the button.
+ *
+ * The tally is taken before the deletion, because afterwards there is nothing
+ * left to count — and "day 3 is empty" without saying what it held is not a
+ * confirmation anyone can check.
+ */
+async function runClearDay(trip: DbTrip, n: number): Promise<View> {
+  const tally = await dayTally(trip, n);
+  if (!tally || tallyTotal(tally) === 0) {
+    return { text: `Day ${n} has nothing on it.`, keyboard: backToStatus() };
+  }
+  const what = describeTally(tally);
+
+  try {
+    await clearDay(trip, n);
+  } catch (err) {
+    return {
+      text: `⚠️ Clearing day ${n} failed: ${err instanceof Error ? err.message : "unknown error"}. Nothing was removed.`,
+      keyboard: backToStatus(),
+    };
+  }
+
+  // The day's distance was part of what the share card showed.
+  await renderOgCard(trip.id).catch(() => {});
+
+  const view = await dayPickerView(trip, 0, "clear");
+  return { ...view, text: `🗑️ Day ${n} is empty — ${what} removed.\n\n${view.text}` };
+}
+
+/**
+ * The two ways out of a GPX merge session, offered on every message that is
+ * part of one — so "what do I send now?" never needs answering from memory.
+ */
+function mergeSessionKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Finish & merge", encodeAction({ type: "mergefinish" }))
+    .text("✖️ Cancel", encodeAction({ type: "mergecancel" }));
+}
+
+/** Stitch the session's uploads into one GPX and send it back as a file. */
+async function finishGpxMerge(ctx: Context) {
+  const chatId = ctx.chat!.id;
+  const { data: session } = await supabase()
+    .from("gpx_merge_sessions")
+    .select("name, tracks")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+
+  if (!session) {
+    await ctx.reply('No GPX merge session open here. Start one with /mergegpx "Tour Name".');
+    return;
+  }
+
+  const tracks = (session.tracks ?? []) as { points?: TrackPoint[]; sport?: string }[];
+  if (tracks.length < 2) {
+    await ctx.reply("Need at least 2 GPX files in session. Upload more first.", {
+      reply_markup: mergeSessionKeyboard(),
+    });
+    return;
+  }
+
+  const allPoints: TrackPoint[] = [];
+  for (const t of tracks) allPoints.push(...(t.points ?? []));
+
+  const hasTime = allPoints.every((p) => p.time !== undefined);
+  if (hasTime) allPoints.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+
+  computeStats(allPoints);
+  const gpx = toGpx(session.name, [allPoints]);
+
+  await supabase().from("gpx_merge_sessions").delete().eq("chat_id", chatId);
+
+  await ctx.replyWithDocument(
+    new InputFile(Buffer.from(gpx), `${session.name.replace(/[^a-z0-9_-]/gi, "_")}.gpx`),
+    {
+      caption: `✅ Merged ${tracks.length} GPX file(s) into ${session.name} (${(gpx.length / 1024).toFixed(1)} KB)`,
+    },
+  );
+}
+
+async function cancelGpxMerge(ctx: Context) {
+  const { data: removed } = await supabase()
+    .from("gpx_merge_sessions")
+    .delete()
+    .eq("chat_id", ctx.chat!.id)
+    .select("name");
+  await ctx.reply(
+    removed && removed.length > 0
+      ? `✖️ Merge session dropped. The uploaded files stay where they were.`
+      : "No GPX merge session open here.",
+  );
+}
+
+/** Erase a trip, then come back with what is left in the chat. */
+async function runDeleteTrip(chat: DbChat, trip: DbTrip): Promise<View> {
+  try {
+    await deleteTrip(trip);
+  } catch (err) {
+    return {
+      text: `⚠️ Delete failed: ${err instanceof Error ? err.message : "unknown error"}. Nothing was removed.`,
+      keyboard: new InlineKeyboard().text("🎒 Trips", encodeAction({ type: "trips" })),
+    };
+  }
+
+  const trips = await listTrips(chat.chat_id);
+  const active = chat.active_trip_id === trip.id ? null : chat.active_trip_id;
+  const view = tripPickerView(trips, active, "use");
+  return { ...view, text: `🗑️ ${trip.name} is gone, photos and all.\n\n${view.text}` };
+}
+
+/** The traveller page link, and the one tap that replaces it. */
+async function myPageLinkView(ctx: Context, confirmed: boolean): Promise<View> {
+  const { senderId, isRegistered } = ctx.state;
+  if (!isRegistered) {
+    return { text: "Only invited travellers have a page.", keyboard: new InlineKeyboard() };
+  }
+  if (!confirmed) return myPageConfirmView();
+
+  const slug = slugId(20);
+  await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
+  return {
+    text: `🔗 Old page link is dead. New one:\n${env.appOrigin}/traveler/${slug}`,
+    keyboard: new InlineKeyboard(),
+  };
+}
+
+/**
  * Shared body of /day <n>, /dayN, /nextday, /previousday: n is assumed to
  * already be a valid integer within [1, max] — callers handle their own
- * usage/boundary messaging before reaching here.
+ * usage/boundary messaging before reaching here. The neighbours ride along on
+ * the confirmation, so the next day is a tap rather than another command.
  */
 async function setCurrentDay(ctx: Context, trip: DbTrip, n: number) {
   const day = await ensureDay(trip, n);
   await updateTrip(trip.id, { current_day_number: n });
-  await ctx.reply(`📅 Day ${n} (${day.date}) is now current — uploads land here.`);
-}
-
-function tripLink(trip: DbTrip): string {
-  return `${env.appOrigin}/t/${trip.share_slug}`;
-}
-
-function km(m: number): string {
-  return (m / 1000).toFixed(1);
-}
-
-interface TripTotals {
-  distanceM: number;
-  elevationUp: number;
-  daysWithTracks: number;
-  planM: number;
-}
-
-async function tripTotals(tripId: string): Promise<TripTotals> {
-  const { data: days } = await supabase()
-    .from("days")
-    .select("id, day_number, track_segments(distance_m, elevation_up)")
-    .eq("trip_id", tripId);
-
-  const totals: TripTotals = { distanceM: 0, elevationUp: 0, daysWithTracks: 0, planM: 0 };
-  for (const d of days ?? []) {
-    const segs = (d as { track_segments: { distance_m: number; elevation_up: number }[] })
-      .track_segments;
-    if (segs.length > 0) totals.daysWithTracks++;
-    for (const s of segs) {
-      totals.distanceM += s.distance_m;
-      totals.elevationUp += s.elevation_up;
-    }
-  }
-
-  const { data: plans } = await supabase()
-    .from("plan_segments")
-    .select("distance_m")
-    .eq("trip_id", tripId);
-  totals.planM = (plans ?? []).reduce((sum, p) => sum + p.distance_m, 0);
-  return totals;
+  await ctx.reply(`📅 Day ${n} (${day.date}) is now current — uploads land here.`, {
+    reply_markup: dayNavKeyboard(trip, n),
+  });
 }
 
 /**
@@ -433,7 +592,12 @@ async function saveTrackSegment(
     `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
   ];
   if ((count ?? 1) > 1) parts.push(`🧩 ${count} segments merged for this day`);
-  const sent = await ctx.reply(parts.join("\n"), { parse_mode: "Markdown" }).catch(() => undefined);
+  const sent = await ctx
+    .reply(parts.join("\n"), {
+      parse_mode: "Markdown",
+      reply_markup: undoKeyboard("track_segment", inserted.id, day.day_number),
+    })
+    .catch(() => undefined);
   await recordAction(ctx, sent, "track_segment", inserted.id);
 
   // The share card shows progress, so it follows every new track.
@@ -526,7 +690,9 @@ async function saveNote(ctx: Context, text: string) {
     .single();
   if (error) throw error;
   const sent = await ctx
-    .reply(`📝 Noted for day ${day.day_number}. Reply /delete to remove.`)
+    .reply(`📝 Noted for day ${day.day_number}.`, {
+      reply_markup: undoKeyboard("note", inserted.id, day.day_number),
+    })
     .catch(() => undefined);
   await recordAction(ctx, sent, "note", inserted.id);
 }
@@ -560,8 +726,18 @@ export function createBot(): Bot {
     await next();
   });
 
-  bot.command("start", (ctx) => ctx.reply(HELP, { parse_mode: "Markdown" }));
-  bot.command("help", (ctx) => ctx.reply(HELP, { parse_mode: "Markdown" }));
+  const helpKeyboard = () =>
+    new InlineKeyboard()
+      .text("🎒 Trip", encodeAction({ type: "status" }))
+      .text("📅 Days", encodeAction({ type: "days", page: 0, mode: "set" }))
+      .row()
+      .text("🗂️ Manage", encodeAction({ type: "home" }))
+      .text("🎒 Switch trip", encodeAction({ type: "trips" }));
+
+  const help = (ctx: Context) =>
+    ctx.reply(HELP, { parse_mode: "Markdown", reply_markup: helpKeyboard() });
+  bot.command("start", help);
+  bot.command("help", help);
 
   bot.command("newtrip", async (ctx) => {
     const { chat, senderId, isRegistered } = ctx.state;
@@ -594,51 +770,55 @@ export function createBot(): Bot {
     await ctx.reply(
       `🎒 Trip *${escapeMd(name)}*${length} created and set active.\n\n` +
         `👨‍👩‍👧 Family link:\n${tripLink(trip)}\n\n` +
-        `Next: /day 1, then send tracks. Optional: send planned Komoot links for the grey plan line.`,
-      { parse_mode: "Markdown" },
+        `Next: pick the day below, then send tracks. Optional: send planned Komoot links for the grey plan line.`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard()
+          .text("📅 Start on day 1", encodeAction({ type: "setday", dayNumber: 1 }))
+          .text("📅 All days", encodeAction({ type: "days", page: 0, mode: "set" })),
+      },
     );
   });
 
   bot.command("trips", async (ctx) => {
     const { chat } = ctx.state;
     const trips = await listTrips(chat.chat_id);
-    if (trips.length === 0) {
-      await ctx.reply("No trips in this chat yet. /newtrip Name | 2026-08-01");
-      return;
-    }
-    const lines = trips.map((t, i) => {
-      const mark = t.id === chat.active_trip_id ? " ✅ active" : t.finished_at ? " 🏁 finished" : "";
-      return `${i + 1}. ${t.name} (${t.start_date} → ${t.end_date ?? "ongoing"})${mark}`;
-    });
-    await ctx.reply(lines.join("\n") + "\n\nSwitch with /usetrip <number>");
+    await sendView(ctx, tripPickerView(trips, chat.active_trip_id, "use"));
   });
 
+  // Kept for the number people already have in their fingers; without one, the
+  // list of trips is itself the picker.
   bot.command("usetrip", async (ctx) => {
     const { chat } = ctx.state;
     const trips = await listTrips(chat.chat_id);
     const idx = parseInt((ctx.match as string).trim(), 10) - 1;
     const trip = trips[idx];
     if (!trip) {
-      await ctx.reply("Usage: /usetrip <number from /trips>");
+      await sendView(ctx, tripPickerView(trips, chat.active_trip_id, "use"));
       return;
     }
-    // Picking a finished trip is how you reopen one you ended too early.
-    if (trip.finished_at) {
-      await reopenTrip(trip);
-      await ctx.reply(`✅ Active trip: ${trip.name} — reopened, so uploads land here again.`);
-      return;
-    }
-    await setActiveTrip(chat.chat_id, trip.id);
-    await ctx.reply(`✅ Active trip: ${trip.name}`);
+    await switchToTrip(ctx, trip);
   });
 
+  // `/day` on its own opens the picker rather than explaining its own syntax:
+  // the days a trip has are the answer to "which day?", and they are already
+  // known here.
   bot.command("day", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    const n = parseInt((ctx.match as string).trim(), 10);
+    const arg = (ctx.match as string).trim();
+    if (!arg) {
+      await sendView(ctx, await dayPickerView(trip, pageOfDay(trip.current_day_number ?? 1), "set"));
+      return;
+    }
+    const n = parseInt(arg, 10);
     const max = tripDayCount(trip);
     if (!Number.isInteger(n) || n < 1 || n > max) {
-      await ctx.reply(`Usage: /day <${dayRange(max)}>`);
+      const view = await dayPickerView(trip, 0, "set");
+      await sendView(ctx, {
+        ...view,
+        text: `This trip has days ${dayRange(max)}.\n\n${view.text}`,
+      });
       return;
     }
     await setCurrentDay(ctx, trip, n);
@@ -652,7 +832,9 @@ export function createBot(): Bot {
     const n = parseInt(ctx.match![1], 10);
     const max = tripDayCount(trip);
     if (!Number.isInteger(n) || n < 1 || n > max) {
-      await ctx.reply(`Usage: /day <${dayRange(max)}>`);
+      await ctx.reply(`That trip runs to day ${dayRange(max)} — pick one:`, {
+        reply_markup: (await dayPickerView(trip, 0, "set")).keyboard,
+      });
       return;
     }
     await setCurrentDay(ctx, trip, n);
@@ -664,7 +846,9 @@ export function createBot(): Bot {
     const n = (trip.current_day_number ?? 0) + 1;
     const max = tripDayCount(trip);
     if (n > max) {
-      await ctx.reply(`You're already on the last day (${max}).`);
+      await ctx.reply(`You're already on the last day (${max}).`, {
+        reply_markup: dayNavKeyboard(trip, max),
+      });
       return;
     }
     await setCurrentDay(ctx, trip, n);
@@ -674,9 +858,8 @@ export function createBot(): Bot {
     const trip = await requireTrip(ctx);
     if (!trip) return;
     const n = (trip.current_day_number ?? 2) - 1;
-    const max = tripDayCount(trip);
     if (n < 1) {
-      await ctx.reply("You're already on day 1.");
+      await ctx.reply("You're already on day 1.", { reply_markup: dayNavKeyboard(trip, 1) });
       return;
     }
     await setCurrentDay(ctx, trip, n);
@@ -740,46 +923,20 @@ export function createBot(): Bot {
     const n = parseInt(parts[0] ?? "", 10);
     const max = tripDayCount(trip);
     if (!Number.isInteger(n) || n < 1 || n > max) {
-      await ctx.reply(`Usage: /clearday <${dayRange(max)}> — empties that day.`);
+      // No day named, or a day this trip hasn't got: the days it does have,
+      // with what is on each of them, is the better answer either way.
+      await sendView(ctx, await dayPickerView(trip, 0, "clear"));
       return;
     }
 
-    const tally = await dayTally(trip, n);
-    if (!tally || tallyTotal(tally) === 0) {
-      await ctx.reply(`Day ${n} has nothing on it.`);
-      return;
-    }
-
-    const what = [
-      tally.tracks > 0 ? `${tally.tracks} track(s)` : null,
-      tally.photos > 0 ? `${tally.photos} photo(s)` : null,
-      tally.notes > 0 ? `${tally.notes} note(s)` : null,
-    ]
-      .filter(Boolean)
-      .join(", ");
-
+    // `/clearday 3 confirm` still works — it is in the older messages this bot
+    // has already sent. Without it, the confirmation is a button.
     if (parts[1]?.toLowerCase() !== "confirm") {
-      await ctx.reply(
-        `Day ${n} holds ${what}. Clearing takes all of it off for good, photos and all.\n\n` +
-          (tally.comments > 0
-            ? `The ${tally.comments} guestbook message(s) stay — /manage removes those one at a time.\n\n`
-            : "") +
-          `Confirm with:\n/clearday ${n} confirm`,
-      );
+      await sendView(ctx, await clearDayConfirmView(trip, n));
       return;
     }
 
-    await ctx.reply("🗑️ Clearing…").catch(() => {});
-    try {
-      await clearDay(trip, n);
-      await ctx.reply(`🗑️ Day ${n} is empty — ${what} removed. Send /day ${n} to start it again.`);
-      // The day's distance was part of what the share card showed.
-      await renderOgCard(trip.id).catch(() => {});
-    } catch (err) {
-      await ctx.reply(
-        `⚠️ Clearing day ${n} failed: ${err instanceof Error ? err.message : "unknown error"}.`,
-      );
-    }
+    await sendView(ctx, await runClearDay(trip, n));
   });
 
   // Browsing the trip to delete something older than the chat's scrollback.
@@ -911,7 +1068,55 @@ export function createBot(): Bot {
     }
 
     try {
-      const trip = await getActiveTrip(ctx.state.chat);
+      const { chat } = ctx.state;
+
+      // The screens that exist precisely because there is no active trip, or
+      // because what they act on is not one — they run before that check.
+      switch (action.type) {
+        case "trips":
+        case "deletetrips": {
+          const trips = await listTrips(chat.chat_id);
+          await editView(
+            ctx,
+            tripPickerView(trips, chat.active_trip_id, action.type === "trips" ? "use" : "delete"),
+          );
+          return;
+        }
+        case "usetrip":
+        case "deletetrip": {
+          // Look the trip up in this chat's own list: a button carries an id and
+          // nothing else, and one from another chat's message must not resolve.
+          const trips = await listTrips(chat.chat_id);
+          const picked = trips.find((t) => t.id === action.id);
+          if (!picked) {
+            await editView(ctx, tripPickerView(trips, chat.active_trip_id, "use"));
+            return;
+          }
+          if (action.type === "usetrip") {
+            await editView(ctx, await tripSwitchedView(chat.chat_id, picked));
+            return;
+          }
+          if (!(await requireTripManager(ctx, picked))) return;
+          if (!action.confirmed) {
+            await editView(ctx, deleteTripConfirmView(picked));
+            return;
+          }
+          await editView(ctx, await runDeleteTrip(chat, picked));
+          return;
+        }
+        case "mergefinish":
+          await finishGpxMerge(ctx);
+          return;
+        case "mergecancel":
+          await cancelGpxMerge(ctx);
+          return;
+        case "mypagelink": {
+          await editView(ctx, await myPageLinkView(ctx, action.confirmed));
+          return;
+        }
+      }
+
+      const trip = await getActiveTrip(chat);
       if (!trip) {
         await ctx.reply("No active trip in this chat any more — /trips lists them.");
         return;
@@ -935,6 +1140,74 @@ export function createBot(): Bot {
             await renderOgCard(trip.id).catch(() => {});
           }
           break;
+        case "days":
+          view = await dayPickerView(trip, action.page, action.mode);
+          break;
+        case "setday": {
+          const max = tripDayCount(trip);
+          if (action.dayNumber > max) {
+            view = await dayPickerView(trip, 0, "set");
+            view = { ...view, text: `That trip ends on day ${max}.\n\n${view.text}` };
+            break;
+          }
+          const day = await ensureDay(trip, action.dayNumber);
+          await updateTrip(trip.id, { current_day_number: action.dayNumber });
+          const moved = { ...trip, current_day_number: action.dayNumber };
+          view = await dayPickerView(moved, pageOfDay(action.dayNumber), "set");
+          view = {
+            ...view,
+            text:
+              `📅 Day ${action.dayNumber} (${day.date}) is now current — uploads land here.\n\n` +
+              view.text,
+          };
+          break;
+        }
+        case "status":
+          view = await tripStatusView(trip);
+          break;
+        case "reminders": {
+          await updateTrip(trip.id, { reminders_enabled: action.on });
+          view = await tripStatusView({ ...trip, reminders_enabled: action.on });
+          view = { ...view, text: `${remindersMessage(action.on)}\n\n${view.text}` };
+          break;
+        }
+        case "endtrip": {
+          if (!(await requireTripManager(ctx, trip))) return;
+          if (!action.confirmed) {
+            view = endTripConfirmView(trip);
+            break;
+          }
+          await finishTrip(trip);
+          view = await tripFinishedView(trip);
+          break;
+        }
+        case "clearday": {
+          view = action.confirmed
+            ? await runClearDay(trip, action.dayNumber)
+            : await clearDayConfirmView(trip, action.dayNumber);
+          break;
+        }
+        case "liveoff": {
+          await updateTrip(trip.id, { live_url: null, live_expires_at: null });
+          const off = { ...trip, live_url: null, live_expires_at: null };
+          view = await tripStatusView(off);
+          view = {
+            ...view,
+            text: `⚫️ Live banner off. Paste a LiveTrack link to switch it back on.\n\n${view.text}`,
+          };
+          break;
+        }
+        case "relink": {
+          if (!action.confirmed) {
+            view = relinkConfirmView(trip);
+            break;
+          }
+          await updateTrip(trip.id, { share_slug: slugId(16) });
+          const updated = (await getTrip(trip.id)) ?? trip;
+          view = await tripStatusView(updated);
+          view = { ...view, text: `🔗 Old link is dead. New family link below.\n\n${view.text}` };
+          break;
+        }
       }
 
       // Both item screens return null for something that has already gone — a
@@ -978,17 +1251,21 @@ export function createBot(): Bot {
     await ctx.reply(
       `🧭 ${escapeMd(senderName)}'s permanent page — share it once and every future trip appears on it:\n` +
         `${env.appOrigin}/traveler/${slug}\n\n` +
-        `_Anyone with this link sees all your trips. /newmypage makes a fresh link and kills this one._`,
-      { parse_mode: "Markdown" },
+        `_Anyone with this link sees all your trips._`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard().text(
+          "🔗 New link (kills this one)",
+          encodeAction({ type: "mypagelink", confirmed: false }),
+        ),
+      },
     );
   });
 
   bot.command("newmypage", async (ctx) => {
-    const { senderId, isRegistered } = ctx.state;
+    const { isRegistered } = ctx.state;
     if (!isRegistered) return;
-    const slug = slugId(20);
-    await supabase().from("users").update({ traveler_slug: slug }).eq("telegram_id", senderId);
-    await ctx.reply(`🔗 Old page link is dead. New one:\n${env.appOrigin}/traveler/${slug}`);
+    await sendView(ctx, myPageConfirmView());
   });
 
   bot.command("archive", async (ctx) => {
@@ -1018,40 +1295,18 @@ export function createBot(): Bot {
     }
   });
 
+  // The trip screen is the hub: everything else about a trip is a tap from here.
   bot.command("trip", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    const totals = await tripTotals(trip.id);
-    const progress =
-      totals.planM > 0
-        ? ` (${Math.min(100, Math.round((totals.distanceM / totals.planM) * 100))}% of plan)`
-        : "";
-
-    await ctx.reply(
-      `🎒 *${escapeMd(trip.name)}* — ${trip.start_date} → ${trip.end_date ?? "ongoing"}\n` +
-        `📅 Current day: ${trip.current_day_number ?? "not set"}\n` +
-        `📏 ${km(totals.distanceM)} km over ${totals.daysWithTracks} tracked days${progress}\n` +
-        `🔔 Reminders ${trip.reminders_enabled ? "on" : "off"}\n` +
-        `👨‍👩‍👧 ${tripLink(trip)}`,
-      { parse_mode: "Markdown" },
-    );
+    await sendView(ctx, await tripStatusView(trip));
   });
 
   bot.command("endtrip", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
     if (!(await requireTripManager(ctx, trip))) return;
-
-    await finishTrip(trip);
-    const totals = await tripTotals(trip.id);
-    await ctx.reply(
-      `🏁 *${escapeMd(trip.name)}* is finished — ${km(totals.distanceM)} km and ` +
-        `${Math.round(totals.elevationUp)} m of climbing over ${totals.daysWithTracks} days.\n\n` +
-        `Nothing more lands here until you start or pick another trip. The family link keeps working:\n` +
-        `${tripLink(trip)}\n\n` +
-        `_/archive saves it as a file. /usetrip picks it up again if you ended it early._`,
-      { parse_mode: "Markdown" },
-    );
+    await sendView(ctx, endTripConfirmView(trip));
   });
 
   bot.command("deletetrip", async (ctx) => {
@@ -1063,11 +1318,7 @@ export function createBot(): Bot {
       return;
     }
     if (!typed) {
-      await ctx.reply(
-        "Deleting a trip removes its days, photos, notes and family page for good — " +
-          "there is no undo.\n\nType the name to confirm, e.g.\n" +
-          `/deletetrip ${trips[0].name}`,
-      );
+      await sendView(ctx, tripPickerView(trips, chat.active_trip_id, "delete"));
       return;
     }
 
@@ -1150,9 +1401,14 @@ export function createBot(): Bot {
     } else {
       lines.push("", "The banner is up but shows no route — it just links to Garmin.");
     }
-    lines.push("", "/live off takes the banner down.");
     // Plain text: the session name is Garmin's, not something we can escape for.
-    await ctx.reply(lines.join("\n"), { link_preview_options: { is_disabled: true } });
+    await ctx.reply(lines.join("\n"), {
+      link_preview_options: { is_disabled: true },
+      reply_markup: new InlineKeyboard()
+        .text("⚫️ Take the banner down", encodeAction({ type: "liveoff" }))
+        .row()
+        .text("🎒 Trip", encodeAction({ type: "status" })),
+    });
   });
 
   bot.command("reminders", async (ctx) => {
@@ -1161,18 +1417,23 @@ export function createBot(): Bot {
     const arg = (ctx.match as string).trim().toLowerCase();
     if (arg !== "on" && arg !== "off") {
       await ctx.reply(
-        `Reminders for *${escapeMd(trip.name)}* are *${trip.reminders_enabled ? "on" : "off"}*.\n` +
-          `Change with /reminders on or /reminders off.`,
-        { parse_mode: "Markdown" },
+        `Reminders for *${escapeMd(trip.name)}* are *${trip.reminders_enabled ? "on" : "off"}*.`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: new InlineKeyboard()
+            .text("🔔 On", encodeAction({ type: "reminders", on: true }))
+            .text("🔕 Off", encodeAction({ type: "reminders", on: false })),
+        },
       );
       return;
     }
     await updateTrip(trip.id, { reminders_enabled: arg === "on" });
-    await ctx.reply(
-      arg === "on"
-        ? "🔔 Reminders on — I'll ping this chat quietly when a day has no track."
-        : "🔕 Reminders off for this trip. Everything else works as before.",
-    );
+    await ctx.reply(remindersMessage(arg === "on"), {
+      reply_markup: new InlineKeyboard().text(
+        arg === "on" ? "🔕 Turn off" : "🔔 Turn on",
+        encodeAction({ type: "reminders", on: arg !== "on" }),
+      ),
+    });
   });
 
   bot.command("renametrip", async (ctx) => {
@@ -1237,12 +1498,11 @@ export function createBot(): Bot {
     );
   });
 
+  // Killing a link the family already has is worth one deliberate tap.
   bot.command("regeneratelink", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    await updateTrip(trip.id, { share_slug: slugId(16) });
-    const updated = await getTrip(trip.id);
-    await ctx.reply(`🔗 Old link is dead. New family link:\n${tripLink(updated!)}`);
+    await sendView(ctx, relinkConfirmView(trip));
   });
 
   bot.command("invite", async (ctx) => {
@@ -1317,10 +1577,10 @@ export function createBot(): Bot {
     const chatId = ctx.chat!.id;
 
     if (!raw) {
-      // No args: show usage or finalize if session exists
+      // No args: finish the open session, or explain how to start one.
       const { data: session } = await supabase()
         .from("gpx_merge_sessions")
-        .select("name, tracks")
+        .select("tracks")
         .eq("chat_id", chatId)
         .maybeSingle();
 
@@ -1333,45 +1593,7 @@ export function createBot(): Bot {
         );
         return;
       }
-
-      // Finalize: merge tracks from session
-      const tracks = session.tracks ?? [];
-
-      if (!tracks || tracks.length < 2) {
-        await ctx.reply("Need at least 2 GPX files in session. Upload more first.");
-        return;
-      }
-
-      const allPoints: TrackPoint[] = [];
-      const sports = new Map<string, number>();
-      for (const t of tracks) {
-        const pts = t.points ?? [];
-        allPoints.push(...pts);
-        if (t.sport) sports.set(t.sport, (sports.get(t.sport) ?? 0) + 1);
-      }
-
-      const hasTime = allPoints.every((p) => p.time !== undefined);
-      if (hasTime) allPoints.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-
-      let sport: string | undefined;
-      let maxCount = 0;
-      for (const [s, c] of sports) {
-        if (c > maxCount) {
-          maxCount = c;
-          sport = s;
-        }
-      }
-
-      computeStats(allPoints);
-      const gpx = toGpx(session.name, [allPoints]);
-
-      // Clean up session
-      await supabase().from("gpx_merge_sessions").delete().eq("chat_id", chatId);
-
-      await ctx.replyWithDocument(
-        new InputFile(Buffer.from(gpx), `${session.name.replace(/[^a-z0-9_-]/gi, "_")}.gpx`),
-        { caption: `✅ Merged ${tracks.length} GPX file(s) into ${session.name} (${(gpx.length / 1024).toFixed(1)} KB)` },
-      );
+      await finishGpxMerge(ctx);
       return;
     }
 
@@ -1383,7 +1605,8 @@ export function createBot(): Bot {
       tracks: [],
     });
     await ctx.reply(
-      `📥 Started GPX merge session for "${name}".\nUpload .gpx files now.\nWhen done, send /mergegpx to finish.`,
+      `📥 Started GPX merge session for "${name}".\nUpload .gpx files now, then finish below.`,
+      { reply_markup: mergeSessionKeyboard() },
     );
   });
 
@@ -1467,7 +1690,9 @@ export function createBot(): Bot {
             .from("gpx_merge_sessions")
             .update({ tracks: newTracks })
             .eq("chat_id", ctx.chat!.id);
-          await ctx.reply(`✅ Added "${doc.file_name}" (${newTracks.length} file(s) in session)`);
+          await ctx.reply(`✅ Added "${doc.file_name}" (${newTracks.length} file(s) in session)`, {
+            reply_markup: mergeSessionKeyboard(),
+          });
           return;
         }
       }
@@ -1544,7 +1769,9 @@ export function createBot(): Bot {
         .single();
       if (error) throw error;
       const sent = await ctx
-        .reply(`📸 Added to day ${day.day_number}${matched ? " and pinned on the map" : ""}.`)
+        .reply(`📸 Added to day ${day.day_number}${matched ? " and pinned on the map" : ""}.`, {
+          reply_markup: undoKeyboard("media", inserted.id, day.day_number),
+        })
         .catch(() => undefined);
       await recordAction(ctx, sent, "media", inserted.id);
     } catch (err) {

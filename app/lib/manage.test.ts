@@ -20,6 +20,27 @@ describe("manage callback payloads", () => {
     { type: "ask", kind: "note", id: uuid, dayNumber: 4 },
     { type: "confirm", kind: "track_segment", id: uuid, dayNumber: 21 },
     { type: "confirm", kind: "comment", id: uuid, dayNumber: 21 },
+    { type: "days", page: 0, mode: "set" },
+    { type: "days", page: 2, mode: "clear" },
+    { type: "setday", dayNumber: 9 },
+    { type: "trips" },
+    { type: "usetrip", id: uuid },
+    { type: "status" },
+    { type: "reminders", on: true },
+    { type: "reminders", on: false },
+    { type: "endtrip", confirmed: false },
+    { type: "endtrip", confirmed: true },
+    { type: "clearday", dayNumber: 4, confirmed: false },
+    { type: "clearday", dayNumber: 4, confirmed: true },
+    { type: "deletetrips" },
+    { type: "deletetrip", id: uuid, confirmed: false },
+    { type: "deletetrip", id: uuid, confirmed: true },
+    { type: "liveoff" },
+    { type: "relink", confirmed: false },
+    { type: "relink", confirmed: true },
+    { type: "mypagelink", confirmed: true },
+    { type: "mergefinish" },
+    { type: "mergecancel" },
   ];
 
   it("round-trips every screen", () => {
@@ -46,6 +67,14 @@ describe("manage callback payloads", () => {
     // An unknown kind code, and a delete with no id to delete.
     expect(parseAction(`mg:a:q:3:${uuid}`)).toBeNull();
     expect(parseAction("mg:a:p:3:")).toBeNull();
+    // A picker with no mode, a day that is not one, and a two-step action
+    // missing the half that says whether it was confirmed.
+    expect(parseAction("mg:dp:0")).toBeNull();
+    expect(parseAction("mg:dp:0:x")).toBeNull();
+    expect(parseAction("mg:sd:0")).toBeNull();
+    expect(parseAction("mg:et")).toBeNull();
+    expect(parseAction("mg:dx:1:")).toBeNull();
+    expect(parseAction("mg:cd:2:maybe")).toBeNull();
   });
 });
 

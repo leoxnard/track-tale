@@ -34,7 +34,7 @@ export interface View {
   preview?: boolean;
 }
 
-interface DayRow {
+export interface DayRow {
   id: string;
   day_number: number;
   date: string;
@@ -45,7 +45,7 @@ interface DayRow {
 }
 
 /** Days that hold something, newest day last — the order the trip happened in. */
-async function loadDays(tripId: string): Promise<DayRow[]> {
+export async function loadDays(tripId: string): Promise<DayRow[]> {
   const { data } = await supabase()
     .from("days")
     .select("id, day_number, date, notes(id), media(id), track_segments(id), comments(id)")
@@ -62,6 +62,8 @@ export async function overview(trip: DbTrip): Promise<View> {
   const keyboard = new InlineKeyboard();
 
   if (days.length === 0) {
+    keyboard.text("📅 Days", encodeAction({ type: "days", page: 0, mode: "set" }));
+    keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
     return {
       text:
         `*${escapeMd(trip.name)}* has nothing on it yet.\n\n` +
@@ -85,6 +87,8 @@ export async function overview(trip: DbTrip): Promise<View> {
       )
       .row();
   }
+
+  keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
 
   return {
     text:
