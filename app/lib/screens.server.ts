@@ -272,9 +272,10 @@ export async function tripStatusView(trip: DbTrip): Promise<View> {
     keyboard.text("⚫️ Live banner off", encodeAction({ type: "liveoff" })).row();
   }
   keyboard
+    .text("🔄 Swap a photo", encodeAction({ type: "replaceHome" }))
     .text("🗑️ Empty a day", encodeAction({ type: "days", page: 0, mode: "clear" }))
-    .text("🔗 New family link", encodeAction({ type: "relink", confirmed: false }))
     .row()
+    .text("🔗 New family link", encodeAction({ type: "relink", confirmed: false }))
     .text("🏁 End trip", encodeAction({ type: "endtrip", confirmed: false }));
 
   return {

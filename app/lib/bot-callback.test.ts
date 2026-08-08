@@ -50,7 +50,15 @@ vi.mock("./supabase.server", () => {
   return {
     supabase: () => ({
       from: (table: string) => chain(table),
-      storage: { from: () => ({ remove: async () => ({}) }) },
+      storage: {
+        from: () => ({
+          remove: async () => ({}),
+          upload: async () => ({ error: null }),
+          getPublicUrl: (path: string) => ({
+            data: { publicUrl: `https://example.supabase.co/storage/${path}` },
+          }),
+        }),
+      },
     }),
   };
 });
@@ -315,6 +323,74 @@ describe("the trip and day pickers", () => {
 });
 
 /**
+ * `/replace` reuses the `/manage` keyboard, which is most of why it is worth
+ * having — and also the risk in it. The two browsers look alike, sit one tap
+ * apart and disagree completely about what a tap on a photo means.
+ */
+describe("the /replace keyboard", () => {
+  const PHOTO = "photo-1";
+
+  beforeEach(() => {
+    vi.resetModules();
+    deadTable = null;
+    apiResults = {};
+    apiPayloads = [];
+    rows = {
+      users: { telegram_id: 42, display_name: "Leonard", is_owner: true },
+      chats: { chat_id: CHAT_ID, type: "supergroup", title: "TrackTale", active_trip_id: "trip-1" },
+      trips: { id: "trip-1", name: "HochlandKinder", start_date: "2026-07-25", end_date: null },
+      days: {
+        id: "day-1",
+        date: "2026-07-25",
+        notes: [{ id: "note-1", text: "Long climb", created_at: "2026-07-25T09:00:00Z" }],
+        media: [
+          { id: PHOTO, caption: "Sunrise over the pass", telegram_date: "2026-07-25T06:00:00Z" },
+        ],
+        track_segments: [],
+        comments: [],
+      },
+      media: {
+        caption: "Sunrise over the pass",
+        storage_path: "trip-1/day-1/OLDoldOL.jpg",
+        thumb_path: null,
+      },
+    };
+  });
+
+  const screen = () =>
+    String(
+      apiPayloads.find((c) => c.method === "editMessageText" || c.method === "sendMessage")
+        ?.payload.text ?? "",
+    );
+
+  it("offers only photos, since only a photo has a picture to swap", async () => {
+    // The day also holds a note. Listing it here would offer a swap that cannot
+    // mean anything, and a tap on it would arm one against a row with no file.
+    const calls = await runCallback("mg:rd:1:0");
+
+    expect(calls[0]).toBe("answerCallbackQuery");
+    expect(screen()).toContain("1 photo(s)");
+    expect(screen()).not.toContain("Long climb");
+  });
+
+  it("waits for the new picture once a photo is picked", async () => {
+    const calls = await runCallback(`mg:rp:1:${PHOTO}`);
+
+    expect(calls[0]).toBe("answerCallbackQuery");
+    expect(screen()).toContain("Now send me the new picture");
+    // The old one is shown, because from here the next photo overwrites it.
+    expect(screen()).toContain("Sunrise over the pass");
+  });
+
+  it("does not read a replace tap as a delete", async () => {
+    // The collision worth guarding: both browsers encode "a photo on day 1",
+    // and one of them is not undoable.
+    await runCallback(`mg:rp:1:${PHOTO}`);
+    expect(screen()).not.toContain("delete");
+  });
+});
+
+/**
  * The other half of the same failure: a tap Telegram never delivers looks, from
  * the chat, exactly like a tap the bot fumbled. `/diag` is what tells them apart,
  * so what it reports has to be right about the case that matters.
@@ -378,5 +454,88 @@ describe("/diag", () => {
     await runUpdate(commandUpdate("/diag"));
 
     expect(apiPayloads.some((c) => c.method === "getWebhookInfo")).toBe(false);
+  });
+});
+
+/**
+ * The half of the fault no amount of handler code could reach.
+ *
+ * `allowed_updates` lives on Telegram's side and outlives every deploy, so a
+ * webhook registered before the `/manage` keyboard existed goes on delivering
+ * messages while dropping taps — and the bot cannot tell, because a dropped tap
+ * arrives as nothing at all. Repairing it has to happen without anyone knowing
+ * to ask for it, and it has to stop once it has, or every cold start writes to
+ * Telegram again.
+ */
+describe("keeping the webhook subscribed to taps", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    deadTable = null;
+    apiResults = {};
+    apiPayloads = [];
+    rows = {};
+  });
+
+  async function check(info: Record<string, unknown>) {
+    const { createBot, ensureTapsDelivered } = await import("./bot.server");
+    const bot = createBot();
+    bot.api.config.use(async (_prev, method, payload) => {
+      apiPayloads.push({ method, payload: payload as Record<string, unknown> });
+      return { ok: true, result: apiResults[method] ?? true } as never;
+    });
+    apiResults.getWebhookInfo = info;
+    return ensureTapsDelivered(bot);
+  }
+
+  const sent = (method: string) => apiPayloads.find((c) => c.method === method)?.payload;
+
+  it("re-subscribes a webhook that was never asked for button taps", async () => {
+    const result = await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 0,
+      allowed_updates: ["message", "edited_message"],
+    });
+
+    expect(result).toBe("repaired");
+    expect(sent("setWebhook")?.allowed_updates).toContain("callback_query");
+    // Telegram's URL, not one rebuilt from this deploy's env — the webhook may
+    // well point at a different deployment than the one running this check.
+    expect(sent("setWebhook")?.url).toBe("https://tracktale.example/api/telegram");
+  });
+
+  it("says so in the chat, since the fault itself was silent", async () => {
+    await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 0,
+      allowed_updates: ["message"],
+    });
+
+    expect(String(sent("sendMessage")?.text ?? "")).toContain("/manage");
+    expect(sent("sendMessage")?.chat_id).toBe(42);
+  });
+
+  it("leaves Telegram's own default alone", async () => {
+    // No allowed_updates means everything bar the chat-member types, taps
+    // included. Rewriting that would be a change for its own sake.
+    const result = await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 3,
+    });
+
+    expect(result).toBe("ok");
+    expect(apiPayloads.some((c) => c.method === "setWebhook")).toBe(false);
+  });
+
+  it("leaves a subscription that already covers everything alone", async () => {
+    // The state a repair leaves behind: it has to read as fine on the next cold
+    // start, or every one of them writes to Telegram again.
+    const result = await check({
+      url: "https://tracktale.example/api/telegram",
+      pending_update_count: 0,
+      allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member"],
+    });
+
+    expect(result).toBe("ok");
+    expect(apiPayloads.some((c) => c.method === "setWebhook")).toBe(false);
   });
 });

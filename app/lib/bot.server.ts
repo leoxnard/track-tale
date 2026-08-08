@@ -47,9 +47,18 @@ import {
   dayTally,
   dayView,
   overview,
+  replaceDayView,
+  replaceOverview,
+  replacePromptView,
   tallyTotal,
   type View,
 } from "./manage.server";
+import {
+  armReplacement,
+  clearReplacement,
+  pendingReplacement,
+  replacePhoto,
+} from "./media-replace.server";
 import {
   backToStatus,
   clearDayConfirmView,
@@ -96,9 +105,17 @@ async function recordAction(
  * this item, in place of the confirmation it was attached to.
  */
 function undoKeyboard(kind: ItemKind, id: string, dayNumber: number): InlineKeyboard {
-  return new InlineKeyboard()
-    .text("🗑 Delete this", encodeAction({ type: "ask", kind, id, dayNumber }))
-    .text(`📅 Day ${dayNumber}`, encodeAction({ type: "day", dayNumber, page: 0 }));
+  const keyboard = new InlineKeyboard().text(
+    "🗑 Delete this",
+    encodeAction({ type: "ask", kind, id, dayNumber }),
+  );
+  // A photo is the one thing whose picture can be changed without losing what
+  // the row means, and the moment right after sending it is when a better
+  // version is most likely to be to hand.
+  if (kind === "media") {
+    keyboard.text("🔄 Swap picture", encodeAction({ type: "replacePick", id, dayNumber }));
+  }
+  return keyboard.text(`📅 Day ${dayNumber}`, encodeAction({ type: "day", dayNumber, page: 0 }));
 }
 
 /**
@@ -181,6 +198,56 @@ const WEBHOOK_UPDATES = [
   "my_chat_member",
 ] as const;
 
+/**
+ * Make sure Telegram is actually sending us button taps, and put it right if
+ * not.
+ *
+ * The subscription lives on Telegram's side, not in this repository: it is
+ * whatever the last `setWebhook` call said, months ago, from a shell. Nothing a
+ * deploy does can change it. So a webhook registered with an `allowed_updates`
+ * list that predates the `/manage` keyboard keeps delivering messages happily
+ * while dropping every tap before it leaves Telegram — and no amount of fixing
+ * the handler helps, because the handler is never reached. That is invisible
+ * from the chat, and it survives exactly the kind of "fixed it, still broken"
+ * loop that costs an afternoon.
+ *
+ * `/diag fix` says the same thing out loud, but it has to be run by the owner
+ * who already knows to suspect this. Doing it here means the deploy that ships
+ * a new kind of update also subscribes to it.
+ *
+ * A missing `allowed_updates` is Telegram's default, which already includes
+ * everything we want — so it is left alone, and this only ever writes when the
+ * list is present and short. That makes it converge after one call rather than
+ * re-registering on every cold start.
+ */
+export async function ensureTapsDelivered(bot: Bot): Promise<"ok" | "repaired"> {
+  const info = await bot.api.getWebhookInfo();
+  const allowed = info.allowed_updates;
+  if (!allowed || WEBHOOK_UPDATES.every((u) => allowed.includes(u))) return "ok";
+
+  // The URL Telegram already has, not one built from an env var: this deploy is
+  // not necessarily the one the webhook points at, and pointing it here would
+  // be a much bigger change than the one being made.
+  await bot.api.setWebhook(info.url || `${env.appOrigin}/api/telegram`, {
+    secret_token: env.telegramWebhookSecret,
+    allowed_updates: [...WEBHOOK_UPDATES],
+  });
+
+  // Say so, or the repair is as invisible as the fault was. The owner is the
+  // one who has been tapping buttons that did nothing.
+  await bot.api
+    .sendMessage(
+      env.ownerTelegramId,
+      `🔧 Telegram was only delivering: ${allowed.join(", ")}.\n\n` +
+        `Button taps were being dropped before they reached the bot, which is why ` +
+        `/manage buttons hung on "Loading…". Fixed — it now delivers ` +
+        `${WEBHOOK_UPDATES.join(", ")}.\n\nSend /manage and tap a day.`,
+    )
+    .catch(() => {});
+
+  return "repaired";
+}
+
 interface BotState {
   chat: DbChat;
   senderId: number;
@@ -221,6 +288,8 @@ Every confirmation carries a 🗑 button — one tap takes that thing back off
 Reply /delete to one of my messages — removes that one
 /manage — browse the trip and delete anything on it, however old: notes,
 photos, tracks, and guestbook messages the family left
+/replace — swap the picture behind a photo: pick it, send the new one. Caption,
+map pin and place in the day all stay — handy after running a filter over them
 /clearday — pick a day and empty it: every note, photo and track on it
 
 *Live*
@@ -952,6 +1021,21 @@ export function createBot(): Bot {
   });
 
   /**
+   * Swap the picture behind a photo, keeping everything the photo means: its
+   * caption, the pin it earned off the day's track, its place in the day and
+   * who took it. Re-editing a trip's photos is otherwise a delete-and-resend
+   * that throws all of that away and puts the picture back at the end of the
+   * day it belonged in the middle of.
+   */
+  bot.command("replace", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    // A half-finished pick from before is not what this tap meant.
+    await clearReplacement(ctx.chat!.id);
+    await sendView(ctx, await replaceOverview(trip));
+  });
+
+  /**
    * Why a button tap did nothing.
    *
    * Everything the bot can say about a tap it never received is nothing, so
@@ -1208,6 +1292,29 @@ export function createBot(): Bot {
           view = { ...view, text: `🔗 Old link is dead. New family link below.\n\n${view.text}` };
           break;
         }
+        case "replaceHome":
+          await clearReplacement(ctx.chat!.id);
+          view = await replaceOverview(trip);
+          break;
+        case "replaceDay":
+          // Backing out to the list un-picks whatever was picked: the next
+          // photo sent should not land on a choice already navigated away from.
+          await clearReplacement(ctx.chat!.id);
+          view = await replaceDayView(trip, action.dayNumber, action.page);
+          break;
+        case "replacePick":
+          view = await replacePromptView(trip, action.id, action.dayNumber);
+          // Only once the photo is known to still be there and the screen has
+          // been built — arming first would leave the chat waiting on a pick
+          // it was never shown.
+          if (view) {
+            await armReplacement(ctx.chat!.id, action.id, action.dayNumber, ctx.state.senderId);
+          }
+          break;
+        case "replaceCancel":
+          await clearReplacement(ctx.chat!.id);
+          view = await replaceDayView(trip, action.dayNumber, 0);
+          break;
       }
 
       // Both item screens return null for something that has already gone — a
@@ -1216,7 +1323,14 @@ export function createBot(): Bot {
       let notice = "";
       if (!view) {
         notice = "That one is already gone.\n\n";
-        view = await dayView(trip, "dayNumber" in action ? action.dayNumber : 0, 0);
+        const dayNumber = "dayNumber" in action ? action.dayNumber : 0;
+        // Back to the browser the tap came from. Dropping someone out of
+        // /replace into the delete screen would be a bad place to put them by
+        // accident, of all the screens to land on.
+        view =
+          action.type === "replacePick"
+            ? await replaceDayView(trip, dayNumber, 0)
+            : await dayView(trip, dayNumber, 0);
       }
 
       await editView(ctx, { ...view, text: notice + view.text });
@@ -1714,14 +1828,61 @@ export function createBot(): Bot {
   bot.on("message:photo", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-    const day = await requireDay(ctx, trip);
-    if (!day) return;
 
     // Telegram already ships several resolutions — use a small one for the grid
     // so the family page stays cheap to load, and the largest for the lightbox.
     const sizes = [...ctx.message.photo].sort((a, b) => a.width - b.width);
     const full = sizes[sizes.length - 1];
     const thumb = sizes.find((s) => s.width >= 320) ?? full;
+
+    // Did a /replace button pick a photo for this one to take the place of?
+    // Ahead of the current day on purpose: a replacement belongs to the day of
+    // the photo it replaces, which need not be the day uploads are landing on.
+    const pending = await pendingReplacement(ctx.chat!.id);
+    if (pending) {
+      try {
+        const swapped = await replacePhoto(pending.mediaId, {
+          full: await downloadTelegramFile(bot, full.file_id),
+          thumb:
+            thumb.file_id !== full.file_id
+              ? await downloadTelegramFile(bot, thumb.file_id)
+              : null,
+          caption: ctx.message.caption ?? null,
+        });
+        await clearReplacement(ctx.chat!.id);
+
+        if (!swapped) {
+          await ctx.reply(
+            `⚠️ That photo was deleted while I was waiting for the new one, so I left ` +
+              `this picture out rather than putting it somewhere you didn't ask for.\n\n` +
+              `/replace starts again.`,
+          );
+          return;
+        }
+
+        // A share card built from a photo is now built from the old one.
+        await renderOgCard(trip.id).catch(() => {});
+
+        // Straight back to the day's photos: swapping one is rarely the whole
+        // job — a filter run over a trip means doing this a dozen times, and
+        // the next one should be one tap away rather than another /replace.
+        const view = await replaceDayView(trip, pending.dayNumber, 0);
+        await sendView(ctx, {
+          ...view,
+          text: `🔄 Photo swapped on day ${pending.dayNumber}.\n\n${view.text}`,
+        });
+      } catch (err) {
+        await clearReplacement(ctx.chat!.id);
+        await ctx.reply(
+          `⚠️ Swapping that photo failed: ${err instanceof Error ? err.message : "unknown error"}\n\n` +
+            `The old picture is untouched. /replace starts again.`,
+        );
+      }
+      return;
+    }
+
+    const day = await requireDay(ctx, trip);
+    if (!day) return;
 
     try {
       const id = nanoid(8);

@@ -149,6 +149,20 @@ create table if not exists gpx_merge_sessions (
   created_at timestamptz not null default now()
 );
 
+-- /replace picks a photo with a button and then has to wait for the next one
+-- sent into the chat, which arrives as its own update with nothing tying it
+-- back. One row per chat: the pick is a conversation, and a chat only has one
+-- going at a time. `on delete cascade` means a photo deleted from under a
+-- waiting /replace takes the wait with it rather than leaving it pointing at a
+-- row that has gone.
+create table if not exists pending_replacements (
+  chat_id bigint primary key references chats(chat_id) on delete cascade,
+  media_id uuid not null references media(id) on delete cascade,
+  day_number int not null,
+  requested_by bigint,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists track_segments_day_idx on track_segments(day_id);
 create index if not exists days_trip_idx on days(trip_id);
 create index if not exists media_day_idx on media(day_id);
@@ -171,6 +185,7 @@ alter table notes enable row level security;
 alter table comments enable row level security;
 alter table bot_actions enable row level security;
 alter table weather_cache enable row level security;
+alter table pending_replacements enable row level security;
 
 grant usage on schema public to service_role;
 grant all privileges on all tables in schema public to service_role;

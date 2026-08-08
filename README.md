@@ -48,8 +48,14 @@ notes, stats and weather.
    ```
    `callback_query` is what carries a tap on one of the bot's buttons. Leave it out of
    an explicit `allowed_updates` and the `/manage` keyboard hangs on "Loading…" forever
-   while ordinary messages keep working. `/diag` in the chat says what Telegram is
-   actually delivering, and `/diag fix` re-registers the webhook with the list above.
+   while ordinary messages keep working — the handler is never reached, so no amount of
+   fixing it helps.
+
+   That subscription lives on Telegram's side and no deploy can change it, so the bot
+   checks it itself: once per cold start and again in the nightly cron, it asks Telegram
+   what it is delivering and re-registers with the list above if button taps are missing,
+   telling the owner in the chat when it did. `/diag` reports the same thing on demand,
+   and `/diag fix` forces the re-registration.
 5. **Vercel**: deploy; set the env vars; `vercel.json` schedules the daily cron (01:00 UTC —
    the reminder + plan refresh + live-link expiry).
 
@@ -90,6 +96,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/note …` | journal entry (plain text works too) |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
+| `/replace` | swap the picture behind a photo, keeping its caption, map pin and place in the day |
 | `/clearday` | pick a day and empty it: every note, photo and track on it |
 | `/live` | what the live banner is showing, and why; `/live off` takes it down |
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
@@ -110,6 +117,17 @@ from a minute ago. Deleting a photo takes its files out of storage too.
 `/clearday` empties a whole day in one go, for a day uploaded against the wrong day number
 or built from the wrong files; it lists the days that hold something, asks for a confirmation
 first, and leaves the family's guestbook messages alone.
+
+`/replace` is the same browser again, photos only: pick a day, tap a photo, send the new
+picture. The row survives the swap, so the caption, the pin the photo earned by matching the
+day's track, its place in the day's order and who took it all stay as they were — only the
+file changes. That matters when the whole trip's photos come back from an edit: deleting and
+re-sending them would strip every caption and drop each one at the end of the day it used to
+sit in the middle of. After a swap the day's photo list comes straight back, so working
+through a trip is one tap per picture. The new files are written under fresh names rather
+than over the old ones, because the page, Telegram's previews and any CDN in between cache by
+URL; the old files are removed once the row no longer points at them. A pick expires after an
+hour, so a forgotten `/replace` cannot swallow the next photo sent into the chat.
 
 ## Friends
 

@@ -1,7 +1,7 @@
 import { Bot } from "grammy";
 import { env } from "../lib/env.server";
 import { supabase } from "../lib/supabase.server";
-import { refreshPlan } from "../lib/bot.server";
+import { ensureTapsDelivered, refreshPlan } from "../lib/bot.server";
 
 /**
  * Daily maintenance, triggered by Vercel Cron (schedule in vercel.json).
@@ -74,6 +74,17 @@ export async function loader({ request }: { request: Request }) {
     } catch (err) {
       failures.push(`${trip.name}: ${message(err)}`);
     }
+  }
+
+  try {
+    // Belt to the webhook handler's braces: that one only runs when an update
+    // arrives, and a chat whose buttons all hang is a chat nobody is sending
+    // updates from.
+    if ((await ensureTapsDelivered(bot)) === "repaired") {
+      report.push("re-subscribed the webhook to button taps");
+    }
+  } catch (err) {
+    failures.push(`checking what Telegram delivers: ${message(err)}`);
   }
 
   try {

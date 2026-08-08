@@ -46,11 +46,12 @@ export interface DayRow {
 
 /** Days that hold something, newest day last — the order the trip happened in. */
 export async function loadDays(tripId: string): Promise<DayRow[]> {
-  const { data } = await supabase()
+  const { data, error } = await supabase()
     .from("days")
     .select("id, day_number, date, notes(id), media(id), track_segments(id), comments(id)")
     .eq("trip_id", tripId)
     .order("day_number");
+  if (error) throw new Error(`could not load the trip's days: ${error.message}`);
 
   return ((data ?? []) as DayRow[]).filter(
     (d) => d.notes.length + d.media.length + d.track_segments.length + d.comments.length > 0,
@@ -99,6 +100,134 @@ export async function overview(trip: DbTrip): Promise<View> {
   };
 }
 
+/**
+ * The `/replace` day picker: only days with photos on them, since a photo is
+ * the only thing whose file can be swapped without the thing itself changing.
+ */
+export async function replaceOverview(trip: DbTrip): Promise<View> {
+  const days = (await loadDays(trip.id)).filter((d) => d.media.length > 0);
+  const keyboard = new InlineKeyboard();
+
+  if (days.length === 0) {
+    keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
+    return {
+      text:
+        `*${escapeMd(trip.name)}* has no photos on it yet.\n\n` +
+        `Send some first — then /replace can swap one for a better version.`,
+      keyboard,
+      markdown: true,
+    };
+  }
+
+  for (const day of days) {
+    keyboard
+      .text(
+        `Day ${day.day_number} · ${KIND_ICON.media} ${day.media.length}`,
+        encodeAction({ type: "replaceDay", dayNumber: day.day_number, page: 0 }),
+      )
+      .row();
+  }
+
+  keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
+
+  return {
+    text:
+      `🔄 *${escapeMd(trip.name)}* — pick a day, then the photo to swap.\n\n` +
+      `_The new picture keeps the old one's caption, its pin on the map and its ` +
+      `place in the day. Only the image changes._`,
+    keyboard,
+    markdown: true,
+  };
+}
+
+/** One day's photos, each a button that arms the swap. */
+export async function replaceDayView(
+  trip: DbTrip,
+  dayNumber: number,
+  page: number,
+): Promise<View> {
+  const contents = await loadDayContents(trip, dayNumber);
+  const photos = (contents?.items ?? []).filter((i) => i.kind === "media");
+  const keyboard = new InlineKeyboard();
+
+  if (photos.length === 0) {
+    keyboard.text("◀︎ Days", encodeAction({ type: "replaceHome" }));
+    return { text: `Day ${dayNumber} has no photos on it.`, keyboard, markdown: true };
+  }
+
+  const { items, page: current, pageCount } = paginate(photos, page);
+  for (const item of items) {
+    keyboard
+      .text(
+        `${KIND_ICON.media} ${item.label}`,
+        encodeAction({ type: "replacePick", id: item.id, dayNumber }),
+      )
+      .row();
+  }
+
+  if (pageCount > 1) {
+    if (current > 0) {
+      keyboard.text(
+        "‹ Previous",
+        encodeAction({ type: "replaceDay", dayNumber, page: current - 1 }),
+      );
+    }
+    if (current < pageCount - 1) {
+      keyboard.text("Next ›", encodeAction({ type: "replaceDay", dayNumber, page: current + 1 }));
+    }
+    keyboard.row();
+  }
+  keyboard.text("◀︎ Days", encodeAction({ type: "replaceHome" }));
+
+  const paging = pageCount > 1 ? ` — page ${current + 1}/${pageCount}` : "";
+  return {
+    text:
+      `🔄 *Day ${dayNumber}* (${contents!.date}) — ${photos.length} photo(s)${paging}\n\n` +
+      `Tap the one you want to swap.`,
+    keyboard,
+    markdown: true,
+  };
+}
+
+/**
+ * Picked, now waiting. The old picture is in the message on purpose: from here
+ * the next photo sent into the chat replaces it, and that is worth being sure
+ * about before reaching for the camera roll.
+ */
+export async function replacePromptView(
+  trip: DbTrip,
+  id: string,
+  dayNumber: number,
+): Promise<View | null> {
+  if (!(await belongsToDay(trip, "media", id, dayNumber))) return null;
+
+  const { data, error } = await supabase()
+    .from("media")
+    .select("caption, storage_path, thumb_path")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`could not load that photo: ${error.message}`);
+  if (!data) return null;
+
+  const url = supabase()
+    .storage.from("photos")
+    .getPublicUrl(data.thumb_path ?? data.storage_path).data.publicUrl;
+
+  return {
+    text:
+      `🔄 Replacing this photo on day ${dayNumber}:\n` +
+      (data.caption ? `“${data.caption}”\n` : "") +
+      `${url}\n\n` +
+      `Now send me the new picture. The next photo in this chat takes its place — ` +
+      `send one, not an album.`,
+    keyboard: new InlineKeyboard().text(
+      "Cancel",
+      encodeAction({ type: "replaceCancel", dayNumber }),
+    ),
+    preview: true,
+  };
+}
+
 interface DayContents {
   dayId: string;
   date: string;
@@ -106,7 +235,7 @@ interface DayContents {
 }
 
 async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayContents | null> {
-  const { data: day } = await supabase()
+  const { data: day, error } = await supabase()
     .from("days")
     .select(
       "id, date, notes(id, text, created_at), media(id, caption, telegram_date), track_segments(id, name, distance_m, sport, started_at, created_at), comments(id, author_name, text, created_at)",
@@ -114,6 +243,10 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
     .eq("trip_id", trip.id)
     .eq("day_number", dayNumber)
     .maybeSingle();
+  // Not the same as a day that isn't there. A refused query used to fall
+  // through to "Day N is empty now." — a wrong answer, delivered confidently,
+  // that looks from the chat exactly like the button doing nothing.
+  if (error) throw new Error(`could not load day ${dayNumber}: ${error.message}`);
   if (!day) return null;
 
   const d = day as unknown as {
