@@ -33,7 +33,9 @@ import { probeLiveSession } from "./livetrack.server";
 import { parseFit, parseGpx } from "./gpx";
 import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson, type TrackPoint, computeStats } from "./track";
 import { toGpx } from "./gpx-export";
-import { matchPhotoToTrack } from "./photo-match";
+import { matchPhotoToDay } from "./photo-match";
+import { readExif, type ExifData } from "./exif";
+import { imageDocument, type ImageDocument } from "./photo-file";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
@@ -181,6 +183,8 @@ const HELP = `🚴 *TrackTale* — your trip journal
 • Komoot share link → route imported
 • GPX or FIT file → route imported (several merge into one day)
 • Photos with captions → day gallery, pinned on the map
+• Send a photo *as a file* (Telegram: "…" → Send as File) and its own GPS is
+  used, so photos uploaded in the evening still land where you took them
 • Any other text → journal entry
 
 *Oops*
@@ -200,6 +204,7 @@ photos, tracks, and guestbook messages the family left
 • GPX with caption "plan" → same
 /refreshplan — re-sync plan links after editing in Komoot
 /refreshweather — fill in weather for older days
+/refreshphotos — put photos on the map that arrived before their track
 
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
@@ -422,6 +427,8 @@ async function saveTrackSegment(
   if (error) throw error;
 
   await cacheDayWeather(day.id, day.date, points);
+  // Photos uploaded before this track had nothing to match against.
+  const pinned = await backfillPhotoLocations(day.id);
 
   const { count } = await supabase()
     .from("track_segments")
@@ -433,6 +440,7 @@ async function saveTrackSegment(
     `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
   ];
   if ((count ?? 1) > 1) parts.push(`🧩 ${count} segments merged for this day`);
+  if (pinned > 0) parts.push(`📍 ${pinned} photo(s) pinned on the map`);
   const sent = await ctx.reply(parts.join("\n"), { parse_mode: "Markdown" }).catch(() => undefined);
   await recordAction(ctx, sent, "track_segment", inserted.id);
 
@@ -505,6 +513,164 @@ async function downloadTelegramFile(bot: Bot, fileId: string): Promise<ArrayBuff
   const res = await fetch(`https://api.telegram.org/file/bot${env.telegramBotToken}/${file.file_path}`);
   if (!res.ok) throw new Error(`Telegram file download failed: ${res.status}`);
   return res.arrayBuffer();
+}
+
+/** Bot API caps downloads well below what a full-resolution photo can weigh. */
+const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
+
+type PhotoLocation = { lat: number; lng: number; source: "exif" | "track" };
+
+/**
+ * Places a photo on the map. A camera's own GPS fix is exact and always wins;
+ * otherwise we fall back to matching a timestamp against the day's track,
+ * preferring the EXIF capture time over the moment the message was sent.
+ */
+async function locatePhoto(
+  dayId: string,
+  exif: ExifData,
+  sentAtMs: number,
+): Promise<PhotoLocation | null> {
+  if (exif.lat !== undefined && exif.lng !== undefined) {
+    return { lat: exif.lat, lng: exif.lng, source: "exif" };
+  }
+  const { data: segments } = await supabase()
+    .from("track_segments")
+    .select("geojson")
+    .eq("day_id", dayId);
+  const tracks = (segments ?? []).map((s) => fromGeoJson(s.geojson as TrackGeoJson));
+  const hit = matchPhotoToDay(exif.takenAtMs ?? sentAtMs, tracks);
+  return hit ? { ...hit, source: "track" } : null;
+}
+
+/**
+ * A track often arrives after the photos it belongs to — someone shoots all
+ * day and uploads the ride in the evening. Those photos were saved with no
+ * position, so give them one now. Only untouched rows are considered, which
+ * leaves an exact EXIF fix alone.
+ */
+async function backfillPhotoLocations(dayId: string): Promise<number> {
+  const { data: pending } = await supabase()
+    .from("media")
+    .select("id, telegram_date, taken_at")
+    .eq("day_id", dayId)
+    .is("matched_lat", null);
+  if (!pending || pending.length === 0) return 0;
+
+  const { data: segments } = await supabase()
+    .from("track_segments")
+    .select("geojson")
+    .eq("day_id", dayId);
+  const tracks = (segments ?? []).map((s) => fromGeoJson(s.geojson as TrackGeoJson));
+  if (tracks.length === 0) return 0;
+
+  let filled = 0;
+  for (const photo of pending) {
+    const at = Date.parse(photo.taken_at ?? photo.telegram_date);
+    if (Number.isNaN(at)) continue;
+    const hit = matchPhotoToDay(at, tracks);
+    if (!hit) continue;
+    const { error } = await supabase()
+      .from("media")
+      .update({ matched_lat: hit.lat, matched_lng: hit.lng, location_source: "track" })
+      .eq("id", photo.id);
+    if (!error) filled++;
+  }
+  return filled;
+}
+
+interface IncomingPhoto extends ImageDocument {
+  fullFileId: string;
+  thumbFileId: string | null;
+}
+
+async function savePhoto(
+  ctx: Context,
+  bot: Bot,
+  trip: DbTrip,
+  day: { id: string; day_number: number },
+  incoming: IncomingPhoto,
+) {
+  const id = nanoid(8);
+  const base = `${trip.id}/day-${day.day_number}/${id}`;
+  const store = supabase().storage.from("photos");
+
+  const fullBuf = await downloadTelegramFile(bot, incoming.fullFileId);
+  const fullPath = `${base}${incoming.extension}`;
+  const up = await store.upload(fullPath, fullBuf, { contentType: incoming.contentType });
+  if (up.error) throw up.error;
+
+  let thumbPath: string | null = null;
+  if (incoming.thumbFileId && incoming.thumbFileId !== incoming.fullFileId) {
+    const thumbBuf = await downloadTelegramFile(bot, incoming.thumbFileId);
+    thumbPath = `${base}-thumb.jpg`;
+    const upThumb = await store.upload(thumbPath, thumbBuf, { contentType: "image/jpeg" });
+    if (upThumb.error) thumbPath = null;
+  }
+
+  const exif = incoming.keepsExif ? readExif(fullBuf) : {};
+  const sentAtMs = ctx.message!.date * 1000;
+  const located = await locatePhoto(day.id, exif, sentAtMs);
+
+  const { senderId, senderName } = ctx.state;
+  const { data: inserted, error } = await supabase()
+    .from("media")
+    .insert({
+      day_id: day.id,
+      storage_path: fullPath,
+      thumb_path: thumbPath,
+      caption: ctx.message!.caption ?? null,
+      telegram_date: new Date(sentAtMs).toISOString(),
+      taken_at: exif.takenAtMs ? new Date(exif.takenAtMs).toISOString() : null,
+      matched_lat: located?.lat ?? null,
+      matched_lng: located?.lng ?? null,
+      location_source: located?.source ?? null,
+      author_telegram_id: senderId,
+      author_name: senderName,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  const where =
+    located?.source === "exif"
+      ? " and pinned where it was taken"
+      : located
+        ? " and pinned on the map"
+        : "";
+  const sent = await ctx.reply(`📸 Added to day ${day.day_number}${where}.`).catch(() => undefined);
+  await recordAction(ctx, sent, "media", inserted.id);
+}
+
+/** Photos sent as files keep their EXIF, which is the whole point of this path. */
+async function savePhotoDocument(
+  ctx: Context,
+  bot: Bot,
+  doc: { file_id: string; file_size?: number; thumbnail?: { file_id: string } },
+  image: ImageDocument,
+) {
+  const trip = await requireTrip(ctx);
+  if (!trip) return;
+  const day = await requireDay(ctx, trip);
+  if (!day) return;
+
+  if ((doc.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) {
+    await ctx.reply(
+      "That photo is over 20 MB, which Telegram won't let me download. " +
+        "Export it a little smaller and send it again.",
+    );
+    return;
+  }
+
+  try {
+    await savePhoto(ctx, bot, trip, day, {
+      fullFileId: doc.file_id,
+      // Telegram generates a preview for image documents; reuse it for the grid.
+      thumbFileId: doc.thumbnail?.file_id ?? null,
+      ...image,
+    });
+  } catch (err) {
+    await ctx.reply(`⚠️ Photo upload failed: ${err instanceof Error ? err.message : "unknown error"}`);
+  }
 }
 
 async function saveNote(ctx: Context, text: string) {
@@ -1428,16 +1594,54 @@ export function createBot(): Bot {
     );
   });
 
+  // Photos land on the map the moment they arrive, and a later track upload
+  // pins whatever was waiting. Days whose track was already in place before
+  // that logic existed never got the second chance — this gives it to them.
+  bot.command("refreshphotos", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    const { data: days } = await supabase()
+      .from("days")
+      .select("id")
+      .eq("trip_id", trip.id)
+      .order("day_number");
+
+    let pinned = 0;
+    for (const day of days ?? []) pinned += await backfillPhotoLocations(day.id);
+    await ctx.reply(
+      pinned > 0
+        ? `📍 Pinned ${pinned} photo(s) on the map.`
+        : "Every photo that can be placed already is — the rest were sent too far from the track to guess.",
+    );
+  });
+
   bot.on("message:document", async (ctx) => {
     const doc = ctx.message.document;
     const name = (doc.file_name ?? "").toLowerCase();
     const isGpx = name.endsWith(".gpx");
     const isFit = name.endsWith(".fit");
+
     if (!isGpx && !isFit) {
-      if (!ctx.state.isGroup) await ctx.reply("I can only read .gpx and .fit files.");
+      const image = imageDocument(doc.mime_type, name);
+      if (image === "unreadable") {
+        await ctx.reply(
+          "That looks like a HEIC photo. Browsers can't show those, so send it as JPEG — " +
+            "in Lightroom pick JPEG on export, or turn on Settings → Camera → Formats → Most Compatible.",
+        );
+        return;
+      }
+      if (image) {
+        await savePhotoDocument(ctx, bot, doc, image);
+        return;
+      }
+      if (!ctx.state.isGroup) {
+        await ctx.reply(
+          "I can only read .gpx and .fit tracks, and photos sent as JPEG or PNG files.",
+        );
+      }
       return;
     }
-    if ((doc.file_size ?? 0) > 20 * 1024 * 1024) {
+    if ((doc.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) {
       await ctx.reply("File too large — Telegram bots can only download files up to 20 MB.");
       return;
     }
@@ -1499,54 +1703,14 @@ export function createBot(): Bot {
     const thumb = sizes.find((s) => s.width >= 320) ?? full;
 
     try {
-      const id = nanoid(8);
-      const base = `${trip.id}/day-${day.day_number}/${id}`;
-      const store = supabase().storage.from("photos");
-
-      const fullBuf = await downloadTelegramFile(bot, full.file_id);
-      const fullPath = `${base}.jpg`;
-      const up = await store.upload(fullPath, fullBuf, { contentType: "image/jpeg" });
-      if (up.error) throw up.error;
-
-      let thumbPath: string | null = null;
-      if (thumb.file_id !== full.file_id) {
-        const thumbBuf = await downloadTelegramFile(bot, thumb.file_id);
-        thumbPath = `${base}-thumb.jpg`;
-        const upThumb = await store.upload(thumbPath, thumbBuf, { contentType: "image/jpeg" });
-        if (upThumb.error) thumbPath = null;
-      }
-
-      // Pin the photo to the route by timestamp (Telegram strips EXIF/GPS).
-      const photoTimeMs = ctx.message.date * 1000;
-      const { data: segments } = await supabase()
-        .from("track_segments")
-        .select("geojson")
-        .eq("day_id", day.id);
-      let matched: { lat: number; lng: number } | null = null;
-      for (const seg of segments ?? []) {
-        matched = matchPhotoToTrack(photoTimeMs, fromGeoJson(seg.geojson as TrackGeoJson));
-        if (matched) break;
-      }
-
-      const { senderId, senderName } = ctx.state;
-      const { data: inserted, error } = await supabase().from("media").insert({
-        day_id: day.id,
-        storage_path: fullPath,
-        thumb_path: thumbPath,
-        caption: ctx.message.caption ?? null,
-        telegram_date: new Date(photoTimeMs).toISOString(),
-        matched_lat: matched?.lat ?? null,
-        matched_lng: matched?.lng ?? null,
-        author_telegram_id: senderId,
-        author_name: senderName,
-      })
-        .select("id")
-        .single();
-      if (error) throw error;
-      const sent = await ctx
-        .reply(`📸 Added to day ${day.day_number}${matched ? " and pinned on the map" : ""}.`)
-        .catch(() => undefined);
-      await recordAction(ctx, sent, "media", inserted.id);
+      await savePhoto(ctx, bot, trip, day, {
+        fullFileId: full.file_id,
+        thumbFileId: thumb.file_id,
+        extension: ".jpg",
+        contentType: "image/jpeg",
+        // Telegram re-encodes compressed photos and drops the metadata.
+        keepsExif: false,
+      });
     } catch (err) {
       await ctx.reply(`⚠️ Photo upload failed: ${err instanceof Error ? err.message : "unknown error"}`);
     }

@@ -383,7 +383,9 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
     );
     for (let i = 0; i < sortedMedia.length; i++) {
       const m = sortedMedia[i];
-      const file = `photos/day-${d.day_number}-${String(i + 1).padStart(2, "0")}.jpg`;
+      // Photos sent as files keep their own format, so don't rename a PNG .jpg.
+      const ext = /\.[a-z0-9]+$/i.exec(m.storage_path)?.[0] ?? ".jpg";
+      const file = `photos/day-${d.day_number}-${String(i + 1).padStart(2, "0")}${ext}`;
       const { data: blob } = await db.storage.from("photos").download(m.storage_path);
       if (blob) files[file] = new Uint8Array(await blob.arrayBuffer());
       if (m.author_name) contributors.add(m.author_name);

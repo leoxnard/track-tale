@@ -24,3 +24,17 @@ export function matchPhotoToTrack(
   if (!best || bestGap > maxGapMs) return null;
   return { lat: best.lat, lng: best.lng };
 }
+
+/**
+ * Same idea across a whole day. A day can hold several segments, so search
+ * them as one track and let the globally nearest point win — taking the first
+ * segment that happens to match would pin a photo to the morning ride when the
+ * afternoon one was closer.
+ */
+export function matchPhotoToDay(
+  photoTimeMs: number,
+  segments: TrackPoint[][],
+  maxGapMs?: number,
+): { lat: number; lng: number } | null {
+  return matchPhotoToTrack(photoTimeMs, segments.flat(), maxGapMs);
+}
