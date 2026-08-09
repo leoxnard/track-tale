@@ -36,6 +36,7 @@ import { toGpx } from "./gpx-export";
 import { matchPhotoToDay } from "./photo-match";
 import { readExif, type ExifData } from "./exif";
 import { imageDocument, type ImageDocument } from "./photo-file";
+import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
@@ -308,6 +309,7 @@ map pin and place in the day all stay — handy after running a filter over them
 /refreshplan — re-sync plan links after editing in Komoot
 /refreshweather — fill in weather for older days
 /refreshphotos — put photos on the map that arrived before their track
+/compressphotos — shrink oversized photos uploaded before compression existed
 
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
@@ -812,6 +814,25 @@ async function backfillPhotoLocations(dayId: string): Promise<number> {
   return filled;
 }
 
+/**
+ * Writes a camera's own fix onto an existing photo. Returns whether it did.
+ * An exact fix beats both an empty position and one inferred off the track, so
+ * this is the one case where a replacement is allowed to move a pin.
+ */
+async function applyExifLocation(mediaId: string, exif: ExifData): Promise<boolean> {
+  if (exif.lat === undefined || exif.lng === undefined) return false;
+  const { error } = await supabase()
+    .from("media")
+    .update({
+      matched_lat: exif.lat,
+      matched_lng: exif.lng,
+      location_source: "exif",
+      ...(exif.takenAtMs ? { taken_at: new Date(exif.takenAtMs).toISOString() } : {}),
+    })
+    .eq("id", mediaId);
+  return !error;
+}
+
 interface IncomingPhoto extends ImageDocument {
   fullFileId: string;
   thumbFileId: string | null;
@@ -829,19 +850,35 @@ async function savePhoto(
   const store = supabase().storage.from("photos");
 
   const fullBuf = await downloadTelegramFile(bot, incoming.fullFileId);
-  const fullPath = `${base}${incoming.extension}`;
-  const up = await store.upload(fullPath, fullBuf, { contentType: incoming.contentType });
-  if (up.error) throw up.error;
+  // Read the metadata off the original, before anything re-encodes it away.
+  const exif = incoming.keepsExif ? readExif(fullBuf) : {};
 
+  let fullPath: string;
   let thumbPath: string | null = null;
-  if (incoming.thumbFileId && incoming.thumbFileId !== incoming.fullFileId) {
-    const thumbBuf = await downloadTelegramFile(bot, incoming.thumbFileId);
+  if (fullBuf.byteLength > COMPRESS_ABOVE_BYTES) {
+    // A camera original is far more picture than a browser needs. Store a
+    // screen-sized copy and make our own thumbnail, which beats the 320 px one
+    // Telegram attaches to a document.
+    const web = await compressForWeb(fullBuf);
+    fullPath = `${base}.jpg`;
+    const up = await store.upload(fullPath, web.display, { contentType: "image/jpeg" });
+    if (up.error) throw up.error;
     thumbPath = `${base}-thumb.jpg`;
-    const upThumb = await store.upload(thumbPath, thumbBuf, { contentType: "image/jpeg" });
+    const upThumb = await store.upload(thumbPath, web.thumb, { contentType: "image/jpeg" });
     if (upThumb.error) thumbPath = null;
+  } else {
+    fullPath = `${base}${incoming.extension}`;
+    const up = await store.upload(fullPath, fullBuf, { contentType: incoming.contentType });
+    if (up.error) throw up.error;
+
+    if (incoming.thumbFileId && incoming.thumbFileId !== incoming.fullFileId) {
+      const thumbBuf = await downloadTelegramFile(bot, incoming.thumbFileId);
+      thumbPath = `${base}-thumb.jpg`;
+      const upThumb = await store.upload(thumbPath, thumbBuf, { contentType: "image/jpeg" });
+      if (upThumb.error) thumbPath = null;
+    }
   }
 
-  const exif = incoming.keepsExif ? readExif(fullBuf) : {};
   const sentAtMs = ctx.message!.date * 1000;
   const located = await locatePhoto(day.id, exif, sentAtMs);
 
@@ -881,14 +918,21 @@ async function savePhoto(
 
 /**
  * Puts new bytes behind the photo a `/replace` button picked, whether they
- * arrived compressed or as a file. The pin and the day stay as they were — a
- * replacement is the same picture, edited, not a new one.
+ * arrived compressed or as a file. The day never changes — a replacement is
+ * the same picture, edited, not a new one.
+ *
+ * The pin does change in one direction: a replacement sent as a file can carry
+ * the GPS fix the compressed original never had, and refusing to use it would
+ * mean re-uploading a whole day's Lightroom exports and still having nothing on
+ * the map. An exact fix therefore fills in or upgrades the position; a
+ * replacement without one leaves whatever was there alone.
  */
 async function swapPendingPhoto(
   ctx: Context,
   trip: DbTrip,
   pending: { mediaId: string; dayNumber: number },
   files: ReplacementFiles,
+  exif: ExifData = {},
 ) {
   try {
     const swapped = await replacePhoto(pending.mediaId, files);
@@ -903,6 +947,8 @@ async function swapPendingPhoto(
       return;
     }
 
+    const pinned = await applyExifLocation(pending.mediaId, exif);
+
     // A share card built from a photo is now built from the old one.
     await renderOgCard(trip.id).catch(() => {});
 
@@ -910,10 +956,10 @@ async function swapPendingPhoto(
     // a filter run over a trip means doing this a dozen times, and the next one
     // should be one tap away rather than another /replace.
     const view = await replaceDayView(trip, pending.dayNumber, 0);
-    await sendView(ctx, {
-      ...view,
-      text: `🔄 Photo swapped on day ${pending.dayNumber}.\n\n${view.text}`,
-    });
+    const headline = pinned
+      ? `🔄 Photo swapped on day ${pending.dayNumber} — 📍 pinned where it was taken.`
+      : `🔄 Photo swapped on day ${pending.dayNumber}.`;
+    await sendView(ctx, { ...view, text: `${headline}\n\n${view.text}` });
   } catch (err) {
     await clearReplacement(ctx.chat!.id);
     await ctx.reply(
@@ -945,12 +991,31 @@ async function savePhotoDocument(
   // before treating this as a new photo.
   const pending = await pendingReplacement(ctx.chat!.id);
   if (pending) {
-    await swapPendingPhoto(ctx, trip, pending, {
-      full: await downloadTelegramFile(bot, doc.file_id),
-      thumb: doc.thumbnail ? await downloadTelegramFile(bot, doc.thumbnail.file_id) : null,
-      caption: ctx.message?.caption ?? null,
-      format: { extension: image.extension, contentType: image.contentType },
-    });
+    const original = await downloadTelegramFile(bot, doc.file_id);
+    const exif = image.keepsExif ? readExif(original) : {};
+    if (original.byteLength > COMPRESS_ABOVE_BYTES) {
+      const web = await compressForWeb(original);
+      await swapPendingPhoto(
+        ctx,
+        trip,
+        pending,
+        { full: web.display, thumb: web.thumb, caption: ctx.message?.caption ?? null },
+        exif,
+      );
+    } else {
+      await swapPendingPhoto(
+        ctx,
+        trip,
+        pending,
+        {
+          full: original,
+          thumb: doc.thumbnail ? await downloadTelegramFile(bot, doc.thumbnail.file_id) : null,
+          caption: ctx.message?.caption ?? null,
+          format: { extension: image.extension, contentType: image.contentType },
+        },
+        exif,
+      );
+    }
     return;
   }
 
@@ -2012,6 +2077,87 @@ export function createBot(): Bot {
       pinned > 0
         ? `📍 Pinned ${pinned} photo(s) on the map.`
         : "Every photo that can be placed already is — the rest were sent too far from the track to guess.",
+    );
+  });
+
+  // Photos are stored screen-sized on the way in, but the ones uploaded before
+  // that was true are still camera originals — several MB each, and the
+  // lightbox pulls the whole thing down before it shows anything.
+  bot.command("compressphotos", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const { data: days } = await supabase().from("days").select("id").eq("trip_id", trip.id);
+    const dayIds = (days ?? []).map((d) => d.id);
+    if (dayIds.length === 0) {
+      await ctx.reply("Nothing uploaded to this trip yet.");
+      return;
+    }
+    const { data: photos } = await supabase()
+      .from("media")
+      .select("id, storage_path, thumb_path")
+      .in("day_id", dayIds);
+    if (!photos || photos.length === 0) {
+      await ctx.reply("No photos on this trip yet.");
+      return;
+    }
+
+    await ctx.reply("🗜️ Checking photo sizes — this can take a while…").catch(() => {});
+    const store = supabase().storage.from("photos");
+    let shrunk = 0;
+    let before = 0;
+    let after = 0;
+    let failed = 0;
+
+    for (const photo of photos) {
+      try {
+        const { data: blob } = await store.download(photo.storage_path);
+        if (!blob || blob.size <= COMPRESS_ABOVE_BYTES) continue;
+        const original = await blob.arrayBuffer();
+        const web = await compressForWeb(original);
+
+        // Write beside the original rather than over it: every cache in front
+        // of the bucket keys on the URL, so an overwrite is the one way to keep
+        // showing the old bytes.
+        const dir = photo.storage_path.slice(0, photo.storage_path.lastIndexOf("/"));
+        const base = `${dir}/${nanoid(8)}`;
+        const up = await store.upload(`${base}.jpg`, web.display, { contentType: "image/jpeg" });
+        if (up.error) throw up.error;
+        const upThumb = await store.upload(`${base}-thumb.jpg`, web.thumb, {
+          contentType: "image/jpeg",
+        });
+
+        const stale = [photo.storage_path, photo.thumb_path].filter(Boolean) as string[];
+        const { error } = await supabase()
+          .from("media")
+          .update({
+            storage_path: `${base}.jpg`,
+            thumb_path: upThumb.error ? null : `${base}-thumb.jpg`,
+          })
+          .eq("id", photo.id);
+        if (error) throw error;
+
+        // Only once the row points at the new files is the old pair orphaned.
+        await store.remove(stale);
+        before += blob.size;
+        after += web.displayBytes;
+        shrunk++;
+      } catch {
+        failed++;
+      }
+    }
+
+    if (shrunk === 0) {
+      await ctx.reply(
+        failed > 0
+          ? `Nothing to shrink, and ${failed} photo(s) could not be read.`
+          : "Every photo is already web-sized.",
+      );
+      return;
+    }
+    await ctx.reply(
+      `🗜️ Shrank ${shrunk} photo(s): ${formatBytes(before)} → ${formatBytes(after)}.` +
+        (failed > 0 ? `\n⚠️ ${failed} could not be processed and were left alone.` : ""),
     );
   });
 

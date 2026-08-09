@@ -11,7 +11,9 @@ notes, stats and weather.
 - Send **photos** (with captions) and **text** → the day's journal. Telegram strips GPS EXIF
   from compressed photos, so those are pinned to the route by timestamp; send a photo **as a
   file** instead and its own GPS fix and capture time survive, which puts it exactly where it
-  was taken even if you upload the whole day from the hotel.
+  was taken even if you upload the whole day from the hotel. The metadata is read off the
+  original; what gets stored is a 2048 px copy, so a 9 MB export doesn't become a 9 MB
+  download for everyone opening the page.
 - `/day` picks which day uploads go to, from a keyboard of the trip's days; a silent 3 AM
   reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
@@ -105,6 +107,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/archive` | download the trip as a self-contained bundle |
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
+| `/compressphotos` | shrink photos stored at full camera resolution |
 | `/regeneratelink` | new family link for this trip |
 | `/invite` | one-time invite code for a friend, valid 7 days |
 

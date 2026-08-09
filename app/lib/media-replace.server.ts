@@ -83,9 +83,9 @@ export async function pendingReplacement(chatId: number): Promise<PendingReplace
 }
 
 export interface ReplacementFiles {
-  full: ArrayBuffer;
+  full: ArrayBuffer | Uint8Array;
   /** Null when Telegram offered no smaller size worth keeping separately. */
-  thumb: ArrayBuffer | null;
+  thumb: ArrayBuffer | Uint8Array | null;
   /** A caption on the new picture replaces the old one; without one it stays. */
   caption: string | null;
   /**
