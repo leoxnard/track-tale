@@ -4,6 +4,7 @@ import { makeProjection, polylinePoints } from "./geo-project";
 import { toGpx } from "./gpx-export";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson, type TrackPoint } from "./track";
 import { weatherIcon, type DayWeather } from "./weather";
+import { byPhotoTime } from "./photo-order";
 
 const MAP_W = 1000;
 const MAP_H = 620;
@@ -360,7 +361,7 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
     db
       .from("days")
       .select(
-        "day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, started_at), media(storage_path, caption, author_name, matched_lat, matched_lng, telegram_date), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
+        "day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, started_at), media(storage_path, caption, author_name, matched_lat, matched_lng, telegram_date, taken_at, created_at), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
       )
       .eq("trip_id", tripId)
       .order("day_number"),
@@ -378,9 +379,7 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
     const segPoints = segments.map((s) => fromGeoJson(s.geojson as TrackGeoJson));
 
     const photos: ArchiveDay["photos"] = [];
-    const sortedMedia = [...d.media].sort(
-      (a, b) => Date.parse(a.telegram_date) - Date.parse(b.telegram_date),
-    );
+    const sortedMedia = [...d.media].sort(byPhotoTime);
     for (let i = 0; i < sortedMedia.length; i++) {
       const m = sortedMedia[i];
       // Photos sent as files keep their own format, so don't rename a PNG .jpg.

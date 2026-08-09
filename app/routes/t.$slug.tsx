@@ -22,6 +22,7 @@ import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { weatherIcon, type DayWeather } from "../lib/weather";
+import { byPhotoTime } from "../lib/photo-order";
 import { fetchLiveSession } from "../lib/livetrack.server";
 import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
@@ -98,7 +99,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     supabase()
       .from("days")
       .select(
-        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, caption, matched_lat, matched_lng, telegram_date, author_name), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
+        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, caption, matched_lat, matched_lng, telegram_date, taken_at, created_at, author_name), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
       )
       .eq("trip_id", trip.id)
       .order("day_number"),
@@ -129,7 +130,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
           segments.flatMap((s) => fromGeoJson(s.geojson as TrackGeoJson)),
         ),
         photos: [...d.media]
-          .sort((a, b) => Date.parse(a.telegram_date) - Date.parse(b.telegram_date))
+          .sort(byPhotoTime)
           .map((m) => ({
             url: storage.getPublicUrl(m.storage_path).data.publicUrl,
             thumbUrl: storage.getPublicUrl(m.thumb_path ?? m.storage_path).data.publicUrl,

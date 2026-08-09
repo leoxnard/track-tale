@@ -37,6 +37,8 @@ import { matchPhotoToDay } from "./photo-match";
 import { readExif, type ExifData } from "./exif";
 import { imageDocument, type ImageDocument } from "./photo-file";
 import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
+import { findTwin, perceptualHash, type HashedPhoto } from "./phash";
+import { byPhotoTime, hasCaptureTime } from "./photo-order";
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
@@ -286,6 +288,8 @@ _Most of these open a keyboard — /trip is the hub, and every screen carries th
 • Photos with captions → day gallery, pinned on the map
 • Send a photo *as a file* (Telegram: "…" → Send as File) and its own GPS is
   used, so photos uploaded in the evening still land where you took them
+• Send an edited version as a file later and I recognise the shot: it replaces
+  the one already on the trip, on its own day, no /replace needed
 • Any other text → journal entry
 
 *Oops*
@@ -310,6 +314,7 @@ map pin and place in the day all stay — handy after running a filter over them
 /refreshweather — fill in weather for older days
 /refreshphotos — put photos on the map that arrived before their track
 /compressphotos — shrink oversized photos uploaded before compression existed
+/sort — check that every day's photos read in the order they were taken
 
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
@@ -814,6 +819,79 @@ async function backfillPhotoLocations(dayId: string): Promise<number> {
   return filled;
 }
 
+/** Beyond this a first auto-match would spend longer indexing than anyone will wait. */
+const TWIN_INDEX_LIMIT = 200;
+
+/**
+ * Every photo on the trip with a fingerprint, computing the missing ones as it
+ * goes. Hashes are read off the stored thumbnail — 20 kB rather than a whole
+ * picture, and a difference hash gives the same answer either way.
+ */
+async function hashedTripPhotos(tripId: string): Promise<HashedPhoto[]> {
+  const { data: days } = await supabase().from("days").select("id").eq("trip_id", tripId);
+  const dayIds = (days ?? []).map((d) => d.id);
+  if (dayIds.length === 0) return [];
+
+  const { data: photos } = await supabase()
+    .from("media")
+    .select("id, phash, thumb_path, storage_path")
+    .in("day_id", dayIds)
+    .limit(TWIN_INDEX_LIMIT);
+  if (!photos) return [];
+
+  const store = supabase().storage.from("photos");
+  const hashed: HashedPhoto[] = [];
+  for (const photo of photos) {
+    if (photo.phash) {
+      hashed.push({ id: photo.id, hash: photo.phash });
+      continue;
+    }
+    try {
+      const { data: blob } = await store.download(photo.thumb_path ?? photo.storage_path);
+      if (!blob) continue;
+      const hash = await perceptualHash(await blob.arrayBuffer());
+      // Keep it, so the trip only pays this once per photo.
+      await supabase().from("media").update({ phash: hash }).eq("id", photo.id);
+      hashed.push({ id: photo.id, hash });
+    } catch {
+      // A photo we cannot read simply isn't a candidate.
+    }
+  }
+  return hashed;
+}
+
+interface TwinPhoto {
+  mediaId: string;
+  dayNumber: number;
+  caption: string | null;
+  distance: number;
+}
+
+/**
+ * The photo already on the trip that this file is an edited version of, if
+ * there is one beyond doubt.
+ */
+async function findEditedOriginal(tripId: string, hash: string): Promise<TwinPhoto | null> {
+  const match = findTwin(hash, await hashedTripPhotos(tripId));
+  if (!match) return null;
+
+  const { data: row } = await supabase()
+    .from("media")
+    .select("id, caption, days(day_number)")
+    .eq("id", match.id)
+    .maybeSingle();
+  if (!row) return null;
+
+  const day = (row as unknown as { days: { day_number: number } | null }).days;
+  if (!day) return null;
+  return {
+    mediaId: match.id,
+    dayNumber: day.day_number,
+    caption: row.caption,
+    distance: match.distance,
+  };
+}
+
 /**
  * Writes a camera's own fix onto an existing photo. Returns whether it did.
  * An exact fix beats both an empty position and one inferred off the track, so
@@ -836,6 +914,8 @@ async function applyExifLocation(mediaId: string, exif: ExifData): Promise<boole
 interface IncomingPhoto extends ImageDocument {
   fullFileId: string;
   thumbFileId: string | null;
+  /** Already downloaded by the caller — a 20 MB file is not worth fetching twice. */
+  bytes?: ArrayBuffer;
 }
 
 async function savePhoto(
@@ -849,9 +929,13 @@ async function savePhoto(
   const base = `${trip.id}/day-${day.day_number}/${id}`;
   const store = supabase().storage.from("photos");
 
-  const fullBuf = await downloadTelegramFile(bot, incoming.fullFileId);
+  const fullBuf = incoming.bytes ?? (await downloadTelegramFile(bot, incoming.fullFileId));
   // Read the metadata off the original, before anything re-encodes it away.
   const exif = incoming.keepsExif ? readExif(fullBuf) : {};
+
+  // Fingerprint the picture so a later edited export can find its way back to
+  // this row instead of landing beside it.
+  const phash = await perceptualHash(fullBuf).catch(() => null);
 
   let fullPath: string;
   let thumbPath: string | null = null;
@@ -895,6 +979,7 @@ async function savePhoto(
       matched_lat: located?.lat ?? null,
       matched_lng: located?.lng ?? null,
       location_source: located?.source ?? null,
+      phash,
       author_telegram_id: senderId,
       author_name: senderName,
     })
@@ -933,6 +1018,8 @@ async function swapPendingPhoto(
   pending: { mediaId: string; dayNumber: number },
   files: ReplacementFiles,
   exif: ExifData = {},
+  /** Whether a person picked this photo or the bot recognised it. */
+  how: "picked" | "recognised" = "picked",
 ) {
   try {
     const swapped = await replacePhoto(pending.mediaId, files);
@@ -956,9 +1043,11 @@ async function swapPendingPhoto(
     // a filter run over a trip means doing this a dozen times, and the next one
     // should be one tap away rather than another /replace.
     const view = await replaceDayView(trip, pending.dayNumber, 0);
-    const headline = pinned
-      ? `🔄 Photo swapped on day ${pending.dayNumber} — 📍 pinned where it was taken.`
-      : `🔄 Photo swapped on day ${pending.dayNumber}.`;
+    const swap =
+      how === "recognised"
+        ? `🔍 Recognised as a photo already on *day ${pending.dayNumber}* and swapped in`
+        : `🔄 Photo swapped on day ${pending.dayNumber}`;
+    const headline = pinned ? `${swap} — 📍 pinned where it was taken.` : `${swap}.`;
     await sendView(ctx, { ...view, text: `${headline}\n\n${view.text}` });
   } catch (err) {
     await clearReplacement(ctx.chat!.id);
@@ -987,35 +1076,40 @@ async function savePhotoDocument(
     return;
   }
 
-  // A file is a perfectly good answer to /replace, so honour a waiting pick
-  // before treating this as a new photo.
   const pending = await pendingReplacement(ctx.chat!.id);
-  if (pending) {
-    const original = await downloadTelegramFile(bot, doc.file_id);
-    const exif = image.keepsExif ? readExif(original) : {};
-    if (original.byteLength > COMPRESS_ABOVE_BYTES) {
-      const web = await compressForWeb(original);
-      await swapPendingPhoto(
-        ctx,
-        trip,
-        pending,
-        { full: web.display, thumb: web.thumb, caption: ctx.message?.caption ?? null },
-        exif,
-      );
-    } else {
-      await swapPendingPhoto(
-        ctx,
-        trip,
-        pending,
-        {
-          full: original,
-          thumb: doc.thumbnail ? await downloadTelegramFile(bot, doc.thumbnail.file_id) : null,
-          caption: ctx.message?.caption ?? null,
-          format: { extension: image.extension, contentType: image.contentType },
-        },
-        exif,
-      );
-    }
+
+  // Editing a trip's photos means sending a lot of them back. Rather than
+  // walking the /replace menu each time, recognise the picture: an export of a
+  // shot already on the trip goes back where that shot lives, on its own day,
+  // keeping its caption and its place. Only files get this — a compressed
+  // re-send is more likely a second look at the same view than an edit of it.
+  let twin: TwinPhoto | null = null;
+  let phash: string | null = null;
+  const original = await downloadTelegramFile(bot, doc.file_id);
+  const exif = image.keepsExif ? readExif(original) : {};
+
+  if (!pending) {
+    phash = await perceptualHash(original).catch(() => null);
+    if (phash) twin = await findEditedOriginal(trip.id, phash);
+  }
+
+  const target = pending ?? (twin ? { mediaId: twin.mediaId, dayNumber: twin.dayNumber } : null);
+  if (target) {
+    const caption = ctx.message?.caption ?? null;
+    const files: ReplacementFiles =
+      original.byteLength > COMPRESS_ABOVE_BYTES
+        ? await (async () => {
+            const web = await compressForWeb(original);
+            return { full: web.display, thumb: web.thumb, caption, phash };
+          })()
+        : {
+            full: original,
+            thumb: doc.thumbnail ? await downloadTelegramFile(bot, doc.thumbnail.file_id) : null,
+            caption,
+            format: { extension: image.extension, contentType: image.contentType },
+            phash,
+          };
+    await swapPendingPhoto(ctx, trip, target, files, exif, pending ? "picked" : "recognised");
     return;
   }
 
@@ -1027,6 +1121,7 @@ async function savePhotoDocument(
       fullFileId: doc.file_id,
       // Telegram generates a preview for image documents; reuse it for the grid.
       thumbFileId: doc.thumbnail?.file_id ?? null,
+      bytes: original,
       ...image,
     });
   } catch (err) {
@@ -2078,6 +2173,58 @@ export function createBot(): Bot {
         ? `📍 Pinned ${pinned} photo(s) on the map.`
         : "Every photo that can be placed already is — the rest were sent too far from the track to guess.",
     );
+  });
+
+  // Photos read in capture-time order wherever they are shown. What this adds
+  // is the audit: which days are ordered by when the shutter fired and which
+  // fall back to upload time, because that difference is invisible on the page
+  // and only fixable by re-sending the photos as files.
+  bot.command("sort", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const { data: days } = await supabase()
+      .from("days")
+      .select("day_number, media(caption, telegram_date, taken_at, created_at)")
+      .eq("trip_id", trip.id)
+      .order("day_number");
+
+    const withPhotos = (days ?? []).filter((d) => d.media.length > 0);
+    if (withPhotos.length === 0) {
+      await ctx.reply("No photos on this trip yet.");
+      return;
+    }
+
+    const lines: string[] = [];
+    let guessed = 0;
+    for (const day of withPhotos) {
+      const photos = [...day.media].sort(byPhotoTime);
+      const dated = photos.filter(hasCaptureTime).length;
+      guessed += photos.length - dated;
+      const first = photos[0];
+      const last = photos[photos.length - 1];
+      const span =
+        dated > 0 && first !== last
+          ? ` · ${new Date(first.taken_at ?? first.telegram_date)
+              .toISOString()
+              .slice(11, 16)}–${new Date(last.taken_at ?? last.telegram_date)
+              .toISOString()
+              .slice(11, 16)}`
+          : "";
+      lines.push(
+        `Day ${day.day_number}: ${photos.length} photo(s), ${dated} by capture time${span}`,
+      );
+    }
+
+    lines.unshift("🗂️ Photos are shown oldest first, on every day:");
+    if (guessed > 0) {
+      lines.push(
+        "",
+        `${guessed} photo(s) carry no capture time, so they sit in the order they were ` +
+          `uploaded. Send those as files and the real time comes with them.`,
+      );
+    }
+    await ctx.reply(lines.join("\n"));
   });
 
   // Photos are stored screen-sized on the way in, but the ones uploaded before

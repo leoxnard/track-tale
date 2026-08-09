@@ -3,6 +3,7 @@ import { supabase } from "./supabase.server";
 import { deleteEntity } from "./entities.server";
 import type { DbTrip } from "./db.server";
 import { escapeMd } from "./telegram-md";
+import { byPhotoTime, photoTimeMs } from "./photo-order";
 import {
   countSummary,
   encodeAction,
@@ -238,7 +239,7 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
   const { data: day, error } = await supabase()
     .from("days")
     .select(
-      "id, date, notes(id, text, created_at), media(id, caption, telegram_date), track_segments(id, name, distance_m, sport, started_at, created_at), comments(id, author_name, text, created_at)",
+      "id, date, notes(id, text, created_at), media(id, caption, telegram_date, taken_at, created_at), track_segments(id, name, distance_m, sport, started_at, created_at), comments(id, author_name, text, created_at)",
     )
     .eq("trip_id", trip.id)
     .eq("day_number", dayNumber)
@@ -253,7 +254,13 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
     id: string;
     date: string;
     notes: { id: string; text: string; created_at: string }[];
-    media: { id: string; caption: string | null; telegram_date: string }[];
+    media: {
+      id: string;
+      caption: string | null;
+      telegram_date: string;
+      taken_at: string | null;
+      created_at: string;
+    }[];
     track_segments: {
       id: string;
       name: string | null;
@@ -274,11 +281,13 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
         `${(t.distance_m / 1000).toFixed(1)} km${t.sport ? ` · ${t.sport}` : ""}`,
       at: Date.parse(t.started_at ?? t.created_at) || 0,
     })),
-    ...d.media.map((m, i) => ({
+    // Same clock the family page orders them by, so "photo 3" means the same
+    // picture in the chat as on the page.
+    ...[...d.media].sort(byPhotoTime).map((m, i) => ({
       kind: "media" as ItemKind,
       id: m.id,
       label: shortLabel(m.caption) || `photo ${i + 1}`,
-      at: Date.parse(m.telegram_date) || 0,
+      at: photoTimeMs(m),
     })),
     ...d.notes.map((n) => ({
       kind: "note" as ItemKind,

@@ -105,6 +105,9 @@ create table if not exists media (
   matched_lng double precision,
   -- 'exif' for a camera's own fix, 'track' for one inferred from the timeline.
   location_source text check (location_source in ('exif', 'track')),
+  -- Difference hash of the picture, so an edited re-upload can be recognised
+  -- as the same shot and swapped in rather than added alongside.
+  phash text,
   author_telegram_id bigint,
   author_name text,
   created_at timestamptz not null default now()
@@ -223,6 +226,9 @@ exception when duplicate_object then null;
 end $$;
 -- Existing pins all came from timeline matching.
 update media set location_source = 'track' where matched_lat is not null and location_source is null;
+-- Recognises an edited re-upload as the same photograph. Filled in lazily, so
+-- existing rows need no backfill here.
+alter table media add column if not exists phash text;
 -- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
 alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;

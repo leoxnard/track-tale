@@ -14,6 +14,10 @@ notes, stats and weather.
   was taken even if you upload the whole day from the hotel. The metadata is read off the
   original; what gets stored is a 2048 px copy, so a 9 MB export doesn't become a 9 MB
   download for everyone opening the page.
+- Send an **edited version** of a photo as a file and it is recognised as the same shot — by
+  what the picture looks like, not its name — and swapped in on the day it already lives on,
+  keeping its caption and its place. Photos are ordered by capture time everywhere they are
+  shown, so an evening batch upload still reads in the order it was taken.
 - `/day` picks which day uploads go to, from a keyboard of the trip's days; a silent 3 AM
   reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
@@ -108,6 +112,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
 | `/compressphotos` | shrink photos stored at full camera resolution |
+| `/sort` | report how each day's photos are ordered, and what lacks a capture time |
 | `/regeneratelink` | new family link for this trip |
 | `/invite` | one-time invite code for a friend, valid 7 days |
 

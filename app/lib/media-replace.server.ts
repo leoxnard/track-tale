@@ -93,6 +93,11 @@ export interface ReplacementFiles {
    * compressed photos always are; a photo sent as a file brings its own format.
    */
   format?: { extension: string; contentType: string };
+  /**
+   * Fingerprint of the new picture. Without refreshing it the row keeps
+   * describing the picture it used to hold.
+   */
+  phash?: string | null;
 }
 
 /**
@@ -144,6 +149,7 @@ export async function replacePhoto(mediaId: string, files: ReplacementFiles): Pr
       storage_path: fullPath,
       thumb_path: thumbPath,
       caption: files.caption ?? existing.caption,
+      ...(files.phash ? { phash: files.phash } : {}),
     })
     .eq("id", mediaId)
     .select("id");
