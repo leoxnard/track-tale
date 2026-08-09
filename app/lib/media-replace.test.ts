@@ -89,6 +89,21 @@ describe("replacing the picture behind a photo", () => {
     };
   });
 
+  it("stores a replacement sent as a file in its own format", async () => {
+    // A photo sent uncompressed keeps its EXIF, which is why anyone would send
+    // one that way — but it also arrives as whatever the phone had, and naming
+    // a PNG .jpg leaves the bucket serving bytes that contradict their type.
+    const { replacePhoto } = await import("./media-replace.server");
+    await replacePhoto("media-1", {
+      full: bytes(),
+      thumb: bytes(),
+      caption: null,
+      format: { extension: ".png", contentType: "image/png" },
+    });
+    expect(events.some((e) => e.startsWith("upload ") && e.endsWith(".png"))).toBe(true);
+    expect(updatePayload?.storage_path).toMatch(/\.png$/);
+  });
+
   it("keeps the caption when the new picture doesn't carry one", async () => {
     // The point of replacing rather than re-sending: a filtered copy of a photo
     // is the same photo, and re-typing the caption is exactly the work this is

@@ -98,8 +98,13 @@ create table if not exists media (
   thumb_path text,
   caption text,
   telegram_date timestamptz not null,
+  -- When the shutter actually fired, from EXIF. Photos sent hours later still
+  -- land in the right place on the route.
+  taken_at timestamptz,
   matched_lat double precision,
   matched_lng double precision,
+  -- 'exif' for a camera's own fix, 'track' for one inferred from the timeline.
+  location_source text check (location_source in ('exif', 'track')),
   author_telegram_id bigint,
   author_name text,
   created_at timestamptz not null default now()
@@ -207,6 +212,17 @@ alter table trips add column if not exists og_updated_at timestamptz;
 alter table trips add column if not exists archive_path text;
 alter table trips add column if not exists archived_at timestamptz;
 alter table invites add column if not exists expires_at timestamptz;
+-- Photos sent as files keep their EXIF, so we can record the real capture time
+-- and tell an exact fix apart from one inferred off the track.
+alter table media add column if not exists taken_at timestamptz;
+alter table media add column if not exists location_source text;
+do $$ begin
+  alter table media add constraint media_location_source_check
+    check (location_source in ('exif', 'track'));
+exception when duplicate_object then null;
+end $$;
+-- Existing pins all came from timeline matching.
+update media set location_source = 'track' where matched_lat is not null and location_source is null;
 -- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
 alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;

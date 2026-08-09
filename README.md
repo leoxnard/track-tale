@@ -8,8 +8,10 @@ notes, stats and weather.
 
 - Send the bot a **Komoot share link** → the tour (track + official stats) is imported.
 - Send a **GPX/FIT file** → parsed directly; several uploads merge into one day.
-- Send **photos** (with captions) and **text** → the day's journal; photos are pinned to the
-  route by timestamp (Telegram strips GPS EXIF).
+- Send **photos** (with captions) and **text** → the day's journal. Telegram strips GPS EXIF
+  from compressed photos, so those are pinned to the route by timestamp; send a photo **as a
+  file** instead and its own GPS fix and capture time survive, which puts it exactly where it
+  was taken even if you upload the whole day from the hotel.
 - `/day` picks which day uploads go to, from a keyboard of the trip's days; a silent 3 AM
   reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
@@ -102,6 +104,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
 | `/archive` | download the trip as a self-contained bundle |
 | `/refreshplan` | re-sync planned Komoot routes |
+| `/refreshphotos` | pin photos that arrived before their day's track |
 | `/regeneratelink` | new family link for this trip |
 | `/invite` | one-time invite code for a friend, valid 7 days |
 

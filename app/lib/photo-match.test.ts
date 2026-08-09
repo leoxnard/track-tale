@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchPhotoToTrack } from "./photo-match";
+import { matchPhotoToDay, matchPhotoToTrack } from "./photo-match";
 import type { TrackPoint } from "./track";
 
 const t0 = Date.parse("2026-08-01T08:00:00Z");
@@ -48,5 +48,33 @@ describe("matchPhotoToTrack", () => {
       lat: 48.1,
       lng: 11.5,
     });
+  });
+});
+
+describe("matchPhotoToDay", () => {
+  const morning: TrackPoint[] = [{ lat: 48.1, lng: 11.5, time: t0 }];
+  const afternoon: TrackPoint[] = [{ lat: 49.9, lng: 12.9, time: t0 + 6 * HOUR }];
+
+  it("picks the closest point across all segments, not the first that fits", () => {
+    // 20 min before the afternoon segment, but hours after the morning one.
+    expect(matchPhotoToDay(t0 + 6 * HOUR - 20 * MINUTE, [morning, afternoon])).toEqual({
+      lat: 49.9,
+      lng: 12.9,
+    });
+  });
+
+  it("matches a photo taken during the first segment", () => {
+    expect(matchPhotoToDay(t0 + 5 * MINUTE, [morning, afternoon])).toEqual({
+      lat: 48.1,
+      lng: 11.5,
+    });
+  });
+
+  it("returns null when the photo sits between segments", () => {
+    expect(matchPhotoToDay(t0 + 3 * HOUR, [morning, afternoon])).toBeNull();
+  });
+
+  it("returns null for a day with no segments", () => {
+    expect(matchPhotoToDay(t0, [])).toBeNull();
   });
 });

@@ -88,6 +88,11 @@ export interface ReplacementFiles {
   thumb: ArrayBuffer | null;
   /** A caption on the new picture replaces the old one; without one it stays. */
   caption: string | null;
+  /**
+   * How to store the new bytes. Defaults to JPEG, which is what Telegram's
+   * compressed photos always are; a photo sent as a file brings its own format.
+   */
+  format?: { extension: string; contentType: string };
 }
 
 /**
@@ -117,8 +122,9 @@ export async function replacePhoto(mediaId: string, files: ReplacementFiles): Pr
   const base = dir ? `${dir}/${nanoid(8)}` : nanoid(8);
   const store = supabase().storage.from("photos");
 
-  const fullPath = `${base}.jpg`;
-  const up = await store.upload(fullPath, files.full, { contentType: "image/jpeg" });
+  const format = files.format ?? { extension: ".jpg", contentType: "image/jpeg" };
+  const fullPath = `${base}${format.extension}`;
+  const up = await store.upload(fullPath, files.full, { contentType: format.contentType });
   if (up.error) throw up.error;
 
   const written: string[] = [fullPath];
