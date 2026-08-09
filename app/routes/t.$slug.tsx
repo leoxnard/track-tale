@@ -250,6 +250,39 @@ export function meta({ loaderData: trip }: Route.MetaArgs) {
   ];
 }
 
+/**
+ * Photo markers are thumbnails up close and plain dots once the map is pulled
+ * back — at whole-trip zoom a day's photos sit on top of each other and the
+ * route disappears under them, so past a point the useful thing is *where* the
+ * photos are, not what they show.
+ *
+ * The switch is on real-world scale rather than a zoom number, because a zoom
+ * level covers a very different distance in Scotland than at the equator.
+ */
+const PHOTO_DOT_ABOVE_M_PER_CM = 10_000;
+/** Metres per CSS pixel at zoom 0, for MapLibre's 512 px tiles. */
+const METERS_PER_PIXEL_Z0 = 40_075_016.686 / 512;
+const CSS_PX_PER_CM = 96 / 2.54;
+
+function metersPerCm(map: import("maplibre-gl").Map): number {
+  const atEquator = METERS_PER_PIXEL_Z0 / 2 ** map.getZoom();
+  const metersPerPixel = atEquator * Math.cos((map.getCenter().lat * Math.PI) / 180);
+  return metersPerPixel * CSS_PX_PER_CM;
+}
+
+const SHARED_MARKER_STYLE =
+  "display:block;border-radius:50%;box-sizing:border-box;transition:width .15s,height .15s,border-width .15s";
+
+const photoThumbStyle = (thumbUrl: string) =>
+  `${SHARED_MARKER_STYLE};width:26px;height:26px;border:2px solid #fff;` +
+  `box-shadow:0 1px 4px rgba(0,0,0,.4);background:url(${JSON.stringify(thumbUrl)}) center/cover`;
+
+/** The collapsed state: a dot in the day's own colour, so it still reads as
+ * belonging to that leg of the route. */
+const photoDotStyle = (color: string) =>
+  `${SHARED_MARKER_STYLE};width:10px;height:10px;border:2px solid #fff;` +
+  `box-shadow:0 1px 3px rgba(0,0,0,.35);background:${color}`;
+
 type MapHandle = {
   flyToDay: (dayNumber: number) => void;
   /** Zoom back out to the whole journey, plan included. */
@@ -307,6 +340,22 @@ function TripMap({
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
 
+      const photoMarkers: { el: HTMLElement; thumbUrl: string; color: string }[] = [];
+      // Only touch the DOM when the answer actually changes — this runs on
+      // every frame of a pan.
+      let showingDots: boolean | null = null;
+      const applyPhotoScale = () => {
+        if (!map || photoMarkers.length === 0) return;
+        const dots = metersPerCm(map) > PHOTO_DOT_ABOVE_M_PER_CM;
+        if (dots === showingDots) return;
+        showingDots = dots;
+        for (const marker of photoMarkers) {
+          marker.el.style.cssText = dots
+            ? photoDotStyle(marker.color)
+            : photoThumbStyle(marker.thumbUrl);
+        }
+      };
+
       map.on("load", () => {
         if (!map) return;
 
@@ -351,10 +400,16 @@ function TripMap({
               event.preventDefault();
               onPhoto(photo);
             });
-            el.style.cssText = `display:block;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);background:url(${JSON.stringify(photo.thumbUrl)}) center/cover;`;
+            el.style.cssText = photoThumbStyle(photo.thumbUrl);
             new maplibregl.Marker({ element: el }).setLngLat([photo.lng, photo.lat]).addTo(map!);
+            photoMarkers.push({ el, thumbUrl: photo.thumbUrl, color: day.color });
           }
         }
+
+        applyPhotoScale();
+        // Latitude moves the scale as much as zoom does, so watch the whole
+        // camera rather than just the zoom level.
+        map.on("move", applyPhotoScale);
 
         // Today's ride, straight from Garmin: drawn on top of the finished days
         // because it is the bit anyone opening the page right now cares about.
