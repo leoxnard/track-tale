@@ -37,8 +37,3 @@ export function byPhotoTime(a: OrderablePhoto, b: OrderablePhoto): number {
   if (diff !== 0) return diff;
   return (parse(a.created_at) ?? 0) - (parse(b.created_at) ?? 0);
 }
-
-/** True when the photo's place in the day rests on a real capture time. */
-export function hasCaptureTime(photo: OrderablePhoto): boolean {
-  return parse(photo.taken_at) !== null;
-}

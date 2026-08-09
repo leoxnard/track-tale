@@ -112,7 +112,6 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
 | `/compressphotos` | shrink photos stored at full camera resolution |
-| `/sort` | report how each day's photos are ordered, and what lacks a capture time |
 | `/regeneratelink` | new family link for this trip |
 | `/invite` | one-time invite code for a friend, valid 7 days |
 

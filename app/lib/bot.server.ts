@@ -38,7 +38,7 @@ import { readExif, type ExifData } from "./exif";
 import { imageDocument, type ImageDocument } from "./photo-file";
 import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { findTwin, perceptualHash, type HashedPhoto } from "./phash";
-import { byPhotoTime, hasCaptureTime } from "./photo-order";
+
 import { fetchDayWeather } from "./weather";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
@@ -314,7 +314,6 @@ map pin and place in the day all stay — handy after running a filter over them
 /refreshweather — fill in weather for older days
 /refreshphotos — put photos on the map that arrived before their track
 /compressphotos — shrink oversized photos uploaded before compression existed
-/sort — check that every day's photos read in the order they were taken
 
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
@@ -2173,58 +2172,6 @@ export function createBot(): Bot {
         ? `📍 Pinned ${pinned} photo(s) on the map.`
         : "Every photo that can be placed already is — the rest were sent too far from the track to guess.",
     );
-  });
-
-  // Photos read in capture-time order wherever they are shown. What this adds
-  // is the audit: which days are ordered by when the shutter fired and which
-  // fall back to upload time, because that difference is invisible on the page
-  // and only fixable by re-sending the photos as files.
-  bot.command("sort", async (ctx) => {
-    const trip = await requireTrip(ctx);
-    if (!trip) return;
-
-    const { data: days } = await supabase()
-      .from("days")
-      .select("day_number, media(caption, telegram_date, taken_at, created_at)")
-      .eq("trip_id", trip.id)
-      .order("day_number");
-
-    const withPhotos = (days ?? []).filter((d) => d.media.length > 0);
-    if (withPhotos.length === 0) {
-      await ctx.reply("No photos on this trip yet.");
-      return;
-    }
-
-    const lines: string[] = [];
-    let guessed = 0;
-    for (const day of withPhotos) {
-      const photos = [...day.media].sort(byPhotoTime);
-      const dated = photos.filter(hasCaptureTime).length;
-      guessed += photos.length - dated;
-      const first = photos[0];
-      const last = photos[photos.length - 1];
-      const span =
-        dated > 0 && first !== last
-          ? ` · ${new Date(first.taken_at ?? first.telegram_date)
-              .toISOString()
-              .slice(11, 16)}–${new Date(last.taken_at ?? last.telegram_date)
-              .toISOString()
-              .slice(11, 16)}`
-          : "";
-      lines.push(
-        `Day ${day.day_number}: ${photos.length} photo(s), ${dated} by capture time${span}`,
-      );
-    }
-
-    lines.unshift("🗂️ Photos are shown oldest first, on every day:");
-    if (guessed > 0) {
-      lines.push(
-        "",
-        `${guessed} photo(s) carry no capture time, so they sit in the order they were ` +
-          `uploaded. Send those as files and the real time comes with them.`,
-      );
-    }
-    await ctx.reply(lines.join("\n"));
   });
 
   // Photos are stored screen-sized on the way in, but the ones uploaded before

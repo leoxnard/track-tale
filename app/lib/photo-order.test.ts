@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byPhotoTime, hasCaptureTime, photoTimeMs, type OrderablePhoto } from "./photo-order";
+import { byPhotoTime, photoTimeMs, type OrderablePhoto } from "./photo-order";
 
 const photo = (p: Partial<OrderablePhoto> & { telegram_date: string }): OrderablePhoto => p;
 
@@ -58,12 +58,5 @@ describe("byPhotoTime", () => {
     const withExif = photo({ taken_at: "2026-08-09T12:00:00Z", telegram_date: "2026-08-09T22:00:00Z" });
     const withoutExif = photo({ telegram_date: "2026-08-09T13:00:00Z" });
     expect([withoutExif, withExif].sort(byPhotoTime)).toEqual([withExif, withoutExif]);
-  });
-});
-
-describe("hasCaptureTime", () => {
-  it("separates a real capture time from a send time standing in for one", () => {
-    expect(hasCaptureTime({ taken_at: "2026-08-09T11:38:01Z", telegram_date: "x" })).toBe(true);
-    expect(hasCaptureTime({ taken_at: null, telegram_date: "2026-08-09T11:38:01Z" })).toBe(false);
   });
 });
