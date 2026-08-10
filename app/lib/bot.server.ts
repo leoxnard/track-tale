@@ -31,7 +31,16 @@ import { fetchKomootTour, findKomootUrl, parseKomootUrl, mergeKomootTours, type 
 import { findLiveTrackUrl } from "./live-link";
 import { probeLiveSession } from "./livetrack.server";
 import { parseFit, parseGpx } from "./gpx";
-import { decimate, fromGeoJson, toGeoJson, type NormalizedTrack, type TrackGeoJson, type TrackPoint, computeStats } from "./track";
+import {
+  decimate,
+  fromGeoJson,
+  planPointBudget,
+  toGeoJson,
+  type NormalizedTrack,
+  type TrackGeoJson,
+  type TrackPoint,
+  computeStats,
+} from "./track";
 import { toGpx } from "./gpx-export";
 import { matchPhotoToDay } from "./photo-match";
 import { readExif, type ExifData } from "./exif";
@@ -706,7 +715,7 @@ async function savePlanSegment(ctx: Context, trip: DbTrip, track: NormalizedTrac
     trip_id: trip.id,
     source_url: sourceUrl ?? null,
     name: track.name ?? null,
-    geojson: toGeoJson(decimate(track.points, 4000)),
+    geojson: toGeoJson(decimate(track.points, planPointBudget(track.stats.distanceM))),
     distance_m: track.stats.distanceM,
     elevation_up: track.stats.elevationUp,
     sort_order: count ?? 0,
@@ -2424,7 +2433,7 @@ export async function refreshPlan(tripId: string): Promise<number> {
         .from("plan_segments")
         .update({
           name: tour.name ?? null,
-          geojson: toGeoJson(decimate(tour.points, 4000)),
+          geojson: toGeoJson(decimate(tour.points, planPointBudget(tour.stats.distanceM))),
           distance_m: tour.stats.distanceM,
           elevation_up: tour.stats.elevationUp,
         })

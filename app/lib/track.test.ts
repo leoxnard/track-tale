@@ -7,6 +7,7 @@ import {
   decimate,
   fromGeoJson,
   haversineM,
+  planPointBudget,
   sortSegmentsByStart,
   toGeoJson,
   type TrackPoint,
@@ -125,6 +126,38 @@ describe("decimate", () => {
   it("leaves a short track untouched", () => {
     const points = ramp(10);
     expect(decimate(points, 2000)).toBe(points);
+  });
+});
+
+describe("planPointBudget", () => {
+  it("spends 300 points on every 100 km of plan", () => {
+    expect(planPointBudget(1_000_000)).toBe(3000);
+    expect(planPointBudget(2_000_000)).toBe(6000);
+  });
+
+  it("keeps a short plan from being thinned into a sketch", () => {
+    // 20 km would earn 60 points on the rate alone — too coarse for a line
+    // with switchbacks in it.
+    expect(planPointBudget(20_000)).toBe(500);
+  });
+
+  it("caps a continental plan before the page pays for it", () => {
+    expect(planPointBudget(100_000_000)).toBe(20_000);
+  });
+
+  it("survives a tour that arrived without usable stats", () => {
+    expect(planPointBudget(0)).toBe(500);
+    expect(planPointBudget(Number.NaN)).toBe(500);
+  });
+
+  it("gives a 1000 km plan five times the detail of a 200 km one", () => {
+    const raw = ramp(50_000);
+    const long = decimate(raw, planPointBudget(1_000_000)).length;
+    const short = decimate(raw, planPointBudget(200_000)).length;
+    // Not exactly 5: decimate thins by a whole-number step, so the budget is a
+    // ceiling the point count lands just under.
+    expect(long / short).toBeGreaterThan(4.5);
+    expect(long / short).toBeLessThan(5.5);
   });
 });
 

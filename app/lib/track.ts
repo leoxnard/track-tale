@@ -144,6 +144,32 @@ export function decimate(points: TrackPoint[], maxPoints = 2000): TrackPoint[] {
   return out;
 }
 
+/**
+ * How many points a planned tour is worth keeping, given how long it is.
+ *
+ * A day's ride gets a flat budget because a day is a day. A plan is not: it can
+ * be a weekend loop or six weeks across a continent, and a fixed budget spends
+ * the same detail on both — lavish on the loop, and on the long one so coarse
+ * that switchbacks turn into straight lines. Scaling by distance keeps the
+ * resolution *per kilometre* constant instead, at roughly a point every 333 m:
+ * 300 points for a 100 km day's worth of plan, 3000 for a 1000 km tour.
+ *
+ * It also feeds the elevation chart, which matches each ridden day to the
+ * nearest place on the planned line — the denser that line, the closer the
+ * match lands to where the day actually rejoined the plan.
+ */
+export const PLAN_POINTS_PER_KM = 3;
+
+/** Below this a short plan would be thinned into a sketch; above it the page pays. */
+const PLAN_MIN_POINTS = 500;
+const PLAN_MAX_POINTS = 20_000;
+
+export function planPointBudget(distanceM: number): number {
+  const km = Number.isFinite(distanceM) && distanceM > 0 ? distanceM / 1000 : 0;
+  const wanted = Math.round(km * PLAN_POINTS_PER_KM);
+  return Math.min(PLAN_MAX_POINTS, Math.max(PLAN_MIN_POINTS, wanted));
+}
+
 export interface ProfilePoint {
   /** cumulative metres from the start of the day */
   d: number;
