@@ -280,7 +280,16 @@ async function main(argv) {
     ].join(",");
     const query = `[out:json][timeout:300];way${filter}(${bbox});(._;>;);out body;`;
     process.stderr.write(`Asking Overpass for ${filter} in ${bbox}…\n`);
-    const res = await fetch(endpoint, { method: "POST", body: `data=${encodeURIComponent(query)}` });
+    // Overpass answers 406 to a body it was not told the type of, and asks
+    // callers to identify themselves — it is a volunteer-run service.
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "TrackTale rail-gpx (https://github.com/leoxnard/track-tale)",
+      },
+      body: `data=${encodeURIComponent(query)}`,
+    });
     if (!res.ok) throw new Error(`Overpass answered ${res.status}: ${await res.text()}`);
     const body = await res.text();
     if (args.dump) await writeFile(args.dump, body);
