@@ -1,5 +1,6 @@
 import type { Bot } from "grammy";
-import { createBot, ensureTapsDelivered } from "../lib/bot.server";
+import { createBot } from "../lib/bot.server";
+import { ensureTapsDelivered } from "../lib/bot-chrome.server";
 import { env } from "../lib/env.server";
 
 let bot: Bot | undefined;

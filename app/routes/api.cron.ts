@@ -1,7 +1,8 @@
 import { Bot } from "grammy";
 import { env } from "../lib/env.server";
 import { supabase } from "../lib/supabase.server";
-import { ensureTapsDelivered, refreshPlan } from "../lib/bot.server";
+import { refreshPlan } from "../lib/bot-ingest.server";
+import { ensureTapsDelivered } from "../lib/bot-chrome.server";
 
 /**
  * Daily maintenance, triggered by Vercel Cron (schedule in vercel.json).

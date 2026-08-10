@@ -477,7 +477,8 @@ describe("keeping the webhook subscribed to taps", () => {
   });
 
   async function check(info: Record<string, unknown>) {
-    const { createBot, ensureTapsDelivered } = await import("./bot.server");
+    const { createBot } = await import("./bot.server");
+    const { ensureTapsDelivered } = await import("./bot-chrome.server");
     const bot = createBot();
     bot.api.config.use(async (_prev, method, payload) => {
       apiPayloads.push({ method, payload: payload as Record<string, unknown> });
