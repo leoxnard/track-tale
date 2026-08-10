@@ -218,9 +218,11 @@ describe("trip page loader", () => {
             started_at: "2026-08-01T07:30:00Z",
           },
           {
+            // Starts where the riding stopped and ends where it resumes —
+            // which is how it is recognised as the reason for the gap.
             geojson: line([
-              [-2.09, 57.14],
-              [-3.62, 57.6],
+              [-2.189, 57.061],
+              [-3.62, 57.61],
             ]),
             distance_m: 133_000,
             moving_s: 0,
@@ -242,11 +244,14 @@ describe("trip page loader", () => {
 
     const day = ((await load("abc")).days as Row[])[0] as {
       distanceM: number;
-      pieces: { distanceM: number; profile: { d: number }[] }[];
+      pieces: { distanceM: number; after: string | null; profile: { d: number }[] }[];
     };
 
     expect(day.pieces).toHaveLength(2);
     expect(day.pieces.map((p) => p.distanceM)).toEqual([86_000, 11_000]);
+    // The gap knows what crossed it — matched on where the train started and
+    // ended, since this one carries no clock at all.
+    expect(day.pieces.map((p) => p.after)).toEqual([null, "train"]);
     // Each stretch measures from its own zero, so nothing carries the 130 km
     // between them.
     for (const piece of day.pieces) {

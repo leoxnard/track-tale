@@ -80,6 +80,24 @@ export function resolveLocale(request: Request): Locale {
   );
 }
 
+/**
+ * What each way of travelling is called, and what it looks like.
+ *
+ * The glyph is the same one the bot replies with and the one dropped into the
+ * gap the leg left in the tour profile, so a train is a train wherever it
+ * turns up.
+ */
+export const TRANSIT_NOUNS: Record<Locale, Record<TransitMode, string>> = {
+  en: { train: "train", ferry: "ferry", bus: "bus" },
+  de: { train: "Zug", ferry: "Fähre", bus: "Bus" },
+};
+
+export const TRANSIT_GLYPHS: Record<TransitMode, string> = {
+  train: "🚆",
+  ferry: "⛴️",
+  bus: "🚌",
+};
+
 const en = {
   appName: "TrackTale",
   footer: "Followed with TrackTale — a private trip journal.",
@@ -126,7 +144,7 @@ const en = {
     moving: (duration: string) => `${duration} moving`,
     /** Kilometres travelled rather than ridden — `132 km by train`. */
     transit: (km: string, modes: TransitMode[]) =>
-      `${km} km by ${modes.map((mode) => ({ train: "train", ferry: "ferry", bus: "bus" })[mode]).join(" + ") || "transport"}`,
+      `${km} km by ${modes.map((mode) => TRANSIT_NOUNS.en[mode]).join(" + ") || "transport"}`,
     segments: (n: number) => `${n} segments`,
     photo: "Photo",
     photoAlt: (day: number) => `Day ${day} photo`,
@@ -173,6 +191,8 @@ const en = {
     aria: (ridden: string, planned: string) =>
       `Elevation of the whole tour: ${ridden} of ${planned} kilometres ridden`,
     day: (n: number) => `day ${n}`,
+    /** Sits on the gap a train left in the line: `by train — not ridden`. */
+    skipped: (mode: TransitMode) => `by ${TRANSIT_NOUNS.en[mode]} — not ridden`,
     tapToJump: "tap to jump to that day",
     alongRoute: (from: string, to: string) => `${from} – ${to} km along the planned route`,
     dragToZoom: "drag across to zoom · ",
@@ -252,7 +272,7 @@ const de: Messages = {
     soFar: " bisher",
     moving: (duration: string) => `${duration} unterwegs`,
     transit: (km: string, modes: TransitMode[]) =>
-      `${km} km per ${modes.map((mode) => ({ train: "Zug", ferry: "Fähre", bus: "Bus" })[mode]).join(" + ") || "Verkehrsmittel"}`,
+      `${km} km per ${modes.map((mode) => TRANSIT_NOUNS.de[mode]).join(" + ") || "Verkehrsmittel"}`,
     segments: (n: number) => `${n} Abschnitte`,
     photo: "Foto",
     photoAlt: (day: number) => `Foto von Tag ${day}`,
@@ -298,6 +318,7 @@ const de: Messages = {
     aria: (ridden: string, planned: string) =>
       `Höhenprofil der ganzen Tour: ${ridden} von ${planned} Kilometern gefahren`,
     day: (n: number) => `Tag ${n}`,
+    skipped: (mode: TransitMode) => `per ${TRANSIT_NOUNS.de[mode]} — nicht geradelt`,
     tapToJump: "antippen, um zu diesem Tag zu springen",
     alongRoute: (from: string, to: string) => `${from} – ${to} km entlang der geplanten Route`,
     dragToZoom: "ziehen zum Zoomen · ",

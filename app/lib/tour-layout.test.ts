@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layDays, type TourDayInput } from "./tour-layout";
+import { hopsBetween, layDays, type TourDayInput } from "./tour-layout";
 import { buildProfile, haversineM, type TrackPoint } from "./track";
 
 /**
@@ -203,6 +203,61 @@ describe("layDays", () => {
     // The train is nobody's distance, but the plan it crossed was reached.
     expect(riddenM).toBeCloseTo(2 * stretchM, -2);
     expect(reachedM).toBeCloseTo(planLengthM, -2);
+  });
+
+  it("hands the hole to whatever carried the traveller over it", () => {
+    const before = route(300, 11.0, 11.1);
+    const after = route(300, 11.5, 11.6);
+    const stretchM = 0.1 * M_PER_DEG_LNG;
+    const byTrain: TourDayInput = {
+      dayNumber: 1,
+      color: "#f032e6",
+      pieces: [
+        { distanceM: stretchM, profile: buildProfile(before) },
+        { distanceM: stretchM, profile: buildProfile(after), after: "train" },
+      ],
+    };
+
+    const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, [byTrain]);
+    const hops = hopsBetween(laid);
+
+    expect(hops).toHaveLength(1);
+    expect(hops[0].mode).toBe("train");
+    expect(hops[0].dayNumber).toBe(1);
+    expect(hops[0].color).toBe("#f032e6");
+    // The hole is exactly the ground between the two stretches…
+    expect(hops[0].fromM).toBeCloseTo(laid[0].endM, 5);
+    expect(hops[0].toM).toBeCloseTo(laid[1].startM, 5);
+    // …and it hangs between the heights either side of it.
+    expect(hops[0].fromE).toBe(laid[0].points[laid[0].points.length - 1].e);
+    expect(hops[0].toE).toBe(laid[1].points[0].e);
+  });
+
+  it("leaves a hole nothing accounts for as plain plan", () => {
+    // No `after`: the day resumed somewhere else and nothing on the day says
+    // how. Drawing a vehicle on that would be a guess.
+    const unexplained: TourDayInput = {
+      dayNumber: 1,
+      color: "#000",
+      pieces: [
+        { distanceM: 0.1 * M_PER_DEG_LNG, profile: buildProfile(route(300, 11.0, 11.1)) },
+        { distanceM: 0.1 * M_PER_DEG_LNG, profile: buildProfile(route(300, 11.5, 11.6)) },
+      ],
+    };
+    const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, [unexplained]);
+
+    expect(laid).toHaveLength(2);
+    expect(hopsBetween(laid)).toEqual([]);
+  });
+
+  it("has no hole to bridge where two days overlap", () => {
+    // Days that re-rode each other's ground are not interrupted; a hop drawn
+    // backwards across them would be nonsense.
+    const repeat = [days[0], day(2, route(300, 11.1, 11.3), dayLengthM)];
+    const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, repeat);
+
+    expect(laid[1].startM).toBeLessThan(laid[0].endM);
+    expect(hopsBetween(laid)).toEqual([]);
   });
 
   it("skips a day with nothing to draw without losing its distance", () => {

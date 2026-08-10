@@ -1,9 +1,10 @@
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
-import { layDays, type TourDayInput } from "../lib/tour-layout";
+import { hopsBetween, layDays, type TourDayInput } from "../lib/tour-layout";
 import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
+import { TRANSIT_GLYPHS } from "../lib/i18n";
 
 const W = 960;
 const H = 200;
@@ -12,6 +13,9 @@ const PAD_BOTTOM = 22;
 const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
 
 const PLAN_COLOR = "#9aa59e";
+
+/** Roughly how far apart the little vehicles sit along a hop, in chart units. */
+const GLYPH_SPACING = 150;
 
 export type { TourDayInput };
 
@@ -103,14 +107,18 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
             .join("")}L${((planM / totalM) * 1000).toFixed(1)},100L0,100Z`
         : "";
 
-    return { laid, planLine, riddenM, reachedM, planM, totalM, base, band, ticks, brush };
+    // Where a day was interrupted, and by what: drawn as a hop from the end of
+    // one stretch to the start of the next, with the plan showing underneath.
+    const hops = hopsBetween(laid);
+
+    return { laid, hops, planLine, riddenM, reachedM, planM, totalM, base, band, ticks, brush };
   }, [plan, planKm, days]);
 
   const zoom = useDragZoom(chart?.totalM ?? 1, svgRef);
 
   const geom = useMemo(() => {
     if (!chart) return null;
-    const { planLine, laid, planM, base, band } = chart;
+    const { planLine, laid, hops, planM, base, band } = chart;
     const viewSpan = zoom.to - zoom.from || 1;
     const x = (d: number) => ((d - zoom.from) / viewSpan) * W;
     const y = (e: number) => PAD_TOP + (1 - (e - base) / band) * PLOT_H;
@@ -131,6 +139,23 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         line: toPath(day.points),
         area: `${toPath(day.points)}L${x(day.endM).toFixed(1)},${H - PAD_BOTTOM}L${x(day.startM).toFixed(1)},${H - PAD_BOTTOM}Z`,
       })),
+      // A hop carries as many glyphs as it has room for: one on a sliver of a
+      // ferry crossing, several across a long train ride, and more as the
+      // chart is zoomed into. They are positioned in the overlay rather than
+      // the SVG, which is stretched to its box and would squash them.
+      hops: hops.map((hop) => {
+        const fromX = x(hop.fromM);
+        const toX = x(hop.toM);
+        const marks = Math.min(6, Math.max(1, Math.round((toX - fromX) / GLYPH_SPACING)));
+        return {
+          ...hop,
+          line: `M${fromX.toFixed(1)},${y(hop.fromE).toFixed(1)}L${toX.toFixed(1)},${y(hop.toE).toFixed(1)}`,
+          marks: Array.from({ length: marks }, (_, i) => {
+            const f = (i + 0.5) / marks;
+            return { x: fromX + (toX - fromX) * f, y: y(hop.fromE + (hop.toE - hop.fromE) * f) };
+          }),
+        };
+      }),
     };
   }, [chart, zoom.from, zoom.to]);
 
@@ -165,7 +190,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
   if (!chart || !geom) return null;
 
   const { laid, riddenM, reachedM, planM, totalM, ticks, brush } = chart;
-  const { x, y, planPath, planArea, dayPaths } = geom;
+  const { x, y, planPath, planArea, dayPaths, hops } = geom;
   const sel = zoom.selection;
   const visible = (d: number) => d >= zoom.from && d <= zoom.to;
 
@@ -250,6 +275,21 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               />
             )}
 
+            {/* The hop first, so a day line drawn near it stays on top. */}
+            {hops.map((hop) => (
+              <path
+                key={`hop-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
+                d={hop.line}
+                fill="none"
+                stroke={hop.color}
+                strokeWidth={1.5}
+                strokeDasharray="2 6"
+                strokeLinecap="round"
+                opacity={0.7}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+
             {dayPaths.map(({ day, line, area }) => (
               <g key={`${day.dayNumber}-${day.piece}`}>
                 <path d={area} fill={day.color} opacity={0.14} />
@@ -332,6 +372,24 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               {Math.round(t)} m
             </span>
           ))}
+          {/* The vehicle sitting in the hole it left in the line. The disc is
+              the page's own paper, so the dashes behind it read as a gap the
+              train is standing in rather than a sticker on top. */}
+          {hops.flatMap((hop) =>
+            hop.marks
+              .filter((mark) => mark.x >= 0 && mark.x <= W)
+              .map((mark, i) => (
+                <span
+                  key={`${hop.dayNumber}-${hop.fromM.toFixed(0)}-${i}`}
+                  title={m.profile.skipped(hop.mode)}
+                  aria-hidden="true"
+                  className="absolute flex h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-[11px] leading-none"
+                  style={{ left: `${(mark.x / W) * 100}%`, top: `${(mark.y / H) * 100}%` }}
+                >
+                  {TRANSIT_GLYPHS[hop.mode]}
+                </span>
+              )),
+          )}
           {laid
             .filter((day) => day.piece === 0 && visible(day.startM))
             .map((day) => (
