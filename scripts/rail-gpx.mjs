@@ -28,7 +28,9 @@
  * filter for the ways to consider (default ["railway"="rail"]; a ferry leg
  * wants ["route"="ferry"]) · --pad, degrees of margin around the endpoints
  * (default 0.3) · --max-points, how much of the OSM detail to keep (default
- * 3000) · --endpoint, an Overpass mirror · --dump/--load, to keep the
+ * 3000) · --trim, how far from an end the path may double back before that
+ * stretch is taken to be station tracks rather than journey (default 150 m;
+ * 0 keeps the path exactly as found) · --endpoint, an Overpass mirror · --dump/--load, to keep the
  * downloaded data and re-run against it instead of hammering Overpass.
  */
 
@@ -188,6 +190,39 @@ export function decimate(points, maxPoints) {
   return out;
 }
 
+/**
+ * Drop an out-and-back at either end of the path.
+ *
+ * A station coordinate snaps onto whichever rail node is nearest, and inside a
+ * station that is often a platform road whose far end is a stub. The shortest
+ * path then leaves the way it came — 350 m south out of Aberdeen and back up
+ * the next track along — which is a fact about the track layout and not about
+ * the journey. Wherever the line comes back past where it started, the last
+ * time it does so is the real beginning; same at the other end.
+ *
+ * Only ever cuts near the ends, so a route that genuinely runs a loop keeps
+ * its middle. `radiusM` of 0 leaves the path exactly as found.
+ */
+export function trimDoublingBack(points, radiusM) {
+  if (radiusM <= 0 || points.length < 3) return points;
+
+  let start = 0;
+  for (let i = points.length - 1; i > 0; i--) {
+    if (haversineM(points[0], points[i]) <= radiusM) {
+      start = i;
+      break;
+    }
+  }
+  let end = points.length - 1;
+  for (let i = 0; i < end; i++) {
+    if (haversineM(points[end], points[i]) <= radiusM) {
+      end = i;
+      break;
+    }
+  }
+  return start < end ? points.slice(start, end + 1) : points;
+}
+
 function esc(s) {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c],
@@ -311,7 +346,16 @@ async function main(argv) {
   const path = shortestPath(graph, start.id, end.id);
   if (!path) throw new Error("The two ends are not connected in this data — widen --pad.");
 
-  const points = decimate(path.points, Number(args["max-points"] ?? 3000));
+  const trimmed = trimDoublingBack(path.points, Number(args.trim ?? 150));
+  if (trimmed.length !== path.points.length) {
+    process.stderr.write(
+      `Trimmed ${path.points.length - trimmed.length} points of station-throat doubling back.\n`,
+    );
+  }
+  const lineM = trimmed
+    .slice(1)
+    .reduce((sum, p, i) => sum + haversineM(trimmed[i], p), 0);
+  const points = decimate(trimmed, Number(args["max-points"] ?? 3000));
   const gpx = toGpx(points, {
     name: args.name ?? "Travelled leg",
     type: args.type ?? "train",
@@ -320,8 +364,8 @@ async function main(argv) {
   });
   await writeFile(out, gpx);
   process.stderr.write(
-    `Wrote ${out}: ${points.length} of ${path.points.length} points, ` +
-      `${(path.distanceM / 1000).toFixed(1)} km along the line.\n`,
+    `Wrote ${out}: ${points.length} of ${trimmed.length} points, ` +
+      `${(lineM / 1000).toFixed(1)} km along the line.\n`,
   );
 }
 

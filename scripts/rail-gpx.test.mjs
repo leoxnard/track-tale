@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGraph, haversineM, nearestNode, shortestPath, toGpx } from "./rail-gpx.mjs";
+import { buildGraph, haversineM, nearestNode, shortestPath, toGpx, trimDoublingBack } from "./rail-gpx.mjs";
 
 /**
  * A miniature network with a decoy: the through line runs 1 → 2 → 3 → 4, and a
@@ -74,6 +74,46 @@ describe("shortestPath", () => {
       { type: "way", id: 2, nodes: [3, 4] },
     ]);
     expect(shortestPath(graph, 1, 4)).toBeNull();
+  });
+});
+
+describe("trimDoublingBack", () => {
+  /** ~1.1 km per 0.01° of latitude here, so these are hundreds of metres. */
+  const hook = [
+    { lat: 57.1431, lng: -2.098 }, // snapped onto a platform road
+    { lat: 57.1418, lng: -2.0971 },
+    { lat: 57.1401, lng: -2.097 }, // south to the throat…
+    { lat: 57.1419, lng: -2.0975 }, // …and back up the next track along
+    { lat: 57.1427, lng: -2.0978 },
+    { lat: 57.1473, lng: -2.1034 }, // away, for real this time
+    { lat: 57.2062, lng: -2.1946 },
+  ];
+
+  it("starts the leg where the line last passes the station", () => {
+    const trimmed = trimDoublingBack(hook, 150);
+    expect(trimmed[0]).toEqual({ lat: 57.1427, lng: -2.0978 });
+    expect(trimmed.at(-1)).toEqual(hook.at(-1));
+  });
+
+  it("leaves a line that never doubles back alone", () => {
+    const straight = hook.slice(4);
+    expect(trimDoublingBack(straight, 150)).toEqual(straight);
+  });
+
+  it("does nothing when switched off", () => {
+    expect(trimDoublingBack(hook, 0)).toEqual(hook);
+  });
+
+  it("keeps the middle of a route that comes back near its own start", () => {
+    // A loop: cutting to "the last time it passes the start" would leave
+    // nothing at all, so the path is handed back whole.
+    const loop = [
+      { lat: 57.0, lng: -2.0 },
+      { lat: 57.1, lng: -2.1 },
+      { lat: 57.2, lng: -2.0 },
+      { lat: 57.0005, lng: -2.0005 },
+    ];
+    expect(trimDoublingBack(loop, 150)).toEqual(loop);
   });
 });
 
