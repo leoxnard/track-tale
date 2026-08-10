@@ -1,10 +1,11 @@
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { hopsBetween, layDays, type TourDayInput } from "../lib/tour-layout";
 import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
-import { TRANSIT_GLYPHS } from "../lib/i18n";
+import { TransitVehicle } from "./TransitVehicle";
+import { carriagesFor, LOCO_PX, TRAIN_PAD_PX } from "../lib/train-fit";
 
 const W = 960;
 const H = 200;
@@ -14,8 +15,10 @@ const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
 
 const PLAN_COLOR = "#9aa59e";
 
-/** Roughly how far apart the little vehicles sit along a hop, in chart units. */
-const GLYPH_SPACING = 150;
+/** A ferry or a bus pulls nothing, so it either fits whole or it does not. */
+function singleFits(gapPx: number): number | null {
+  return gapPx - 2 * TRAIN_PAD_PX >= LOCO_PX ? 0 : null;
+}
 
 export type { TourDayInput };
 
@@ -59,6 +62,19 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
     null,
   );
   const justZoomed = useRef(false);
+
+  // The train is built out of whole vehicles, so it needs the chart's real
+  // width in pixels rather than its stretched viewBox units.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [chartPx, setChartPx] = useState(0);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setChartPx(entry.contentRect.width));
+    observer.observe(box);
+    setChartPx(box.getBoundingClientRect().width);
+    return () => observer.disconnect();
+  }, []);
 
   const chart = useMemo(() => {
     const planPoints = buildProfile(plan.flatMap(fromGeoJson), 600);
@@ -139,25 +155,30 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         line: toPath(day.points),
         area: `${toPath(day.points)}L${x(day.endM).toFixed(1)},${H - PAD_BOTTOM}L${x(day.startM).toFixed(1)},${H - PAD_BOTTOM}Z`,
       })),
-      // A hop carries as many glyphs as it has room for: one on a sliver of a
-      // ferry crossing, several across a long train ride, and more as the
-      // chart is zoomed into. They are positioned in the overlay rather than
-      // the SVG, which is stretched to its box and would squash them.
+      // The train that fills the hole. How much of one depends on the width of
+      // the gap *on screen*, which the viewBox cannot tell us — the chart is
+      // stretched to its box — so it is measured, and the vehicles are placed
+      // in the overlay where nothing squashes them.
       hops: hops.map((hop) => {
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
-        const marks = Math.min(6, Math.max(1, Math.round((toX - fromX) / GLYPH_SPACING)));
+        const midX = (fromX + toX) / 2;
+        const gapPx = ((toX - fromX) / W) * (chartPx || 0);
+        const carriages = hop.mode === "train" ? carriagesFor(gapPx) : singleFits(gapPx);
         return {
           ...hop,
-          line: `M${fromX.toFixed(1)},${y(hop.fromE).toFixed(1)}L${toX.toFixed(1)},${y(hop.toE).toFixed(1)}`,
-          marks: Array.from({ length: marks }, (_, i) => {
-            const f = (i + 0.5) / marks;
-            return { x: fromX + (toX - fromX) * f, y: y(hop.fromE + (hop.toE - hop.fromE) * f) };
-          }),
+          midX,
+          midY: y((hop.fromE + hop.toE) / 2),
+          carriages,
+          // Dashes are what is left when not even the locomotive fits.
+          line:
+            carriages === null
+              ? `M${fromX.toFixed(1)},${y(hop.fromE).toFixed(1)}L${toX.toFixed(1)},${y(hop.toE).toFixed(1)}`
+              : "",
         };
       }),
     };
-  }, [chart, zoom.from, zoom.to]);
+  }, [chart, chartPx, zoom.from, zoom.to]);
 
   const move = useCallback(
     (clientX: number) => {
@@ -209,7 +230,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         </p>
       </div>
 
-      <div className="relative mt-3">
+      <div ref={boxRef} className="relative mt-3">
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
@@ -275,20 +296,22 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               />
             )}
 
-            {/* The hop first, so a day line drawn near it stays on top. */}
-            {hops.map((hop) => (
-              <path
-                key={`hop-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
-                d={hop.line}
-                fill="none"
-                stroke={hop.color}
-                strokeWidth={1.5}
-                strokeDasharray="2 6"
-                strokeLinecap="round"
-                opacity={0.7}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
+            {/* Only the hops too narrow for a locomotive keep a line. */}
+            {hops
+              .filter((hop) => hop.line)
+              .map((hop) => (
+                <path
+                  key={`hop-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
+                  d={hop.line}
+                  fill="none"
+                  stroke={hop.color}
+                  strokeWidth={1.5}
+                  strokeDasharray="2 6"
+                  strokeLinecap="round"
+                  opacity={0.7}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
 
             {dayPaths.map(({ day, line, area }) => (
               <g key={`${day.dayNumber}-${day.piece}`}>
@@ -372,24 +395,24 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               {Math.round(t)} m
             </span>
           ))}
-          {/* The vehicle sitting in the hole it left in the line. The disc is
-              the page's own paper, so the dashes behind it read as a gap the
-              train is standing in rather than a sticker on top. */}
-          {hops.flatMap((hop) =>
-            hop.marks
-              .filter((mark) => mark.x >= 0 && mark.x <= W)
-              .map((mark, i) => (
-                <span
-                  key={`${hop.dayNumber}-${hop.fromM.toFixed(0)}-${i}`}
+          {/* The train standing in the hole it left, as long as the hole is
+              wide: a locomotive and as many carriages as fit. */}
+          {hops
+            .filter((hop) => hop.carriages !== null && hop.midX >= 0 && hop.midX <= W)
+            .map((hop) => (
+              <span
+                key={`train-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
+                className="absolute -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${(hop.midX / W) * 100}%`, top: `${(hop.midY / H) * 100}%` }}
+              >
+                <TransitVehicle
+                  mode={hop.mode}
+                  color={hop.color}
+                  carriages={hop.carriages ?? 0}
                   title={m.profile.skipped(hop.mode)}
-                  aria-hidden="true"
-                  className="absolute flex h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-[11px] leading-none"
-                  style={{ left: `${(mark.x / W) * 100}%`, top: `${(mark.y / H) * 100}%` }}
-                >
-                  {TRANSIT_GLYPHS[hop.mode]}
-                </span>
-              )),
-          )}
+                />
+              </span>
+            ))}
           {laid
             .filter((day) => day.piece === 0 && visible(day.startM))
             .map((day) => (
