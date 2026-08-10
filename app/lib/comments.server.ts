@@ -17,9 +17,23 @@ export type CommentResult = { ok: true } | { ok: false; error: string };
 
 const MAX_NAME = 40;
 const MAX_TEXT = 800;
-/** A whole family posting at once is fine; a stuck finger is not. */
+/**
+ * A whole family posting at once is fine; a stuck finger is not.
+ *
+ * Counted across the whole trip rather than per day. Per day, the ceiling
+ * multiplied by however many days the trip had — a four-week trip allowed
+ * hundreds of messages a minute, and every one of them rings the travellers'
+ * phones, because each comment is relayed into the Telegram chat.
+ */
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 8;
+const RATE_MAX = 10;
+
+/**
+ * The bot used to relay comments. Built once instead of per comment: a fresh
+ * grammy Bot costs a getMe round trip before it will send anything, and that
+ * sat in the middle of the visitor's request.
+ */
+let relayBot: Bot | undefined;
 
 export async function postComment(input: NewComment): Promise<CommentResult> {
   const err = messages(input.locale ?? DEFAULT_LOCALE).guestbook.errors;
@@ -37,19 +51,20 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
     .maybeSingle();
   if (!trip) return { ok: false, error: err.noTrip };
 
-  const { data: day } = await db
-    .from("days")
-    .select("id, day_number")
-    .eq("trip_id", trip.id)
-    .eq("day_number", input.dayNumber)
-    .maybeSingle();
+  // Every day of the trip, not just the one being posted to: the rate window
+  // below spans the trip, and this is the same single query either way.
+  const { data: dayRows } = await db.from("days").select("id, day_number").eq("trip_id", trip.id);
+  const day = (dayRows ?? []).find((d) => d.day_number === input.dayNumber);
   if (!day) return { ok: false, error: err.noDay };
 
   const since = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
   const { count } = await db
     .from("comments")
     .select("*", { count: "exact", head: true })
-    .eq("day_id", day.id)
+    .in(
+      "day_id",
+      (dayRows ?? []).map((d) => d.id),
+    )
     .gt("created_at", since);
   if ((count ?? 0) >= RATE_MAX) {
     return { ok: false, error: err.tooMany };
@@ -67,8 +82,8 @@ export async function postComment(input: NewComment): Promise<CommentResult> {
   // has to be escaped — an unmatched "_" would make Telegram reject the relay
   // and the family would never know their message went nowhere.
   try {
-    const bot = new Bot(env.telegramBotToken);
-    const sent = await bot.api.sendMessage(
+    relayBot ??= new Bot(env.telegramBotToken);
+    const sent = await relayBot.api.sendMessage(
       trip.chat_id,
       `💬 *${escapeMd(authorName)}* on day ${day.day_number} of ${escapeMd(trip.name)}:\n` +
         `${escapeMd(text)}\n\n_Reply /delete to remove it._`,
