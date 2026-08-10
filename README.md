@@ -47,6 +47,12 @@ notes, stats and weather.
   86 km instead of overhanging its neighbours. What was ridden is in the day's own stats.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
+- A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the
+  other international routes in red, national in blue, regional and local paler — from
+  [Waymarked Trails](https://cycling.waymarkedtrails.org/), which renders OpenStreetMap's
+  route relations as transparent tiles. It sits under the day colours at half strength, so
+  it reads as context rather than competing with the ride, and it is **off until asked for**:
+  no tile is fetched from a third party while the button is untouched.
 
 ## Setup
 

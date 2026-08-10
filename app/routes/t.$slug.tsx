@@ -419,12 +419,25 @@ function ensureGlyph(
   return id;
 }
 
+/**
+ * Signposted cycle routes from OpenStreetMap, rendered by Waymarked Trails as
+ * transparent tiles: the international routes (EuroVelo and friends) in red,
+ * national in blue, regional and local paler. It answers the question a family
+ * link keeps raising — "is that an actual cycle route they're on?" — without
+ * replacing the quiet basemap the day colours are drawn to stand out against.
+ */
+const CYCLE_TILES = "https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png";
+const CYCLE_ATTRIBUTION =
+  '<a href="https://cycling.waymarkedtrails.org/" target="_blank" rel="noreferrer">Waymarked Trails</a> (CC BY-SA 3.0)';
+const CYCLE_LAYER = "cycle-routes";
+
 type MapHandle = {
   flyToDay: (dayNumber: number) => void;
   /** Zoom back out to the whole journey, plan included. */
   resetView: () => void;
   /** Close in on the live position, which is a speck at whole-tour zoom. */
   flyToLive: () => void;
+  setCycleRoutes: (visible: boolean) => void;
   showScrub: (lngLat: [number, number] | null, color: string) => void;
 };
 
@@ -433,6 +446,7 @@ function TripMap({
   plan,
   live,
   handleRef,
+  cycleRoutes,
   onPhoto,
   m,
 }: {
@@ -440,11 +454,23 @@ function TripMap({
   plan: TrackGeoJson[];
   live?: ViewerLive | null;
   handleRef: React.MutableRefObject<MapHandle | null>;
+  /** Whether the cycle-route overlay is switched on. */
+  cycleRoutes: boolean;
   /** Open a photo marker in the lightbox instead of navigating to the file. */
   onPhoto: (photo: ViewerPhoto) => void;
   m: Messages;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Read through a ref rather than an effect dependency: toggling the overlay
+  // must not tear the map down and rebuild it. The ref also carries the choice
+  // across a rebuild triggered by anything else, so the overlay doesn't
+  // silently switch itself off.
+  const cycleRef = useRef(cycleRoutes);
+  cycleRef.current = cycleRoutes;
+
+  useEffect(() => {
+    handleRef.current?.setCycleRoutes(cycleRoutes);
+  }, [cycleRoutes, handleRef]);
 
   useEffect(() => {
     let disposed = false;
@@ -494,6 +520,25 @@ function TripMap({
 
       map.on("load", () => {
         if (!map) return;
+
+        // First of everything we add, so the tour's own lines stay on top of
+        // the route network rather than being lost in it.
+        map.addSource(CYCLE_LAYER, {
+          type: "raster",
+          tiles: [CYCLE_TILES],
+          tileSize: 256,
+          maxzoom: 18,
+          attribution: CYCLE_ATTRIBUTION,
+        });
+        map.addLayer({
+          id: CYCLE_LAYER,
+          type: "raster",
+          source: CYCLE_LAYER,
+          // Full strength would out-shout the day colours; half lets the
+          // network read as context under them.
+          paint: { "raster-opacity": 0.55 },
+          layout: { visibility: cycleRef.current ? "visible" : "none" },
+        });
 
         plan.forEach((segment, i) => {
           map!.addSource(`plan-${i}`, { type: "geojson", data: segment });
@@ -647,6 +692,12 @@ function TripMap({
         flyToLive() {
           if (!map || !live?.current) return;
           map.flyTo({ center: live.current, zoom: 13, duration: 1200 });
+        },
+        setCycleRoutes(visible) {
+          // A toggle during the style's first load has nothing to set yet; the
+          // load handler reads the same ref and picks the choice up there.
+          if (!map?.getLayer(CYCLE_LAYER)) return;
+          map.setLayoutProperty(CYCLE_LAYER, "visibility", visible ? "visible" : "none");
         },
         flyToDay(dayNumber) {
           const day = days.find((d) => d.dayNumber === dayNumber);
@@ -831,6 +882,9 @@ export function TripView({
   const formatHours = (seconds: number) => formatDuration(seconds, locale);
 
   const mapHandle = useRef<MapHandle | null>(null);
+  // Off to begin with: the overlay is a third-party tile request, and it stays
+  // unmade until someone asks for it.
+  const [cycleRoutes, setCycleRoutes] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -949,6 +1003,7 @@ export function TripView({
               plan={trip.plan}
               live={trip.live}
               handleRef={mapHandle}
+              cycleRoutes={cycleRoutes}
               onPhoto={openByUrl}
               m={m}
             />
@@ -976,6 +1031,18 @@ export function TripView({
                 title={m.trip.wholeTourHint}
               >
                 <span aria-hidden>⤢</span> {m.trip.wholeTour}
+              </button>
+              <button
+                onClick={() => setCycleRoutes((on) => !on)}
+                aria-pressed={cycleRoutes}
+                className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-bold focus-visible:outline-2 focus-visible:outline-pine ${
+                  cycleRoutes
+                    ? "border-pine bg-pine text-paper"
+                    : "border-trail text-pine hover:border-pine-soft"
+                }`}
+                title={m.trip.cycleRoutesHint}
+              >
+                <span aria-hidden>🚲</span> {m.trip.cycleRoutes}
               </button>
               {trip.live?.current && (
                 <button
