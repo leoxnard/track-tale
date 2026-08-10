@@ -256,7 +256,10 @@ export async function tripStatusView(trip: DbTrip): Promise<View> {
       : "";
 
   const liveMs = trip.live_expires_at ? Date.parse(trip.live_expires_at) : NaN;
-  const liveOn = Boolean(trip.live_url) && Number.isFinite(liveMs) && liveMs > Date.now();
+  // A link left over from before the switch was flipped is not a banner: with
+  // live tracking off the page never draws one, so the status must not claim it.
+  const liveOn =
+    env.liveTracking && Boolean(trip.live_url) && Number.isFinite(liveMs) && liveMs > Date.now();
 
   const keyboard = new InlineKeyboard()
     .text("📅 Days", encodeAction({ type: "days", page: pageOfDay(trip.current_day_number ?? 1), mode: "set" }))

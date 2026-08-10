@@ -6,12 +6,12 @@ import { verifySvixSignature } from "../lib/webhook-signature";
  * Resend inbound webhook. Garmin emails a LiveTrack link to the inbound address
  * when a ride starts, and this turns it into the live banner.
  *
- * Refuses everything unless both secrets are configured, so an environment
- * without inbound mail set up cannot be poked at.
+ * Refuses everything unless live tracking is switched on and both secrets are
+ * configured, so an environment without inbound mail set up cannot be poked at.
  */
 export async function action({ request }: { request: Request }) {
   const secret = env.resendInboundSecret;
-  if (!secret || !env.resendApiKey) {
+  if (!env.liveTracking || !secret || !env.resendApiKey) {
     return new Response("inbound email is not configured", { status: 404 });
   }
 

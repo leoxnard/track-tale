@@ -4,6 +4,11 @@ function required(name: string): string {
   return value;
 }
 
+/** Reads a feature switch. Anything but a plain yes counts as off. */
+function isOn(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
 export const env = {
   get supabaseUrl() {
     return required("SUPABASE_URL");
@@ -28,9 +33,21 @@ export const env = {
     return process.env.APP_ORIGIN ?? "http://localhost:5173";
   },
   /**
-   * Optional. Without it the share card still renders, just on plain paper
-   * instead of over a map.
+   * Live tracking, off unless `LIVE_TRACKING` is switched on.
+   *
+   * Off it stays a feature rather than a scar: the code, the schema columns and
+   * the translations all remain, and every way of turning the banner on is shut
+   * at its entrance — the family's page never asks Garmin, the bot says the
+   * feature is off rather than promising a banner nobody will see, and inbound
+   * mail 404s. Flip it back on and it all works again, no migration involved.
+   *
+   * The reason it is off: the trip page fetched Garmin's page on *every* render
+   * while a link was live, and that request sits between a visitor and their
+   * map.
    */
+  get liveTracking() {
+    return isOn(process.env.LIVE_TRACKING);
+  },
   /**
    * Inbound mail. Both are optional: without them /api/inbound-email refuses
    * every request and live links are set by pasting into Telegram, as before.

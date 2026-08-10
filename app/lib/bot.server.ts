@@ -272,6 +272,19 @@ interface BotState {
   isOwner: boolean;
 }
 
+/** Told to anyone reaching for live tracking while `LIVE_TRACKING` is off. */
+const LIVE_OFF_NOTICE =
+  "⚫️ Live tracking is switched off on this server, so a LiveTrack link would " +
+  "light up a banner nobody can see. Everything else — tracks, photos, notes — " +
+  "works as usual.";
+
+const LIVE_HELP = `*Live*
+🔴 Paste a Garmin LiveTrack link → live banner for 24h
+/live — what the family page is showing right now
+/live off — take the banner down
+
+`;
+
 const HELP = `🚴 *TrackTale* — your trip journal
 
 _Most of these open a keyboard — /trip is the hub, and every screen carries the next step as a button._
@@ -311,12 +324,7 @@ photos, tracks, and guestbook messages the family left
 map pin and place in the day all stay — handy after running a filter over them
 /clearday — pick a day and empty it: every note, photo and track on it
 
-*Live*
-🔴 Paste a Garmin LiveTrack link → live banner for 24h
-/live — what the family page is showing right now
-/live off — take the banner down
-
-*Plan*
+${LIVE_HELP}*Plan*
 • A *planned* Komoot tour link → grey plan line + progress
 • GPX with caption "plan" → same
 /refreshplan — re-sync plan links after editing in Komoot
@@ -337,6 +345,11 @@ map pin and place in the day all stay — handy after running a filter over them
 
 _Add me to a group and everyone travelling can contribute — photos and notes are credited by name._
 _Invited friends run their own trips in their own chats — you don't need to be there._`;
+
+/** A help text that lists a switched-off feature teaches the wrong thing. */
+function helpText(): string {
+  return env.liveTracking ? HELP : HELP.replace(LIVE_HELP, "");
+}
 
 /**
  * Decide whether we may act on this update, and gather sender identity.
@@ -1201,7 +1214,7 @@ export function createBot(): Bot {
       .text("🎒 Switch trip", encodeAction({ type: "trips" }));
 
   const help = (ctx: Context) =>
-    ctx.reply(HELP, { parse_mode: "Markdown", reply_markup: helpKeyboard() });
+    ctx.reply(helpText(), { parse_mode: "Markdown", reply_markup: helpKeyboard() });
   bot.command("start", help);
   bot.command("help", help);
 
@@ -1868,6 +1881,10 @@ export function createBot(): Bot {
    * only scrape. This says what the server sees right now.
    */
   bot.command("live", async (ctx) => {
+    if (!env.liveTracking) {
+      await ctx.reply(LIVE_OFF_NOTICE);
+      return;
+    }
     const trip = await requireTrip(ctx);
     if (!trip) return;
     const arg = (ctx.match as string).trim().toLowerCase();
@@ -2391,6 +2408,12 @@ export function createBot(): Bot {
 
     // Links are unambiguous intent, so they work anywhere.
     if (liveUrl) {
+      // Saying so beats saving a link the page will not read, and beats filing
+      // the message away as a journal note.
+      if (!env.liveTracking) {
+        await ctx.reply(LIVE_OFF_NOTICE);
+        return;
+      }
       const trip = await requireTrip(ctx);
       if (!trip) return;
       await updateTrip(trip.id, {

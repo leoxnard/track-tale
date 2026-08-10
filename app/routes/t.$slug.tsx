@@ -23,6 +23,7 @@ import { supabase } from "../lib/supabase.server";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
 import { weatherIcon, type DayWeather } from "../lib/weather";
 import { byPhotoTime } from "../lib/photo-order";
+import { env } from "../lib/env.server";
 import { fetchLiveSession } from "../lib/livetrack.server";
 import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
@@ -157,7 +158,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const plan = (planRows ?? []).map((p) => p.geojson as TrackGeoJson);
   const planKm = (planRows ?? []).reduce((s, p) => s + p.distance_m, 0) / 1000;
   const totalKm = days.reduce((s, d) => s + d.distanceM, 0) / 1000;
+  // With live tracking switched off the page never talks to Garmin, which is
+  // one fewer third-party round trip in front of the map.
   const liveActive =
+    env.liveTracking &&
     trip.live_url !== null &&
     trip.live_expires_at !== null &&
     Date.parse(trip.live_expires_at) > Date.now();

@@ -26,7 +26,10 @@ notes, stats and weather.
   or let Garmin email it: add the inbound address as a LiveTrack recipient and starting a ride
   turns the banner on by itself, with the bot confirming in the chat which trip it landed on.
   `/live` reports what the server can actually read off Garmin's page, since that is the one
-  part of the app nobody can check from the family link.
+  part of the app nobody can check from the family link. **Switched off by default**: the
+  page fetched Garmin on every single render while a link was live, and that request sat
+  between a visitor and their map. Set `LIVE_TRACKING=1` to have all of it back — nothing was
+  removed, and no migration is involved either way.
 - One whole-tour elevation chart shows the plan in grey with each ridden day laid over the
   stretch of route it actually covers, matched by coordinates rather than stacked in
   sequence — so a shortcut or a detour leaves a gap or an overlap instead of shifting every
@@ -46,7 +49,8 @@ notes, stats and weather.
    [@userinfobot](https://t.me/userinfobot).
 3. **Env**: copy [.env.example](.env.example) to `.env` and fill everything in. Everything
    is required except `MAPTILER_KEY`, which puts a real map behind the route on the share
-   card; without it the card renders on plain paper.
+   card (without it the card renders on plain paper), and `LIVE_TRACKING`, which is off
+   unless you set it to `1`.
 4. **Webhook** (after deploying):
    ```sh
    curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
