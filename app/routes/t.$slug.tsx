@@ -20,7 +20,14 @@ function saveRecentTrip(slug: string, name: string) {
 import { getTripBySlug, updateTrip } from "../lib/db.server";
 import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
-import { buildProfile, fromGeoJson, groupContinuous, type TrackGeoJson } from "../lib/track";
+import {
+  buildProfile,
+  fromGeoJson,
+  groupContinuous,
+  haversineM,
+  type TrackGeoJson,
+  type TrackPoint,
+} from "../lib/track";
 import type { TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather } from "../lib/weather";
@@ -38,6 +45,7 @@ import {
   formatShortDate,
   messages,
   resolveLocale,
+  TRANSIT_GLYPHS,
   type Messages,
 } from "../lib/i18n";
 import { useLocale, useMessages } from "../lib/locale";
@@ -107,6 +115,38 @@ export async function action({ request, params }: Route.ActionArgs) {
     : { ok: false as const, error: result.error, dayNumber: Number(form.get("dayNumber")) };
 }
 
+/**
+ * How far a station may be from where the riding stopped and still be the
+ * reason it stopped. Generous: the last kilometre to the platform is often not
+ * recorded, and being wrong here only costs the gap its little icon.
+ */
+const BRIDGE_NEAR_M = 5000;
+
+/**
+ * Which travelled leg accounts for the gap between two stretches of riding.
+ *
+ * Matched on where the leg begins and ends rather than on when it was: a GPX
+ * built from a timetable-less railway line carries no clock at all, and the
+ * geometry is the part that cannot be missing.
+ */
+function bridgingMode(
+  legs: { mode: TransitMode; points: TrackPoint[] }[],
+  from: TrackPoint,
+  to: TrackPoint,
+): TransitMode | null {
+  for (const leg of legs) {
+    const head = leg.points[0];
+    const tail = leg.points[leg.points.length - 1];
+    if (!head || !tail) continue;
+    const forwards =
+      haversineM(head, from) <= BRIDGE_NEAR_M && haversineM(tail, to) <= BRIDGE_NEAR_M;
+    const backwards =
+      haversineM(tail, from) <= BRIDGE_NEAR_M && haversineM(head, to) <= BRIDGE_NEAR_M;
+    if (forwards || backwards) return leg.mode;
+  }
+  return null;
+}
+
 export async function loader({ params, request }: Route.LoaderArgs) {
   const locale = resolveLocale(request);
   const trip = await getTripBySlug(params.slug);
@@ -143,10 +183,25 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       // on, and those are two stretches with 133 km between them that were
       // never pedalled.
       const riddenPoints = ridden.map((s) => fromGeoJson(s.geojson as TrackGeoJson));
-      const pieces = groupContinuous(riddenPoints).map((group) => ({
-        distanceM: group.reduce((sum, i) => sum + ridden[i].distance_m, 0),
-        profile: buildProfile(group.flatMap((i) => riddenPoints[i])),
+      const transitLegs = transit.map((s) => ({
+        mode: transitMode(s.sport)!,
+        points: fromGeoJson(s.geojson as TrackGeoJson),
       }));
+      const groups = groupContinuous(riddenPoints);
+      const pieces = groups.map((group, gi) => {
+        const previous = groups[gi - 1];
+        return {
+          distanceM: group.reduce((sum, i) => sum + ridden[i].distance_m, 0),
+          profile: buildProfile(group.flatMap((i) => riddenPoints[i])),
+          after: previous
+            ? bridgingMode(
+                transitLegs,
+                riddenPoints[previous[previous.length - 1]].at(-1)!,
+                riddenPoints[group[0]][0],
+              )
+            : null,
+        };
+      });
       return {
         dayNumber: d.day_number,
         date: d.date,
@@ -322,6 +377,48 @@ const photoDotStyle = (color: string) =>
   `${SHARED_MARKER_STYLE};width:10px;height:10px;border:2px solid #fff;` +
   `box-shadow:0 1px 3px rgba(0,0,0,.35);background:${color}`;
 
+/**
+ * The vehicle, drawn once into an image the map can repeat along a line.
+ *
+ * On paper, with a ring in the day's own colour: dropped onto the hatched
+ * railway at intervals it reads as the line breaking open to let the train
+ * sit in it, which is the whole point — a glance has to say "this bit was not
+ * ridden" without anyone reading a legend.
+ */
+const GLYPH_PX = 44;
+
+function ensureGlyph(
+  map: import("maplibre-gl").Map,
+  mode: TransitMode,
+  color: string,
+): string | null {
+  const id = `transit-${mode}-${color}`;
+  if (map.hasImage(id)) return id;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = GLYPH_PX;
+  canvas.height = GLYPH_PX;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const r = GLYPH_PX / 2;
+  ctx.beginPath();
+  ctx.arc(r, r, r - 3, 0, Math.PI * 2);
+  ctx.fillStyle = "#fbfaf7";
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+
+  ctx.font = `${Math.round(GLYPH_PX * 0.52)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(TRANSIT_GLYPHS[mode], r, r + 1);
+
+  map.addImage(id, ctx.getImageData(0, 0, GLYPH_PX, GLYPH_PX), { pixelRatio: 2 });
+  return id;
+}
+
 type MapHandle = {
   flyToDay: (dayNumber: number) => void;
   /** Zoom back out to the whole journey, plan included. */
@@ -444,6 +541,26 @@ function TripMap({
                 },
                 layout: { "line-cap": "butt", "line-join": "round" },
               });
+
+              // …and the vehicle itself, riding the line at intervals.
+              const glyph = ensureGlyph(map!, track.mode, day.color);
+              if (glyph) {
+                map!.addLayer({
+                  id: `${id}-glyph`,
+                  type: "symbol",
+                  source: id,
+                  layout: {
+                    "icon-image": glyph,
+                    "symbol-placement": "line",
+                    "symbol-spacing": 110,
+                    // Upright whatever the line is doing, and never so crowded
+                    // that the route disappears under a row of trains.
+                    "icon-rotation-alignment": "viewport",
+                    "icon-allow-overlap": false,
+                    "icon-padding": 8,
+                  },
+                });
+              }
             }
           });
 

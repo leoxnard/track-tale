@@ -1,5 +1,6 @@
 import { buildPlanIndex, median, theilSenSlope } from "./plan-anchor";
 import type { ProfilePoint, TrackPoint } from "./track";
+import type { TransitMode } from "./transport";
 
 /**
  * Laying each ridden day over the stretch of the planned route it covered.
@@ -38,6 +39,12 @@ export interface TourPiece {
   distanceM: number;
   /** Elevation series on its own distance axis, starting at zero. */
   profile: ProfilePoint[];
+  /**
+   * How the traveller got here from the stretch before — the leg that bridges
+   * the gap. Null on the first stretch of a day, and on a gap nothing accounts
+   * for, which is the honest answer to a transfer nobody recorded.
+   */
+  after?: TransitMode | null;
 }
 
 export interface TourDayInput {
@@ -57,6 +64,8 @@ export interface LaidDay {
   color: string;
   /** Which stretch of the day this is; 0 unless the day was interrupted. */
   piece: number;
+  /** What carried the traveller here from the stretch before, if anything did. */
+  after: TransitMode | null;
   /** Where the stretch begins along the plan, in metres. */
   startM: number;
   endM: number;
@@ -70,6 +79,45 @@ export interface TourLayout {
   riddenM: number;
   /** Furthest point reached along the plan, which is not the same thing. */
   reachedM: number;
+}
+
+/** A gap in a day's line, and what carried the traveller across it. */
+export interface TourHop {
+  dayNumber: number;
+  color: string;
+  mode: TransitMode;
+  /** The gap's ends along the plan, and the elevations either side of it. */
+  fromM: number;
+  toM: number;
+  fromE: number;
+  toE: number;
+}
+
+/**
+ * The holes an interruption left in the drawn days.
+ *
+ * Only where something accounts for the hole: a gap nobody can explain is left
+ * as plain plan, because putting a vehicle on it would be a guess. A stretch
+ * that starts before the one before it ended is an overlap rather than a gap,
+ * and there is nothing to bridge.
+ */
+export function hopsBetween(laid: LaidDay[]): TourHop[] {
+  const hops: TourHop[] = [];
+  for (const [i, piece] of laid.entries()) {
+    const before = laid[i - 1];
+    if (!before || piece.piece === 0 || !piece.after) continue;
+    if (piece.startM <= before.endM) continue;
+    hops.push({
+      dayNumber: piece.dayNumber,
+      color: piece.color,
+      mode: piece.after,
+      fromM: before.endM,
+      toM: piece.startM,
+      fromE: before.points[before.points.length - 1].e,
+      toE: piece.points[0].e,
+    });
+  }
+  return hops;
 }
 
 /**
@@ -166,6 +214,7 @@ export function layDays(
         dayNumber: day.dayNumber,
         color: day.color,
         piece: index,
+        after: piece.after ?? null,
         startM,
         endM: startM + drawnWidth,
         points: piece.profile.map((p) => ({ ...p, d: startM + scale * p.d })),
