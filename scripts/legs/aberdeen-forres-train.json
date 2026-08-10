@@ -1,0 +1,8 @@
+{
+  "name": "Zug Aberdeen – Forres",
+  "type": "train",
+  "from": "57.14357,-2.09694",
+  "to": "57.60855,-3.61240",
+  "maxPoints": 2000,
+  "note": "Day 7 of HochlandKinder: the Aberdeen–Inverness line, ridden as far as Forres. from/to are the two station forecourts; the script snaps them onto the rails."
+}

@@ -158,6 +158,41 @@ describe("trip page loader", () => {
     expect(out.movingS).toBe(600);
   });
 
+  it("keeps a leg taken by train on the map but out of the ridden totals", async () => {
+    const trainLeg = {
+      geojson: line([
+        [-2.09, 57.14],
+        [-3.62, 57.6],
+      ]),
+      distance_m: 132_000,
+      moving_s: 4800,
+      elevation_up: 400,
+      sport: "train",
+      started_at: "2026-08-01T09:30:00Z",
+    };
+    dayRows = [dayWithTrack({ track_segments: [...(dayWithTrack().track_segments as Row[]), trainLeg] })];
+    const out = await load("abc");
+    const day = (out.days as Row[])[0] as {
+      distanceM: number;
+      elevationUp: number;
+      movingS: number;
+      transitM: number;
+      transitModes: string[];
+      tracks: { mode: string | null }[];
+    };
+
+    expect(day.distanceM).toBe(1200);
+    expect(day.elevationUp).toBe(50);
+    expect(day.movingS).toBe(300);
+    expect(day.transitM).toBe(132_000);
+    expect(day.transitModes).toEqual(["train"]);
+    // Both lines are drawn; only one of them is hatched as a railway.
+    expect(day.tracks.map((t) => t.mode)).toEqual([null, "train"]);
+    expect(out.totalKm).toBeCloseTo(1.2, 5);
+    expect(out.transitKm).toBeCloseTo(132, 5);
+    expect(out.transitModes).toEqual(["train"]);
+  });
+
   it("leaves out a day with nothing on it", async () => {
     // A trip creates a row per day up front; an empty one is a day not yet
     // lived, not a day worth a heading on the page.

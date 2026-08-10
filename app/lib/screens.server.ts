@@ -5,6 +5,7 @@ import { escapeMd } from "./telegram-md";
 import { countSummary, encodeAction, type DayPickerMode } from "./manage";
 import { dayTally, loadDays, tallyTotal, type DayTally, type View } from "./manage.server";
 import { tripDayCount, type DbTrip } from "./db.server";
+import { isTransit } from "./transport";
 
 /**
  * The screens that turn a command you have to remember the syntax of into a
@@ -45,15 +46,18 @@ export interface TripTotals {
 export async function tripTotals(tripId: string): Promise<TripTotals> {
   const { data: days } = await supabase()
     .from("days")
-    .select("id, day_number, track_segments(distance_m, elevation_up)")
+    .select("id, day_number, track_segments(distance_m, elevation_up, sport)")
     .eq("trip_id", tripId);
 
   const totals: TripTotals = { distanceM: 0, elevationUp: 0, daysWithTracks: 0, planM: 0 };
   for (const d of days ?? []) {
-    const segs = (d as { track_segments: { distance_m: number; elevation_up: number }[] })
-      .track_segments;
+    const segs = (d as {
+      track_segments: { distance_m: number; elevation_up: number; sport: string | null }[];
+    }).track_segments;
     if (segs.length > 0) totals.daysWithTracks++;
     for (const s of segs) {
+      // A leg taken by train counts as a day travelled, not as distance made.
+      if (isTransit(s.sport)) continue;
       totals.distanceM += s.distance_m;
       totals.elevationUp += s.elevation_up;
     }

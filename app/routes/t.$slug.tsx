@@ -21,6 +21,7 @@ import { getTripBySlug, updateTrip } from "../lib/db.server";
 import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
+import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather } from "../lib/weather";
 import { byPhotoTime } from "../lib/photo-order";
 import { env } from "../lib/env.server";
@@ -61,15 +62,25 @@ export interface ViewerComment {
   at: string;
 }
 
+/** A drawn line plus how it was travelled — null for anything under own power. */
+export interface ViewerTrack {
+  geojson: TrackGeoJson;
+  mode: TransitMode | null;
+}
+
 export interface ViewerDay {
   dayNumber: number;
   date: string;
   color: string;
+  /** Ridden only. A train leg is on the map but not in the day's distance. */
   distanceM: number;
   elevationUp: number;
   movingS: number;
+  /** Kilometres covered by train, ferry or bus, kept apart from the ridden ones. */
+  transitM: number;
+  transitModes: TransitMode[];
   sports: string[];
-  tracks: TrackGeoJson[];
+  tracks: ViewerTrack[];
   profile: ProfilePoint[];
   photos: ViewerPhoto[];
   notes: ViewerNote[];
@@ -117,18 +128,28 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       const segments = [...d.track_segments].sort(
         (a, b) => Date.parse(a.started_at ?? 0) - Date.parse(b.started_at ?? 0),
       );
+      // A train or ferry leg is drawn with the day but adds up separately: it
+      // is not distance the traveller made, and its "climb" is the line's, not
+      // theirs.
+      const ridden = segments.filter((s) => transitMode(s.sport) === null);
+      const transit = segments.filter((s) => transitMode(s.sport) !== null);
       return {
         dayNumber: d.day_number,
         date: d.date,
         color: d.color,
-        distanceM: segments.reduce((s, seg) => s + seg.distance_m, 0),
-        elevationUp: segments.reduce((s, seg) => s + seg.elevation_up, 0),
-        movingS: segments.reduce((s, seg) => s + seg.moving_s, 0),
-        sports: [...new Set(segments.map((s) => s.sport).filter(Boolean))] as string[],
-        tracks: segments.map((s) => s.geojson as TrackGeoJson),
+        distanceM: ridden.reduce((s, seg) => s + seg.distance_m, 0),
+        elevationUp: ridden.reduce((s, seg) => s + seg.elevation_up, 0),
+        movingS: ridden.reduce((s, seg) => s + seg.moving_s, 0),
+        transitM: transit.reduce((s, seg) => s + seg.distance_m, 0),
+        transitModes: [...new Set(transit.map((s) => transitMode(s.sport)!))],
+        sports: [...new Set(ridden.map((s) => s.sport).filter(Boolean))] as string[],
+        tracks: segments.map((s) => ({
+          geojson: s.geojson as TrackGeoJson,
+          mode: transitMode(s.sport),
+        })),
         // Segments of a split day read as one continuous climb.
         profile: buildProfile(
-          segments.flatMap((s) => fromGeoJson(s.geojson as TrackGeoJson)),
+          ridden.flatMap((s) => fromGeoJson(s.geojson as TrackGeoJson)),
         ),
         photos: [...d.media]
           .sort(byPhotoTime)
@@ -222,6 +243,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     plan,
     planKm,
     totalKm,
+    transitKm: days.reduce((s, d) => s + d.transitM, 0) / 1000,
+    transitModes: [...new Set(days.flatMap((d) => d.transitModes))],
     totalUp: days.reduce((s, d) => s + d.elevationUp, 0),
     movingS: days.reduce((s, d) => s + d.movingS, 0),
   };
@@ -325,7 +348,7 @@ function TripMap({
 
       const allCoords = [
         ...plan.flatMap((p) => p.geometry.coordinates),
-        ...days.flatMap((d) => d.tracks.flatMap((t) => t.geometry.coordinates)),
+        ...days.flatMap((d) => d.tracks.flatMap((t) => t.geojson.geometry.coordinates)),
         ...(live?.coords ?? []),
       ];
       if (allCoords.length === 0) return;
@@ -378,17 +401,39 @@ function TripMap({
         for (const day of days) {
           day.tracks.forEach((track, i) => {
             const id = `day-${day.dayNumber}-${i}`;
-            map!.addSource(id, { type: "geojson", data: track });
+            map!.addSource(id, { type: "geojson", data: track.geojson });
             map!.addLayer({
               id,
               type: "line",
               source: id,
               paint: {
                 "line-color": day.color,
-                "line-width": 4,
+                // A travelled leg is thinner, so the sleepers laid over it
+                // below read as hatching rather than as a striped rope.
+                "line-width": track.mode ? 3 : 4,
               },
-              layout: { "line-cap": "round", "line-join": "round" },
+              layout: track.mode
+                ? { "line-cap": "butt", "line-join": "round" }
+                : { "line-cap": "round", "line-join": "round" },
             });
+            // The railway symbol every map uses: the line in the day's colour,
+            // cross-hatched in white. It keeps the leg part of day 7 while
+            // saying at a glance that this stretch was not ridden. Dash lengths
+            // are multiples of the line width, so the hatching keeps its
+            // proportions at every zoom.
+            if (track.mode) {
+              map!.addLayer({
+                id: `${id}-hatch`,
+                type: "line",
+                source: id,
+                paint: {
+                  "line-color": "#ffffff",
+                  "line-width": 3,
+                  "line-dasharray": [0.7, 0.7],
+                },
+                layout: { "line-cap": "butt", "line-join": "round" },
+              });
+            }
           });
 
           for (const photo of day.photos) {
@@ -478,7 +523,7 @@ function TripMap({
         flyToDay(dayNumber) {
           const day = days.find((d) => d.dayNumber === dayNumber);
           if (!day || !map) return;
-          const coords = day.tracks.flatMap((t) => t.geometry.coordinates);
+          const coords = day.tracks.flatMap((t) => t.geojson.geometry.coordinates);
           if (coords.length === 0) return;
           const b = coords.reduce(
             (acc, c) => acc.extend(c as [number, number]),
@@ -522,6 +567,8 @@ export interface ViewerTrip {
   plan: TrackGeoJson[];
   planKm: number;
   totalKm: number;
+  transitKm: number;
+  transitModes: TransitMode[];
   totalUp: number;
   movingS: number;
 }
@@ -848,6 +895,8 @@ export function TripView({
             {trip.totalKm.toFixed(1)} km · {m.trip.climbed(String(Math.round(trip.totalUp)))} ·{" "}
             {m.trip.inMotion(formatHours(trip.movingS))} · {m.trip.days(trip.days.length)}
             {!trip.finished && m.trip.soFar}
+            {trip.transitKm > 0 &&
+              ` · ${m.trip.transit(trip.transitKm.toFixed(0), trip.transitModes)}`}
           </p>
         )}
 
@@ -896,12 +945,23 @@ export function TripView({
                   )}
                 </div>
 
-                {day.distanceM > 0 && (
+                {(day.distanceM > 0 || day.transitM > 0) && (
                   <p className="mt-1 text-sm">
-                    <strong>{(day.distanceM / 1000).toFixed(1)} km</strong>
+                    {day.distanceM > 0 && (
+                      <>
+                        <strong>{(day.distanceM / 1000).toFixed(1)} km</strong>
+                        <span className="text-faint">
+                          {" "}· ↑ {Math.round(day.elevationUp)} m ·{" "}
+                          {m.trip.moving(formatHours(day.movingS))}
+                        </span>
+                      </>
+                    )}
                     <span className="text-faint">
-                      {" "}· ↑ {Math.round(day.elevationUp)} m ·{" "}
-                      {m.trip.moving(formatHours(day.movingS))}
+                      {day.transitM > 0 &&
+                        `${day.distanceM > 0 ? " · " : ""}${m.trip.transit(
+                          (day.transitM / 1000).toFixed(0),
+                          day.transitModes,
+                        )}`}
                       {day.tracks.length > 1 && ` · ${m.trip.segments(day.tracks.length)}`}
                     </span>
                   </p>

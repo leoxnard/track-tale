@@ -7,6 +7,7 @@ import { supabase } from "./supabase.server";
 import { makeMercatorLayout, polylinePoints as polyline } from "./geo-project";
 import { basemapSvg, BASEMAP_ATTRIBUTION, BASEMAP_TILE_PX } from "./basemap.server";
 import { fromGeoJson, type TrackGeoJson, type TrackPoint } from "./track";
+import { isTransit } from "./transport";
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -172,7 +173,7 @@ export async function renderOgCard(tripId: string): Promise<string | null> {
   const [{ data: dayRows }, { data: planRows }] = await Promise.all([
     db
       .from("days")
-      .select("day_number, color, track_segments(geojson, distance_m, elevation_up, started_at)")
+      .select("day_number, color, track_segments(geojson, distance_m, elevation_up, sport, started_at)")
       .eq("trip_id", tripId)
       .order("day_number"),
     db.from("plan_segments").select("geojson, distance_m").eq("trip_id", tripId).order("sort_order"),
@@ -194,8 +195,13 @@ export async function renderOgCard(tripId: string): Promise<string | null> {
       const points = fromGeoJson(seg.geojson as TrackGeoJson);
       if (points.length === 0) continue;
       dayTracks.push({ color: day.color, points });
-      totalKm += seg.distance_m / 1000;
-      totalUp += seg.elevation_up;
+      // A train or ferry leg is on the card's map, and its end is still where
+      // they got to — but it is not in the numbers, which say how far they have
+      // come under their own power.
+      if (!isTransit(seg.sport)) {
+        totalKm += seg.distance_m / 1000;
+        totalUp += seg.elevation_up;
+      }
       const started = Date.parse(seg.started_at ?? 0) || 0;
       if (started >= latestStart) {
         latestStart = started;

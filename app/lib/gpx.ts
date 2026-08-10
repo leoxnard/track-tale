@@ -2,6 +2,7 @@ import { DOMParser } from "@xmldom/xmldom";
 import { gpx as gpxToGeoJson } from "@tmcw/togeojson";
 import FitParser from "fit-file-parser";
 import { computeStats, type NormalizedTrack, type TrackPoint } from "./track";
+import { classifyTransit } from "./transport";
 
 /** Parse a GPX file into one normalized track (all track segments concatenated). */
 export function parseGpx(xml: string): NormalizedTrack {
@@ -11,10 +12,12 @@ export function parseGpx(xml: string): NormalizedTrack {
 
   const points: TrackPoint[] = [];
   let name: string | undefined;
+  let type: string | undefined;
 
   for (const feature of collection.features) {
     const props = feature.properties ?? {};
     name ??= typeof props.name === "string" ? props.name : undefined;
+    type ??= typeof props.type === "string" ? props.type : undefined;
     const geometry = feature.geometry;
     if (!geometry) continue;
 
@@ -41,7 +44,15 @@ export function parseGpx(xml: string): NormalizedTrack {
   }
 
   if (points.length === 0) throw new Error("GPX contains no track points");
-  return { name, points, stats: computeStats(points) };
+  // A GPX carries no sport of its own, but a leg that was taken by train or
+  // ferry says so in its `<type>` — and, failing that, usually in its name.
+  // Recognising it here is what keeps those kilometres out of what was ridden.
+  return {
+    name,
+    sport: classifyTransit(type, name) ?? undefined,
+    points,
+    stats: computeStats(points),
+  };
 }
 
 /** Parse a Garmin FIT file into one normalized track. */

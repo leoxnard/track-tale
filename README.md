@@ -8,6 +8,13 @@ notes, stats and weather.
 
 - Send the bot a **Komoot share link** → the tour (track + official stats) is imported.
 - Send a **GPX/FIT file** → parsed directly; several uploads merge into one day.
+- A stretch **travelled rather than ridden** — a train, a ferry, a bus — is drawn on the map
+  hatched like a railway in the day's own colour, and left out of the kilometres ridden, the
+  climb and the progress bar; the day's line reads as continuous without the train claiming
+  distance nobody pedalled. A GPX says so in its `<type>` (`train`, `ferry`, `bus`), or just
+  in its name ("Zugfahrt Aberdeen – Forres"). [scripts/rail-gpx.mjs](scripts/rail-gpx.mjs)
+  builds such a file along the *real* line, taken from OpenStreetMap, rather than a straight
+  chord between the two stations.
 - Send **photos** (with captions) and **text** → the day's journal. Telegram strips GPS EXIF
   from compressed photos, so those are pinned to the route by timestamp; send a photo **as a
   file** instead and its own GPS fix and capture time survive, which puts it exactly where it
