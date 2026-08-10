@@ -20,7 +20,8 @@ function saveRecentTrip(slug: string, name: string) {
 import { getTripBySlug, updateTrip } from "../lib/db.server";
 import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
-import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson } from "../lib/track";
+import { buildProfile, fromGeoJson, groupContinuous, type TrackGeoJson } from "../lib/track";
+import type { TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather } from "../lib/weather";
 import { byPhotoTime } from "../lib/photo-order";
@@ -81,7 +82,11 @@ export interface ViewerDay {
   transitModes: TransitMode[];
   sports: string[];
   tracks: ViewerTrack[];
-  profile: ProfilePoint[];
+  /**
+   * The day's riding, in stretches ridden without a break. One for most days;
+   * a day interrupted by a train is several, and nothing joins them up.
+   */
+  pieces: TourPiece[];
   photos: ViewerPhoto[];
   notes: ViewerNote[];
   comments: ViewerComment[];
@@ -133,6 +138,15 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       // theirs.
       const ridden = segments.filter((s) => transitMode(s.sport) === null);
       const transit = segments.filter((s) => transitMode(s.sport) !== null);
+      // Segments of a split day read as one continuous climb — but only where
+      // the day actually continued. Ride to Aberdeen, train to Forres, ride
+      // on, and those are two stretches with 133 km between them that were
+      // never pedalled.
+      const riddenPoints = ridden.map((s) => fromGeoJson(s.geojson as TrackGeoJson));
+      const pieces = groupContinuous(riddenPoints).map((group) => ({
+        distanceM: group.reduce((sum, i) => sum + ridden[i].distance_m, 0),
+        profile: buildProfile(group.flatMap((i) => riddenPoints[i])),
+      }));
       return {
         dayNumber: d.day_number,
         date: d.date,
@@ -147,10 +161,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
           geojson: s.geojson as TrackGeoJson,
           mode: transitMode(s.sport),
         })),
-        // Segments of a split day read as one continuous climb.
-        profile: buildProfile(
-          ridden.flatMap((s) => fromGeoJson(s.geojson as TrackGeoJson)),
-        ),
+        pieces,
         photos: [...d.media]
           .sort(byPhotoTime)
           .map((m) => ({
@@ -745,12 +756,12 @@ export function TripView({
   // Every day's chart is drawn to the same metres-per-pixel, so a hard stage
   // visibly towers over an easy one instead of each filling its own box.
   const elevationSpan = useMemo(() => {
+    // Across the whole day, stretches included: an interrupted day is still
+    // one chart, and its two halves share a scale with every other day.
     const ranges = trip.days
-      .filter((d) => d.profile.length > 1)
-      .map((d) => {
-        const es = d.profile.map((p) => p.e);
-        return Math.max(...es) - Math.min(...es);
-      });
+      .map((d) => d.pieces.flatMap((piece) => piece.profile).map((p) => p.e))
+      .filter((es) => es.length > 1)
+      .map((es) => Math.max(...es) - Math.min(...es));
     return Math.max(20, ...ranges);
   }, [trip.days]);
 
@@ -967,9 +978,9 @@ export function TripView({
                   </p>
                 )}
 
-                {day.profile.length > 1 && (
+                {day.pieces.some((piece) => piece.profile.length > 1) && (
                   <ElevationProfile
-                    profile={day.profile}
+                    pieces={day.pieces.map((piece) => piece.profile)}
                     color={day.color}
                     span={elevationSpan}
                     onScrub={(p) => mapHandle.current?.showScrub([p.lng, p.lat], day.color)}

@@ -14,7 +14,7 @@ function route(vertices: number, fromDeg: number, toDeg: number): TrackPoint[] {
 }
 
 function day(dayNumber: number, points: TrackPoint[], distanceM: number): TourDayInput {
-  return { dayNumber, color: "#000", distanceM, profile: buildProfile(points) };
+  return { dayNumber, color: "#000", pieces: [{ distanceM, profile: buildProfile(points) }] };
 }
 
 /** Push a route off its own line and back, so it rides further than it advances. */
@@ -97,7 +97,10 @@ describe("layDays", () => {
     // A day's authoritative distance comes from the full track and its profile
     // from a thinned, altitude-only subset, so the two always disagree a
     // little. Neither of them decides where the day goes any more.
-    const stretched: TourDayInput = { ...days[1], distanceM: dayLengthM * 1.4 };
+    const stretched: TourDayInput = {
+      ...days[1],
+      pieces: [{ ...days[1].pieces[0], distanceM: dayLengthM * 1.4 }],
+    };
     const { laid } = layDays(route(2000, 11.0, 11.6), planLengthM, [days[0], stretched, days[2]]);
 
     expect(laid[1].startM).toBeCloseTo(dayLengthM, -2);
@@ -158,8 +161,56 @@ describe("layDays", () => {
     expect(reachedM).toBeCloseTo(3 * dayLengthM, 5);
   });
 
+  it("leaves the plan bare where a day was interrupted", () => {
+    // The reported bug in its real shape: day one rides the first sixth, takes
+    // a train across the middle third, and rides the last sixth. Fitted as one
+    // day those two stretches are drawn as a single line straight across the
+    // plan nobody rode.
+    const before = route(300, 11.0, 11.1);
+    const after = route(300, 11.5, 11.6);
+    const stretchM = 0.1 * M_PER_DEG_LNG;
+    const interrupted: TourDayInput = {
+      dayNumber: 1,
+      color: "#000",
+      pieces: [
+        { distanceM: stretchM, profile: buildProfile(before) },
+        { distanceM: stretchM, profile: buildProfile(after) },
+      ],
+    };
+
+    const { laid, riddenM, reachedM } = layDays(route(2000, 11.0, 11.6), planLengthM, [
+      interrupted,
+    ]);
+
+    expect(laid).toHaveLength(2);
+    expect(laid.map((d) => d.dayNumber)).toEqual([1, 1]);
+    expect(laid.map((d) => d.piece)).toEqual([0, 1]);
+
+    // Each stretch sits on the plan it actually covered…
+    expect(laid[0].startM).toBeCloseTo(0, -2);
+    expect(laid[0].endM).toBeCloseTo(stretchM, -2);
+    expect(laid[1].startM).toBeCloseTo(0.5 * M_PER_DEG_LNG, -2);
+    expect(laid[1].endM).toBeCloseTo(planLengthM, -2);
+    // …leaving the four sixths in between with nothing drawn over them.
+    expect(laid[1].startM - laid[0].endM).toBeCloseTo(0.4 * M_PER_DEG_LNG, -2);
+    // No point of either stretch strays into the gap.
+    for (const d of laid) {
+      for (const p of d.points) {
+        expect(p.d >= d.startM - 1 && p.d <= d.endM + 1).toBe(true);
+      }
+    }
+
+    // The train is nobody's distance, but the plan it crossed was reached.
+    expect(riddenM).toBeCloseTo(2 * stretchM, -2);
+    expect(reachedM).toBeCloseTo(planLengthM, -2);
+  });
+
   it("skips a day with nothing to draw without losing its distance", () => {
-    const empty: TourDayInput = { dayNumber: 9, color: "#000", distanceM: 5000, profile: [] };
+    const empty: TourDayInput = {
+      dayNumber: 9,
+      color: "#000",
+      pieces: [{ distanceM: 5000, profile: [] }],
+    };
     const { laid, riddenM } = layDays([], 0, [empty, days[0]]);
 
     expect(laid).toHaveLength(1);

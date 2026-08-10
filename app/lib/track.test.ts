@@ -6,7 +6,9 @@ import {
   dayColor,
   decimate,
   fromGeoJson,
+  groupContinuous,
   haversineM,
+  layEndToEnd,
   planPointBudget,
   sortSegmentsByStart,
   toGeoJson,
@@ -218,6 +220,63 @@ describe("sortSegmentsByStart", () => {
       { startedAt: undefined, label: "unknown" },
     ];
     expect(sortSegmentsByStart(segments).map((s) => s.label)).toEqual(["unknown", "morning"]);
+  });
+});
+
+describe("groupContinuous", () => {
+  /** A segment of `count` points starting at a given latitude. */
+  const leg = (fromLat: number, count = 5): TrackPoint[] =>
+    Array.from({ length: count }, (_, i) => at(fromLat + i * 0.001, 0));
+
+  it("joins uploads that carry on from one another", () => {
+    // The usual split day: the afternoon starts where the morning stopped.
+    const morning = leg(0);
+    const afternoon = leg(0.004);
+    expect(groupContinuous([morning, afternoon])).toEqual([[0, 1]]);
+  });
+
+  it("forgives the few hundred metres a stopped tracker loses", () => {
+    expect(groupContinuous([leg(0), leg(0.0105)])).toEqual([[0, 1]]);
+  });
+
+  it("keeps a day that resumed somewhere else apart", () => {
+    // Ride to Aberdeen, train, ride on from Forres: two stretches, and the
+    // 130-odd km between them belongs to neither.
+    const toAberdeen = leg(0);
+    const fromForres = leg(1.2);
+    expect(groupContinuous([toAberdeen, fromForres])).toEqual([[0], [1]]);
+  });
+
+  it("skips empty segments without breaking the run", () => {
+    expect(groupContinuous([leg(0), [], leg(0.004)])).toEqual([[0, 2]]);
+  });
+
+  it("has nothing to group when there is nothing", () => {
+    expect(groupContinuous([])).toEqual([]);
+  });
+});
+
+describe("layEndToEnd", () => {
+  it("puts one stretch after another without the ground between them", () => {
+    const first = buildProfile(ramp(10, (i) => 100 + i));
+    const second = buildProfile(ramp(10, (i) => 500 + i));
+    const laid = layEndToEnd([first, second]);
+
+    expect(laid).toHaveLength(first.length + second.length);
+    expect(laid[0].d).toBe(0);
+    // The second stretch starts exactly where the first stopped — the train
+    // ride in between is not distance on this axis.
+    expect(laid[first.length].d).toBe(first[first.length - 1].d);
+    expect(laid[laid.length - 1].d).toBe(
+      first[first.length - 1].d + second[second.length - 1].d,
+    );
+    // Elevations are carried over untouched.
+    expect(laid[first.length].e).toBe(second[0].e);
+  });
+
+  it("leaves a single stretch exactly as it was", () => {
+    const only = buildProfile(ramp(10, (i) => 100 + i));
+    expect(layEndToEnd([only])).toEqual(only);
   });
 });
 

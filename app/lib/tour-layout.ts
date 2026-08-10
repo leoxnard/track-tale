@@ -25,21 +25,42 @@ import type { ProfilePoint, TrackPoint } from "./track";
  * So each day gets a robust straight-line fit from its own distance onto the
  * plan's — position *and* scale — rather than a position alone. The ridden
  * distance is not lost: it is what the day's own stats and the tour total say.
+ *
+ * A day is not always one continuous ride, either. Ride to Aberdeen, take the
+ * train to Forres, ride on: fitted as one, those two stretches are drawn as a
+ * single line straight across 133 km nobody pedalled. Each stretch is
+ * therefore fitted on its own, and the plan between them is left showing.
  */
+
+/** One stretch ridden without a break in it. */
+export interface TourPiece {
+  /** Authoritative distance for the stretch, from the tracks' own stats. */
+  distanceM: number;
+  /** Elevation series on its own distance axis, starting at zero. */
+  profile: ProfilePoint[];
+}
 
 export interface TourDayInput {
   dayNumber: number;
   color: string;
-  /** Authoritative distance for the day, from the track's own stats. */
-  distanceM: number;
-  profile: ProfilePoint[];
+  /**
+   * The day's riding, in stretches. Normally one. A day interrupted — a train
+   * from Aberdeen to Forres — is several, and each is anchored onto the plan
+   * on its own. That is what leaves the plan bare across the interruption
+   * instead of drawing a flat line over ground nobody rode.
+   */
+  pieces: TourPiece[];
 }
 
-export interface LaidDay extends TourDayInput {
-  /** Where the day begins along the plan, in metres. */
+export interface LaidDay {
+  dayNumber: number;
+  color: string;
+  /** Which stretch of the day this is; 0 unless the day was interrupted. */
+  piece: number;
+  /** Where the stretch begins along the plan, in metres. */
   startM: number;
   endM: number;
-  /** The day's profile, re-based onto the plan's distance axis. */
+  /** The stretch's profile, re-based onto the plan's distance axis. */
   points: ProfilePoint[];
 }
 
@@ -107,45 +128,50 @@ export function layDays(
   let riddenM = 0;
 
   for (const day of days) {
-    const span = day.profile[day.profile.length - 1]?.d ?? 0;
-    const width = day.distanceM > 0 ? day.distanceM : span;
-    riddenM += width;
-    if (day.profile.length < 2 || width <= 0) {
-      cursor += width;
-      continue;
+    for (const [index, piece] of day.pieces.entries()) {
+      const span = piece.profile[piece.profile.length - 1]?.d ?? 0;
+      const width = piece.distanceM > 0 ? piece.distanceM : span;
+      riddenM += width;
+      if (piece.profile.length < 2 || width <= 0) {
+        cursor += width;
+        continue;
+      }
+
+      // Each anchor pairs a distance along the stretch with the distance along
+      // the plan it fell at. Together they are the line to fit.
+      const anchors: { x: number; y: number }[] = [];
+      for (const f of ANCHOR_FRACTIONS) {
+        const p = piece.profile[Math.round(f * (piece.profile.length - 1))];
+        const anchor = plan.anchor(p);
+        if (anchor && anchor.gap < MAX_ANCHOR_GAP_M) anchors.push({ x: p.d, y: anchor.d });
+      }
+
+      // Falling back means keeping the stretch's own length and sitting it
+      // behind the one before — the honest answer for riding the plan says
+      // nothing about.
+      let scale = width / (span || 1);
+      let startM = cursor;
+
+      if (anchors.length >= MIN_ANCHORS) {
+        const fitted = theilSenSlope(anchors);
+        if (Number.isFinite(fitted) && fitted >= MIN_SCALE && fitted <= MAX_SCALE) scale = fitted;
+        // Intercept of the same fit, taken as a median so one bad anchor cannot
+        // shift the stretch. Days are allowed to overlap — that is the point —
+        // but none of them starts before the plan does.
+        startM = Math.max(0, median(anchors.map((a) => a.y - scale * a.x)));
+      }
+
+      const drawnWidth = scale * span;
+      laid.push({
+        dayNumber: day.dayNumber,
+        color: day.color,
+        piece: index,
+        startM,
+        endM: startM + drawnWidth,
+        points: piece.profile.map((p) => ({ ...p, d: startM + scale * p.d })),
+      });
+      cursor = startM + drawnWidth;
     }
-
-    // Each anchor pairs a distance along the day with the distance along the
-    // plan it fell at. Together they are the line to fit.
-    const anchors: { x: number; y: number }[] = [];
-    for (const f of ANCHOR_FRACTIONS) {
-      const p = day.profile[Math.round(f * (day.profile.length - 1))];
-      const anchor = plan.anchor(p);
-      if (anchor && anchor.gap < MAX_ANCHOR_GAP_M) anchors.push({ x: p.d, y: anchor.d });
-    }
-
-    // Falling back means keeping the day's own length and sitting it behind the
-    // one before — the honest answer for a day the plan says nothing about.
-    let scale = width / (span || 1);
-    let startM = cursor;
-
-    if (anchors.length >= MIN_ANCHORS) {
-      const fitted = theilSenSlope(anchors);
-      if (Number.isFinite(fitted) && fitted >= MIN_SCALE && fitted <= MAX_SCALE) scale = fitted;
-      // Intercept of the same fit, taken as a median so one bad anchor cannot
-      // shift the day. Days are allowed to overlap — that is the point — but
-      // none of them starts before the plan does.
-      startM = Math.max(0, median(anchors.map((a) => a.y - scale * a.x)));
-    }
-
-    const drawnWidth = scale * span;
-    laid.push({
-      ...day,
-      startM,
-      endM: startM + drawnWidth,
-      points: day.profile.map((p) => ({ ...p, d: startM + scale * p.d })),
-    });
-    cursor = startM + drawnWidth;
   }
 
   return { laid, riddenM, reachedM: laid.reduce((m, d) => Math.max(m, d.endM), 0) };
