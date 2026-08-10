@@ -9,7 +9,13 @@ const PAD_TOP = 12;
 const PAD_BOTTOM = 16;
 
 interface Props {
-  profile: ProfilePoint[];
+  /**
+   * The day's riding, in stretches, each on its own axis starting at zero.
+   * Normally one. A day interrupted by a train is several, and they are laid
+   * end to end here — the axis is kilometres ridden, so the interruption is a
+   * break in the line rather than distance on it.
+   */
+  pieces: ProfilePoint[][];
   color: string;
   /**
    * Metres covered by the chart's height, shared across every day so a given
@@ -29,16 +35,27 @@ interface Props {
  * making it scroll sideways only ever got in the way of the finger already
  * being used to scrub it. A mouse can still drag out a stretch to zoom into.
  */
-export function ElevationProfile({ profile, color, span, onScrub }: Props) {
+export function ElevationProfile({ pieces, color, span, onScrub }: Props) {
   const m = useMessages();
   const svgRef = useRef<SVGSVGElement>(null);
   const clipId = useId();
   const [active, setActive] = useState<number | null>(null);
 
+  // Stretches end to end on one axis, and the flat list the scrubbing reads.
+  const { laid, profile } = useMemo(() => {
+    let offset = 0;
+    const laid = pieces.map((piece) => {
+      const shifted = piece.map((p) => ({ ...p, d: p.d + offset }));
+      offset += piece[piece.length - 1]?.d ?? 0;
+      return shifted;
+    });
+    return { laid, profile: laid.flat() };
+  }, [pieces]);
+
   const totalD = profile[profile.length - 1]?.d || 1;
   const zoom = useDragZoom(totalD, svgRef);
 
-  const { path, area, minE, maxE, xOf, yOf } = useMemo(() => {
+  const { paths, minE, maxE, xOf, yOf } = useMemo(() => {
     const es = profile.map((p) => p.e);
     const lo = Math.min(...es);
     const hi = Math.max(...es);
@@ -52,21 +69,21 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
     const x = (d: number) => ((d - zoom.from) / viewSpan) * W;
     const y = (e: number) => PAD_TOP + (1 - (e - base) / band) * (H - PAD_TOP - PAD_BOTTOM);
 
-    const line = profile
-      .map((p, i) => `${i === 0 ? "M" : "L"}${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`)
-      .join("");
-    const first = x(profile[0]?.d ?? 0).toFixed(1);
-    const last = x(profile[profile.length - 1]?.d ?? 0).toFixed(1);
+    // One path per stretch, so a day interrupted has a gap where the train was
+    // rather than a line drawn across it.
+    const paths = laid
+      .filter((piece) => piece.length > 1)
+      .map((piece) => {
+        const line = piece
+          .map((p, i) => `${i === 0 ? "M" : "L"}${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`)
+          .join("");
+        const first = x(piece[0].d).toFixed(1);
+        const last = x(piece[piece.length - 1].d).toFixed(1);
+        return { line, area: `${line}L${last},${H - PAD_BOTTOM}L${first},${H - PAD_BOTTOM}Z` };
+      });
 
-    return {
-      path: line,
-      area: `${line}L${last},${H - PAD_BOTTOM}L${first},${H - PAD_BOTTOM}Z`,
-      minE: lo,
-      maxE: hi,
-      xOf: x,
-      yOf: y,
-    };
-  }, [profile, span, zoom.from, zoom.to]);
+    return { paths, minE: lo, maxE: hi, xOf: x, yOf: y };
+  }, [laid, profile, span, zoom.from, zoom.to]);
 
   const move = useCallback(
     (clientX: number) => {
@@ -127,8 +144,12 @@ export function ElevationProfile({ profile, color, span, onScrub }: Props) {
         </defs>
 
         <g clipPath={`url(#${clipId})`}>
-          <path d={area} fill={color} opacity={0.16} />
-          <path d={path} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          {paths.map(({ line, area }, i) => (
+            <g key={i}>
+              <path d={area} fill={color} opacity={0.16} />
+              <path d={line} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            </g>
+          ))}
           {cur && (
             <g>
               <line

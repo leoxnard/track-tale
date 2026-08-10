@@ -193,6 +193,69 @@ describe("trip page loader", () => {
     expect(out.transitModes).toEqual(["train"]);
   });
 
+  it("splits a day the train interrupted into stretches that are not joined up", async () => {
+    // Ride to Aberdeen, train to Forres, ride on. The two rides are 130 km
+    // apart: measured as one they put that distance on the chart's axis and
+    // draw a line across ground nobody pedalled.
+    const climb = (lng: number, lat: number): [number, number][] =>
+      Array.from({ length: 12 }, (_, i) => [lng + i * 0.001, lat + i * 0.001]);
+    const alts = Array.from({ length: 12 }, (_, i) => 100 + i * 10);
+    const withAlts = (coords: [number, number][]) => ({
+      type: "Feature",
+      properties: { alts },
+      geometry: { type: "LineString", coordinates: coords },
+    });
+
+    dayRows = [
+      dayWithTrack({
+        track_segments: [
+          {
+            geojson: withAlts(climb(-2.2, 57.05)),
+            distance_m: 86_000,
+            moving_s: 14_400,
+            elevation_up: 800,
+            sport: "touringbicycle",
+            started_at: "2026-08-01T07:30:00Z",
+          },
+          {
+            geojson: line([
+              [-2.09, 57.14],
+              [-3.62, 57.6],
+            ]),
+            distance_m: 133_000,
+            moving_s: 0,
+            elevation_up: 0,
+            sport: "train",
+            started_at: null,
+          },
+          {
+            geojson: withAlts(climb(-3.62, 57.61)),
+            distance_m: 11_000,
+            moving_s: 2400,
+            elevation_up: 30,
+            sport: "touringbicycle",
+            started_at: "2026-08-01T20:00:00Z",
+          },
+        ],
+      }),
+    ];
+
+    const day = ((await load("abc")).days as Row[])[0] as {
+      distanceM: number;
+      pieces: { distanceM: number; profile: { d: number }[] }[];
+    };
+
+    expect(day.pieces).toHaveLength(2);
+    expect(day.pieces.map((p) => p.distanceM)).toEqual([86_000, 11_000]);
+    // Each stretch measures from its own zero, so nothing carries the 130 km
+    // between them.
+    for (const piece of day.pieces) {
+      expect(piece.profile[0].d).toBe(0);
+      expect(piece.profile[piece.profile.length - 1].d).toBeLessThan(5000);
+    }
+    expect(day.distanceM).toBe(97_000);
+  });
+
   it("leaves out a day with nothing on it", async () => {
     // A trip creates a row per day up front; an empty one is a day not yet
     // lived, not a day worth a heading on the page.

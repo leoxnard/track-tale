@@ -2,7 +2,15 @@ import { zipSync, strToU8 } from "fflate";
 import { supabase } from "./supabase.server";
 import { makeProjection, polylinePoints } from "./geo-project";
 import { toGpx } from "./gpx-export";
-import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson, type TrackPoint } from "./track";
+import {
+  buildProfile,
+  fromGeoJson,
+  groupContinuous,
+  layEndToEnd,
+  type ProfilePoint,
+  type TrackGeoJson,
+  type TrackPoint,
+} from "./track";
 import { weatherIcon, type DayWeather } from "./weather";
 import { byPhotoTime } from "./photo-order";
 import { isTransit } from "./transport";
@@ -418,7 +426,14 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
       elevationUp: ridden.reduce((s, x) => s + x.elevation_up, 0),
       movingS: ridden.reduce((s, x) => s + x.moving_s, 0),
       segments: segPoints,
-      profile: buildProfile(riddenPoints.flat()),
+      // Stretch by stretch, laid end to end: a day interrupted by a train did
+      // not ride the 133 km in between, and measuring straight through them
+      // would put that distance on the chart's axis.
+      profile: layEndToEnd(
+        groupContinuous(riddenPoints).map((group) =>
+          buildProfile(group.flatMap((i) => riddenPoints[i])),
+        ),
+      ),
       photos,
       notes: [...d.notes]
         .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))

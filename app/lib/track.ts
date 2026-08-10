@@ -170,6 +170,39 @@ export function planPointBudget(distanceM: number): number {
   return Math.min(PLAN_MAX_POINTS, Math.max(PLAN_MIN_POINTS, wanted));
 }
 
+/**
+ * How far apart two segments may be and still count as one ride.
+ *
+ * A day split into several uploads resumes where it stopped, give or take the
+ * few hundred metres of a lunch stop the tracker was off for. A day that
+ * resumes a hundred kilometres away did not ride the bit in between — there
+ * was a train — and joining the two would draw a ride that never happened.
+ */
+export const RESUME_GAP_M = 1000;
+
+/**
+ * Group consecutive segments that carry on from one another, as index lists.
+ *
+ * Indices rather than points, because the caller holds the authoritative
+ * distance for each segment and has to add up the same grouping.
+ */
+export function groupContinuous(segments: TrackPoint[][], gapM = RESUME_GAP_M): number[][] {
+  const groups: number[][] = [];
+  let openEnd: TrackPoint | undefined;
+
+  segments.forEach((points, index) => {
+    if (points.length === 0) return;
+    if (openEnd && haversineM(openEnd, points[0]) <= gapM) {
+      groups[groups.length - 1].push(index);
+    } else {
+      groups.push([index]);
+    }
+    openEnd = points[points.length - 1];
+  });
+
+  return groups;
+}
+
 export interface ProfilePoint {
   /** cumulative metres from the start of the day */
   d: number;
@@ -222,6 +255,23 @@ export function buildProfile(points: TrackPoint[], maxPoints = 240): ProfilePoin
       lng: Math.round(withAlt[lastIdx].lng * 1e5) / 1e5,
       lat: Math.round(withAlt[lastIdx].lat * 1e5) / 1e5,
     });
+  }
+  return out;
+}
+
+/**
+ * Lay a day's stretches end to end on one distance axis.
+ *
+ * Each stretch measures from its own zero, so this is what turns them back
+ * into a single series to scrub along — without the ground between them,
+ * which is the point: that ground was not ridden.
+ */
+export function layEndToEnd(pieces: ProfilePoint[][]): ProfilePoint[] {
+  let offset = 0;
+  const out: ProfilePoint[] = [];
+  for (const piece of pieces) {
+    for (const p of piece) out.push({ ...p, d: p.d + offset });
+    offset += piece[piece.length - 1]?.d ?? 0;
   }
   return out;
 }

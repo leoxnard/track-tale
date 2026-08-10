@@ -251,7 +251,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
             )}
 
             {dayPaths.map(({ day, line, area }) => (
-              <g key={day.dayNumber}>
+              <g key={`${day.dayNumber}-${day.piece}`}>
                 <path d={area} fill={day.color} opacity={0.14} />
                 <path
                   d={line}
@@ -260,8 +260,9 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                   strokeWidth={2}
                   vectorEffect="non-scaling-stroke"
                 />
-                {/* Day boundary. The first day starts at the axis, which needs no line. */}
-                {day.startM > 0 && visible(day.startM) && (
+                {/* Day boundary. The first day starts at the axis, which needs
+                    no line, and a day resuming after a train is not a new day. */}
+                {day.piece === 0 && day.startM > 0 && visible(day.startM) && (
                   <line
                     x1={x(day.startM)}
                     x2={x(day.startM)}
@@ -332,7 +333,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
             </span>
           ))}
           {laid
-            .filter((day) => visible(day.startM))
+            .filter((day) => day.piece === 0 && visible(day.startM))
             .map((day) => (
               <span
                 key={day.dayNumber}
