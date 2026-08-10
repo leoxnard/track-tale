@@ -5,7 +5,7 @@ import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
 import { TransitVehicle } from "./TransitVehicle";
-import { carriagesFor, LOCO_PX, TRAIN_PAD_PX } from "../lib/train-fit";
+import { carriagesFor, TRAIN_PAD_PX, VEHICLE_PX } from "../lib/train-fit";
 
 const W = 960;
 const H = 200;
@@ -17,7 +17,7 @@ const PLAN_COLOR = "#9aa59e";
 
 /** A ferry or a bus pulls nothing, so it either fits whole or it does not. */
 function singleFits(gapPx: number): number | null {
-  return gapPx - 2 * TRAIN_PAD_PX >= LOCO_PX ? 0 : null;
+  return gapPx - 2 * TRAIN_PAD_PX >= VEHICLE_PX ? 0 : null;
 }
 
 export type { TourDayInput };

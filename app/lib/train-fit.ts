@@ -12,7 +12,14 @@
  * loudest thing on the page.
  */
 
-export const LOCO_PX = 26;
+/**
+ * The locomotive is the widest of them because it has the most to say: a
+ * boiler, a chimney at the front and a cab at the back are what make it read
+ * as a locomotive rather than as a van with windows.
+ */
+export const LOCO_PX = 32;
+/** A ferry and a bus are one shape each, and need less room than that. */
+export const VEHICLE_PX = 26;
 export const CARRIAGE_PX = 17;
 /** Air between two vehicles — the coupling, visually. */
 export const COUPLING_PX = 3;
