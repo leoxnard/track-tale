@@ -15,6 +15,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # An advisory against something in the request path of a public page is
+      # worth a red build; anything below high is noise on a project this size.
+      - run: npm audit --audit-level=high
       - run: npm run typecheck
       - run: npm test
       # Catch a broken build here rather than on the deploy that follows it.
