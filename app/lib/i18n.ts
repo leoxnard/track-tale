@@ -9,6 +9,8 @@
  * spread across the components.
  */
 
+import type { TransitMode } from "./transport";
+
 export const LOCALES = ["en", "de"] as const;
 export type Locale = (typeof LOCALES)[number];
 
@@ -120,6 +122,9 @@ const en = {
     inMotion: (duration: string) => `${duration} in motion`,
     soFar: " so far",
     moving: (duration: string) => `${duration} moving`,
+    /** Kilometres travelled rather than ridden — `132 km by train`. */
+    transit: (km: string, modes: TransitMode[]) =>
+      `${km} km by ${modes.map((mode) => ({ train: "train", ferry: "ferry", bus: "bus" })[mode]).join(" + ") || "transport"}`,
     segments: (n: number) => `${n} segments`,
     photo: "Photo",
     photoAlt: (day: number) => `Day ${day} photo`,
@@ -242,6 +247,8 @@ const de: Messages = {
     inMotion: (duration: string) => `${duration} in Bewegung`,
     soFar: " bisher",
     moving: (duration: string) => `${duration} unterwegs`,
+    transit: (km: string, modes: TransitMode[]) =>
+      `${km} km per ${modes.map((mode) => ({ train: "Zug", ferry: "Fähre", bus: "Bus" })[mode]).join(" + ") || "Verkehrsmittel"}`,
     segments: (n: number) => `${n} Abschnitte`,
     photo: "Foto",
     photoAlt: (day: number) => `Foto von Tag ${day}`,

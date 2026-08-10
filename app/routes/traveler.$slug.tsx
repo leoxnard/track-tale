@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase.server";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { intlTag, type Locale, type Messages } from "../lib/i18n";
 import { useLocale, useMessages } from "../lib/locale";
+import { isTransit } from "../lib/transport";
 
 export async function loader({ params }: Route.LoaderArgs) {
   const db = supabase();
@@ -18,7 +19,7 @@ export async function loader({ params }: Route.LoaderArgs) {
   const { data: tripRows } = await db
     .from("trips")
     .select(
-      "id, name, start_date, end_date, share_slug, og_path, days(day_number, track_segments(distance_m, elevation_up))",
+      "id, name, start_date, end_date, share_slug, og_path, days(day_number, track_segments(distance_m, elevation_up, sport))",
     )
     .eq("owner_telegram_id", user.telegram_id)
     .order("start_date", { ascending: false });
@@ -26,9 +27,15 @@ export async function loader({ params }: Route.LoaderArgs) {
   const storage = db.storage.from("photos");
   const trips = (tripRows ?? [])
     .map((t) => {
-      const segments = t.days.flatMap(
-        (d) => (d as { track_segments: { distance_m: number; elevation_up: number }[] }).track_segments,
-      );
+      // What was ridden, so a leg taken by train doesn't pad a life's mileage.
+      const segments = t.days
+        .flatMap(
+          (d) =>
+            (d as {
+              track_segments: { distance_m: number; elevation_up: number; sport: string | null }[];
+            }).track_segments,
+        )
+        .filter((s) => !isTransit(s.sport));
       return {
         name: t.name,
         slug: t.share_slug,

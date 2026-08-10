@@ -10,6 +10,9 @@ import { km } from "./screens.server";
 import { recordAction, undoKeyboard } from "./bot-chrome.server";
 import { requireDay, requireTrip } from "./bot-access.server";
 import { backfillPhotoLocations } from "./bot-photos.server";
+import { transitMode, type TransitMode } from "./transport";
+
+const MODE_ICON: Record<TransitMode, string> = { train: "🚆", ferry: "⛴️", bus: "🚌" };
 
 /**
  * Taking in what a day is made of — a ridden track, the planned route it was
@@ -78,9 +81,15 @@ export async function saveTrackSegment(
     .select("*", { count: "exact", head: true })
     .eq("day_id", day.id);
 
+  // A leg that was travelled rather than ridden is drawn on the map hatched
+  // like a railway, and left out of the ridden totals — say so, because "0 km
+  // added" would otherwise look like the upload half failed.
+  const mode = transitMode(track.sport);
   const parts = [
-    `✅ Saved to *day ${day.day_number}*${track.name ? ` — ${escapeMd(track.name)}` : ""}`,
-    `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
+    `${mode ? MODE_ICON[mode] : "✅"} Saved to *day ${day.day_number}*${track.name ? ` — ${escapeMd(track.name)}` : ""}`,
+    mode
+      ? `📏 ${km(track.stats.distanceM)} km by ${mode} — on the map, not in the ridden total`
+      : `📏 ${km(track.stats.distanceM)} km  ⛰️ ${Math.round(track.stats.elevationUp)} m up`,
   ];
   if ((count ?? 1) > 1) parts.push(`🧩 ${count} segments merged for this day`);
   if (pinned > 0) parts.push(`📍 ${pinned} photo(s) pinned on the map`);

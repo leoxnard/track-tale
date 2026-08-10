@@ -5,6 +5,7 @@ import { toGpx } from "./gpx-export";
 import { buildProfile, fromGeoJson, type ProfilePoint, type TrackGeoJson, type TrackPoint } from "./track";
 import { weatherIcon, type DayWeather } from "./weather";
 import { byPhotoTime } from "./photo-order";
+import { isTransit } from "./transport";
 
 const MAP_W = 1000;
 const MAP_H = 620;
@@ -361,7 +362,7 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
     db
       .from("days")
       .select(
-        "day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, started_at), media(storage_path, caption, author_name, matched_lat, matched_lng, telegram_date, taken_at, created_at), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
+        "day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, caption, author_name, matched_lat, matched_lng, telegram_date, taken_at, created_at), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
       )
       .eq("trip_id", tripId)
       .order("day_number"),
@@ -377,6 +378,10 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
       (a, b) => Date.parse(a.started_at ?? 0) - Date.parse(b.started_at ?? 0),
     );
     const segPoints = segments.map((s) => fromGeoJson(s.geojson as TrackGeoJson));
+    // The GPX keeps every metre of the day; the numbers count only what was
+    // ridden, so a leg taken by train reads the same here as on the page.
+    const ridden = segments.filter((s) => !isTransit(s.sport));
+    const riddenPoints = ridden.map((s) => fromGeoJson(s.geojson as TrackGeoJson));
 
     const photos: ArchiveDay["photos"] = [];
     const sortedMedia = [...d.media].sort(byPhotoTime);
@@ -409,11 +414,11 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
       dayNumber: d.day_number,
       date: d.date,
       color: d.color,
-      distanceM: segments.reduce((s, x) => s + x.distance_m, 0),
-      elevationUp: segments.reduce((s, x) => s + x.elevation_up, 0),
-      movingS: segments.reduce((s, x) => s + x.moving_s, 0),
+      distanceM: ridden.reduce((s, x) => s + x.distance_m, 0),
+      elevationUp: ridden.reduce((s, x) => s + x.elevation_up, 0),
+      movingS: ridden.reduce((s, x) => s + x.moving_s, 0),
       segments: segPoints,
-      profile: buildProfile(segPoints.flat()),
+      profile: buildProfile(riddenPoints.flat()),
       photos,
       notes: [...d.notes]
         .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
