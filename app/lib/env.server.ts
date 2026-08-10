@@ -59,6 +59,10 @@ export const env = {
   get resendInboundSecret() {
     return process.env.RESEND_INBOUND_SECRET || null;
   },
+  /**
+   * Optional. Puts a real map behind the route on the share card; without it
+   * the card still renders, just on plain paper.
+   */
   get maptilerKey() {
     // `||`, not `??`: an env var present but blank is how "unset" usually looks
     // in a .env file, and `?? ` would hand a blank style straight into the URL.
