@@ -41,18 +41,21 @@ function Locomotive({ color }: { color: string }) {
   return (
     <svg width={LOCO_PX} height={H} viewBox={`0 0 ${LOCO_PX} ${H}`} aria-hidden="true">
       {/* Facing right, the way the journey goes: chimney at the front, cab at
-          the back where the carriages couple on. */}
+          the back where the carriages couple on.
+          The silhouette steps *down* towards the front — cab roof, then
+          chimney, then dome, then the boiler — which is what makes it an old
+          engine rather than a modern one of even height. */}
       <rect x={1.2} y={9.6} width={29.6} height={1.8} rx={0.6} fill={color} />
-      {/* Boiler, rounded off at the smokebox end. */}
-      <rect x={12} y={4.4} width={18.4} height={5.6} rx={2.8} fill={color} />
-      {/* Steam dome, then the chimney with its cap. */}
-      <rect x={18.4} y={2.9} width={2.8} height={2} rx={1} fill={color} />
-      <rect x={25.2} y={1.6} width={2.9} height={3.4} rx={0.5} fill={color} />
-      <rect x={24.2} y={1.2} width={4.9} height={1.4} rx={0.6} fill={color} />
-      {/* The cab: the tall part, roof overhanging both ways. */}
-      <rect x={3.4} y={3} width={9} height={7} rx={1} fill={color} />
-      <rect x={2.4} y={2.2} width={11} height={1.5} rx={0.7} fill={color} />
-      <rect x={5.4} y={4.6} width={4.6} height={3.2} rx={0.6} fill={PAPER} />
+      {/* Boiler, rounded off at the smokebox end: the lowest thing up front. */}
+      <rect x={12} y={4.8} width={18.4} height={5.2} rx={2.6} fill={color} />
+      {/* Steam dome, then the chimney with its cap — both under the cab roof. */}
+      <rect x={18.2} y={3.4} width={2.8} height={1.8} rx={0.9} fill={color} />
+      <rect x={25.2} y={2.7} width={2.9} height={2.6} rx={0.5} fill={color} />
+      <rect x={24.2} y={2.3} width={4.9} height={1.3} rx={0.6} fill={color} />
+      {/* The cab: the tallest part of the engine, roof overhanging both ways. */}
+      <rect x={3.4} y={2.2} width={9} height={7.8} rx={1} fill={color} />
+      <rect x={2.2} y={1.3} width={11.4} height={1.5} rx={0.7} fill={color} />
+      <rect x={5.4} y={3.8} width={4.6} height={3.2} rx={0.6} fill={PAPER} />
       {/* One big driving wheel under the cab and two carrying wheels under the
           boiler — the proportion that says "locomotive" before anything else. */}
       <Wheels xs={[9.4]} color={color} r={3.3} />
