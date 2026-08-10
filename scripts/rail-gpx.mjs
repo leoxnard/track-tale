@@ -27,7 +27,8 @@
  * Flags: --type train|ferry|bus (default train) · --filter, an Overpass tag
  * filter for the ways to consider (default ["railway"="rail"]; a ferry leg
  * wants ["route"="ferry"]) · --pad, degrees of margin around the endpoints
- * (default 0.3) · --endpoint, an Overpass mirror · --dump/--load, to keep the
+ * (default 0.3) · --max-points, how much of the OSM detail to keep (default
+ * 3000) · --endpoint, an Overpass mirror · --dump/--load, to keep the
  * downloaded data and re-run against it instead of hammering Overpass.
  */
 
@@ -173,6 +174,20 @@ export function shortestPath(graph, fromId, toId) {
   return { points: ids.map((id) => graph.nodes.get(id)), distanceM: dist.get(toId) };
 }
 
+/**
+ * OSM surveys a railway to the metre; a line on a map of Scotland does not
+ * need every one of them. Thinned by an even step with both ends kept, which
+ * is what the app does to a ridden track for the same reason.
+ */
+export function decimate(points, maxPoints) {
+  if (points.length <= maxPoints) return points;
+  const step = Math.ceil(points.length / maxPoints);
+  const out = points.filter((_, i) => i % step === 0);
+  const last = points[points.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+
 function esc(s) {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c],
@@ -287,7 +302,8 @@ async function main(argv) {
   const path = shortestPath(graph, start.id, end.id);
   if (!path) throw new Error("The two ends are not connected in this data — widen --pad.");
 
-  const gpx = toGpx(path.points, {
+  const points = decimate(path.points, Number(args["max-points"] ?? 3000));
+  const gpx = toGpx(points, {
     name: args.name ?? "Travelled leg",
     type: args.type ?? "train",
     departMs: parseTime(args.depart, "depart"),
@@ -295,7 +311,8 @@ async function main(argv) {
   });
   await writeFile(out, gpx);
   process.stderr.write(
-    `Wrote ${out}: ${path.points.length} points, ${(path.distanceM / 1000).toFixed(1)} km.\n`,
+    `Wrote ${out}: ${points.length} of ${path.points.length} points, ` +
+      `${(path.distanceM / 1000).toFixed(1)} km along the line.\n`,
   );
 }
 

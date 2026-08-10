@@ -1,0 +1,43 @@
+name: Build travelled legs
+
+# Overpass is a network call, and the GPX it produces is a checked-in artefact
+# of the trip rather than something rebuilt on every deploy — so this runs when
+# a leg definition changes, or on demand, and commits the result back.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/legs/**"
+      - "scripts/rail-gpx.mjs"
+      - "scripts/build-legs.mjs"
+      - ".github/workflows/rail-gpx.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/build-legs.mjs
+      - run: |
+          echo '### Built legs' >> "$GITHUB_STEP_SUMMARY"
+          for f in public/legs/*.gpx; do
+            echo "- \`$f\` — $(grep -c '<trkpt' "$f") points" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legs
+          path: public/legs/*.gpx
+      - name: Commit what changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/legs
+          git diff --cached --quiet && echo "nothing changed" && exit 0
+          git commit -m "Rebuild travelled legs from OpenStreetMap"
+          git push
