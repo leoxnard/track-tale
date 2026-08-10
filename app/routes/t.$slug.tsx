@@ -996,17 +996,38 @@ export function TripView({
       <div className="map-shell sticky top-0 z-10 bg-paper">
         {/* dvh, not vh: mobile Safari resolves vh against the viewport with the
             toolbars hidden, which made the map overhang the visible area. */}
-        <div className="h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
+        <div className="relative h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
           {mounted && hasMap ? (
-            <TripMap
-              days={trip.days}
-              plan={trip.plan}
-              live={trip.live}
-              handleRef={mapHandle}
-              cycleRoutes={cycleRoutes}
-              onPhoto={openByUrl}
-              m={m}
-            />
+            <>
+              <TripMap
+                days={trip.days}
+                plan={trip.plan}
+                live={trip.live}
+                handleRef={mapHandle}
+                cycleRoutes={cycleRoutes}
+                onPhoto={openByUrl}
+                m={m}
+              />
+              {/* On the map rather than in the ribbon below: it changes what the
+                  map shows, so it belongs where the change happens. Top left is
+                  the one corner MapLibre leaves free — zoom sits top right, the
+                  attribution bottom right. */}
+              <button
+                onClick={() => setCycleRoutes((on) => !on)}
+                aria-pressed={cycleRoutes}
+                // Opaque, for the same reason the ribbon below is: a
+                // translucent or blurred surface inside this sticky element
+                // makes Safari composite the map canvas through it.
+                className={`absolute left-2 top-2 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold shadow-sm focus-visible:outline-2 focus-visible:outline-pine ${
+                  cycleRoutes
+                    ? "border-pine bg-pine text-paper"
+                    : "border-trail bg-paper text-pine hover:border-pine-soft"
+                }`}
+                title={m.trip.cycleRoutesHint}
+              >
+                <span aria-hidden>🚲</span> {m.trip.cycleRoutes}
+              </button>
+            </>
           ) : (
             <div className="flex h-full items-center justify-center text-faint">
               {hasMap ? m.trip.loadingMap : m.trip.notStarted}
@@ -1031,18 +1052,6 @@ export function TripView({
                 title={m.trip.wholeTourHint}
               >
                 <span aria-hidden>⤢</span> {m.trip.wholeTour}
-              </button>
-              <button
-                onClick={() => setCycleRoutes((on) => !on)}
-                aria-pressed={cycleRoutes}
-                className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-bold focus-visible:outline-2 focus-visible:outline-pine ${
-                  cycleRoutes
-                    ? "border-pine bg-pine text-paper"
-                    : "border-trail text-pine hover:border-pine-soft"
-                }`}
-                title={m.trip.cycleRoutesHint}
-              >
-                <span aria-hidden>🚲</span> {m.trip.cycleRoutes}
               </button>
               {trip.live?.current && (
                 <button
