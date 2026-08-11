@@ -69,11 +69,13 @@ function Locomotive({ color }: { color: string }) {
 function Carriage({ color }: { color: string }) {
   return (
     <svg width={CARRIAGE_PX} height={H} viewBox={`0 0 ${CARRIAGE_PX} ${H}`} aria-hidden="true">
-      <rect x={0.4} y={4.4} width={16.2} height={7} rx={1.1} fill={color} />
-      {[2.2, 5.8, 9.4, 13].map((x) => (
-        <rect key={x} x={x} y={5.8} width={2.8} height={2.6} rx={0.5} fill={PAPER} opacity={0.85} />
+      {/* Long and low: its roof sits at the height of the engine's boiler,
+          well under the cab, and it runs on bogies near its ends. */}
+      <rect x={0.4} y={4.8} width={23.2} height={6.6} rx={1.2} fill={color} />
+      {[2.4, 6.4, 10.4, 14.4, 18.4].map((x) => (
+        <rect key={x} x={x} y={6.2} width={3.2} height={2.6} rx={0.5} fill={PAPER} opacity={0.85} />
       ))}
-      <Wheels xs={[3.4, 6.2, 10.8, 13.6]} color={color} r={1.6} />
+      <Wheels xs={[3.6, 6.4, 17.4, 20.2]} color={color} r={1.6} />
     </svg>
   );
 }

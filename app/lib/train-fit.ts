@@ -20,7 +20,12 @@
 export const LOCO_PX = 32;
 /** A ferry and a bus are one shape each, and need less room than that. */
 export const VEHICLE_PX = 26;
-export const CARRIAGE_PX = 17;
+/**
+ * A carriage is longer than the engine that pulls it and no taller than its
+ * boiler — that is what real rolling stock looks like, and drawing it stubby
+ * made the train read as a toy.
+ */
+export const CARRIAGE_PX = 24;
 /** Air between two vehicles — the coupling, visually. */
 export const COUPLING_PX = 3;
 /** Breathing room at both ends, so the train never touches the ridden lines. */
