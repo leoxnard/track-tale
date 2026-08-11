@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hopsBetween, layDays, type TourDayInput } from "./tour-layout";
+import { hopsBetween, layDays, reachedAlongPlan, type TourDayInput } from "./tour-layout";
 import { buildProfile, haversineM, type TrackPoint } from "./track";
 
 /**
@@ -203,6 +203,34 @@ describe("layDays", () => {
     // The train is nobody's distance, but the plan it crossed was reached.
     expect(riddenM).toBeCloseTo(2 * stretchM, -2);
     expect(reachedM).toBeCloseTo(planLengthM, -2);
+  });
+
+  it("counts a leg taken by train as ground covered, not as ground ridden", () => {
+    // What the progress bar is for: after riding the first sixth and taking a
+    // train across the middle third, the traveller is five sixths of the way
+    // along the route — not one third of the way, which is all they rode.
+    const stretchM = 0.1 * M_PER_DEG_LNG;
+    const byTrain: TourDayInput = {
+      dayNumber: 1,
+      color: "#000",
+      pieces: [
+        { distanceM: stretchM, profile: buildProfile(route(300, 11.0, 11.1)) },
+        { distanceM: stretchM, profile: buildProfile(route(300, 11.4, 11.5)), after: "train" },
+      ],
+    };
+
+    const reached = reachedAlongPlan(route(2000, 11.0, 11.6), planLengthM, [byTrain]);
+
+    expect(reached).toBeCloseTo(0.5 * M_PER_DEG_LNG, -2);
+    // Ridden is a fifth of the plan; reached is five sixths of it.
+    expect(layDays(route(2000, 11.0, 11.6), planLengthM, [byTrain]).riddenM).toBeCloseTo(
+      2 * stretchM,
+      -2,
+    );
+  });
+
+  it("reports nothing reached before anything has been ridden", () => {
+    expect(reachedAlongPlan(route(2000, 11.0, 11.6), planLengthM, [])).toBe(0);
   });
 
   it("hands the hole to whatever carried the traveller over it", () => {

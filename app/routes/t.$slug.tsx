@@ -20,15 +20,9 @@ function saveRecentTrip(slug: string, name: string) {
 import { getTripBySlug, updateTrip } from "../lib/db.server";
 import { postComment } from "../lib/comments.server";
 import { supabase } from "../lib/supabase.server";
-import {
-  buildProfile,
-  fromGeoJson,
-  groupContinuous,
-  haversineM,
-  type TrackGeoJson,
-  type TrackPoint,
-} from "../lib/track";
-import type { TourPiece } from "../lib/tour-layout";
+import { fromGeoJson, haversineM, type TrackGeoJson, type TrackPoint } from "../lib/track";
+import { riddenStretches, toPieces, type StoredSegment } from "../lib/day-stretches";
+import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather } from "../lib/weather";
 import { byPhotoTime } from "../lib/photo-order";
@@ -182,23 +176,17 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       // the day actually continued. Ride to Aberdeen, train to Forres, ride
       // on, and those are two stretches with 133 km between them that were
       // never pedalled.
-      const riddenPoints = ridden.map((s) => fromGeoJson(s.geojson as TrackGeoJson));
+      const stretches = riddenStretches(segments as StoredSegment[]);
       const transitLegs = transit.map((s) => ({
         mode: transitMode(s.sport)!,
         points: fromGeoJson(s.geojson as TrackGeoJson),
       }));
-      const groups = groupContinuous(riddenPoints);
-      const pieces = groups.map((group, gi) => {
-        const previous = groups[gi - 1];
+      const pieces = toPieces(stretches).map((piece, i) => {
+        const previous = stretches[i - 1];
         return {
-          distanceM: group.reduce((sum, i) => sum + ridden[i].distance_m, 0),
-          profile: buildProfile(group.flatMap((i) => riddenPoints[i])),
+          ...piece,
           after: previous
-            ? bridgingMode(
-                transitLegs,
-                riddenPoints[previous[previous.length - 1]].at(-1)!,
-                riddenPoints[group[0]][0],
-              )
+            ? bridgingMode(transitLegs, previous.points[previous.points.length - 1], stretches[i].points[0])
             : null,
         };
       });
@@ -308,6 +296,16 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     days,
     plan,
     planKm,
+    // Where the journey has got to along the plan, which is not what it has
+    // ridden: a wandering day advances less route than it rides, and a train
+    // advances it without riding any. The whole-tour chart marks the same
+    // figure with its line.
+    reachedKm:
+      reachedAlongPlan(
+        (planRows ?? []).flatMap((p) => fromGeoJson(p.geojson as TrackGeoJson)),
+        planKm * 1000,
+        days.map((d) => ({ dayNumber: d.dayNumber, color: d.color, pieces: d.pieces })),
+      ) / 1000,
     totalKm,
     transitKm: days.reduce((s, d) => s + d.transitM, 0) / 1000,
     transitModes: [...new Set(days.flatMap((d) => d.transitModes))],
@@ -736,6 +734,8 @@ export interface ViewerTrip {
   days: ViewerDay[];
   plan: TrackGeoJson[];
   planKm: number;
+  /** How far along the plan the journey has got, in km. */
+  reachedKm: number;
   totalKm: number;
   transitKm: number;
   transitModes: TransitMode[];
@@ -913,7 +913,7 @@ export function TripView({
   );
 
   const progressPct =
-    trip.planKm > 0 ? Math.min(100, Math.round((trip.totalKm / trip.planKm) * 100)) : null;
+    trip.planKm > 0 ? Math.min(100, Math.round((trip.reachedKm / trip.planKm) * 100)) : null;
 
   // Every day's chart is drawn to the same metres-per-pixel, so a hard stage
   // visibly towers over an easy one instead of each filling its own box.
@@ -976,7 +976,7 @@ export function TripView({
                 <div className="h-full rounded-full bg-pine-soft" style={{ width: `${progressPct}%` }} />
               </div>
               <p className="shrink-0 text-xs text-faint">
-                {m.trip.progress(trip.totalKm.toFixed(0), trip.planKm.toFixed(0), progressPct)}
+                {m.trip.progress(trip.reachedKm.toFixed(0), trip.planKm.toFixed(0), progressPct)}
               </p>
             </div>
           </div>

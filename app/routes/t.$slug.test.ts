@@ -247,6 +247,31 @@ describe("trip page loader", () => {
       pieces: { distanceM: number; after: string | null; profile: { d: number }[] }[];
     };
 
+    // Where the journey has got to is not what it has ridden: the train
+    // carried it across ground it never pedalled, and the progress bar is a
+    // question about position. Needs a plan to be positioned along — without
+    // one there is no route to have got anywhere on.
+    planRows = [
+      {
+        geojson: {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "LineString",
+            coordinates: Array.from({ length: 200 }, (_, i) => [
+              -2.2 + (i / 199) * -1.41,
+              57.05 + (i / 199) * 0.57,
+            ]),
+          },
+        },
+        distance_m: 106_000,
+      },
+    ];
+    const trip = await load("abc");
+    expect(trip.totalKm as number).toBeCloseTo(97, 5);
+    // Ridden 97 km, but standing some 105 km along the route.
+    expect(trip.reachedKm as number).toBeGreaterThan(100);
+
     expect(day.pieces).toHaveLength(2);
     expect(day.pieces.map((p) => p.distanceM)).toEqual([86_000, 11_000]);
     // The gap knows what crossed it — matched on where the train started and

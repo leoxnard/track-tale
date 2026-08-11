@@ -14,6 +14,8 @@ import {
 import { weatherIcon, type DayWeather } from "./weather";
 import { byPhotoTime } from "./photo-order";
 import { isTransit } from "./transport";
+import { riddenStretches, toPieces, type StoredSegment } from "./day-stretches";
+import { reachedAlongPlan } from "./tour-layout";
 
 const MAP_W = 1000;
 const MAP_H = 620;
@@ -222,6 +224,8 @@ function buildHtml(opts: {
   totalUp: number;
   movingS: number;
   planKm: number;
+  /** How far along the plan the journey has got — not what it has ridden. */
+  reachedKm: number;
   liveUrl: string;
   showAuthors: boolean;
 }): string {
@@ -231,7 +235,9 @@ function buildHtml(opts: {
       ? makeProjection(all, { x: 24, y: 24, w: MAP_W - 48, h: MAP_H - 48 })
       : null;
 
-  const pct = opts.planKm > 0 ? Math.round((opts.totalKm / opts.planKm) * 100) : null;
+  // Position along the route rather than distance ridden: a wandering day
+  // advances less route than it rides, and a train advances it without riding.
+  const pct = opts.planKm > 0 ? Math.round((opts.reachedKm / opts.planKm) * 100) : null;
 
   const elevationSpan = Math.max(
     20,
@@ -464,6 +470,23 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
       totalUp: withContent.reduce((s, d) => s + d.elevationUp, 0),
       movingS: withContent.reduce((s, d) => s + d.movingS, 0),
       planKm: (planRows ?? []).reduce((s, p) => s + p.distance_m, 0) / 1000,
+      reachedKm:
+        reachedAlongPlan(
+          (planRows ?? []).flatMap((p) => fromGeoJson(p.geojson as TrackGeoJson)),
+          (planRows ?? []).reduce((s, p) => s + p.distance_m, 0),
+          (dayRows ?? []).map((d) => ({
+            dayNumber: d.day_number,
+            color: d.color,
+            // In the order they were ridden; grouping is about sequence.
+            pieces: toPieces(
+              riddenStretches(
+                [...d.track_segments].sort(
+                  (a, b) => Date.parse(a.started_at ?? 0) - Date.parse(b.started_at ?? 0),
+                ) as StoredSegment[],
+              ),
+            ),
+          })),
+        ) / 1000,
       liveUrl: `${appOrigin}/t/${trip.share_slug}`,
       showAuthors: contributors.size > 1,
     }),
