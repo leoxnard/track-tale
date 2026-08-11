@@ -235,3 +235,45 @@ alter table users add column if not exists traveler_slug text unique;
 -- Redemption compares against expires_at, and NULL never compares true, so give
 -- codes issued before expiry existed a deadline rather than breaking them.
 update invites set expires_at = created_at + interval '7 days' where expires_at is null;
+
+-- Redeeming a code both spends it and registers the sender, and neither half is
+-- safe on its own: `invites.used_by` references `users`, so stamping the code
+-- first violates the foreign key and every redemption fails, while creating the
+-- user first would register whoever loses a race for the same code. One
+-- function, one transaction — the block's exception handler rolls the new user
+-- back if the claim finds nothing to claim.
+create or replace function redeem_invite(
+  p_code text,
+  p_telegram_id bigint,
+  p_display_name text
+) returns users
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  redeemed users;
+begin
+  insert into users (telegram_id, display_name, is_owner)
+  values (p_telegram_id, p_display_name, false)
+  on conflict (telegram_id) do nothing;
+
+  -- The expiry check rides along in the update, so a code cannot be redeemed by
+  -- two people racing each other past a separate read.
+  update invites
+     set used_by = p_telegram_id
+   where code = p_code
+     and used_by is null
+     and expires_at > now();
+  if not found then
+    raise exception using errcode = 'no_data_found';
+  end if;
+
+  select * into redeemed from users where telegram_id = p_telegram_id;
+  return redeemed;
+exception when no_data_found then
+  return null;
+end $$;
+
+revoke all on function redeem_invite(text, bigint, text) from public, anon, authenticated;
+grant execute on function redeem_invite(text, bigint, text) to service_role;

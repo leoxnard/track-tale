@@ -56,8 +56,10 @@ export async function authorize(ctx: Context): Promise<BotState | null> {
     const codeMatch = text.match(/^(?:\/start\s+)?([A-Za-z0-9_-]{8,21})$/);
     if (codeMatch) {
       triedCode = true;
-      if (await redeemInvite(codeMatch[1], from.id)) {
-        user = await createUser(from.id, senderName, false);
+      // Redemption registers the sender itself — the code and the user row have
+      // to be written in the same transaction to survive a race for the code.
+      user = await redeemInvite(codeMatch[1], from.id, senderName);
+      if (user) {
         await ctx.reply("✅ Welcome to TrackTale! Send /help to see how it works.").catch(() => {});
       }
     }

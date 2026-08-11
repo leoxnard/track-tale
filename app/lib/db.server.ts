@@ -68,18 +68,28 @@ export async function createUser(
 /** How long an unused invite code stays redeemable. */
 export const INVITE_TTL_DAYS = 7;
 
-export async function redeemInvite(code: string, telegramId: number): Promise<boolean> {
-  // The expiry check rides along in the update, so a code cannot be redeemed by
-  // two people racing each other past a separate read.
-  const { data } = await supabase()
-    .from("invites")
-    .update({ used_by: telegramId })
-    .eq("code", code)
-    .is("used_by", null)
-    .gt("expires_at", new Date().toISOString())
-    .select()
-    .maybeSingle();
-  return data !== null;
+/**
+ * Spend a code and register the sender behind it, or return null if the code is
+ * unknown, already used or expired.
+ *
+ * Claiming and registering cannot be two statements from here: `invites.used_by`
+ * references `users`, so stamping the code before the user exists trips the
+ * foreign key, and creating the user first hands a login to whoever loses a race
+ * for the same code. Both live in one database transaction instead — see
+ * `redeem_invite` in supabase/schema.sql.
+ */
+export async function redeemInvite(
+  code: string,
+  telegramId: number,
+  displayName: string,
+): Promise<DbUser | null> {
+  const { data, error } = await supabase().rpc("redeem_invite", {
+    p_code: code,
+    p_telegram_id: telegramId,
+    p_display_name: displayName,
+  });
+  if (error) throw error;
+  return data ?? null;
 }
 
 /** Returns the expiry stamped on the new code. */
