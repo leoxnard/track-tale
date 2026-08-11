@@ -491,7 +491,13 @@ function TripMap({
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
 
-      const photoMarkers: { el: HTMLElement; thumbUrl: string; color: string }[] = [];
+      // The `skin` is ours to restyle; the element around it belongs to
+      // MapLibre, which positions markers by writing an inline transform onto
+      // it. Restyling that element with `cssText` wipes the transform, and
+      // every marker drops into the top-left corner of the map until the next
+      // camera move puts it back — which looked like one stray dot on load,
+      // because they all land in the same place.
+      const photoMarkers: { skin: HTMLElement; thumbUrl: string; color: string }[] = [];
       // Only touch the DOM when the answer actually changes — this runs on
       // every frame of a pan.
       let showingDots: boolean | null = null;
@@ -501,7 +507,7 @@ function TripMap({
         if (dots === showingDots) return;
         showingDots = dots;
         for (const marker of photoMarkers) {
-          marker.el.style.cssText = dots
+          marker.skin.style.cssText = dots
             ? photoDotStyle(marker.color)
             : photoThumbStyle(marker.thumbUrl);
         }
@@ -612,9 +618,14 @@ function TripMap({
               event.preventDefault();
               onPhoto(photo);
             });
-            el.style.cssText = photoThumbStyle(photo.thumbUrl);
+            // Nothing but layout on the anchor: it is MapLibre's to position,
+            // and the look lives on the span inside it.
+            el.style.cssText = "display:block;line-height:0";
+            const skin = document.createElement("span");
+            skin.style.cssText = photoThumbStyle(photo.thumbUrl);
+            el.appendChild(skin);
             new maplibregl.Marker({ element: el }).setLngLat([photo.lng, photo.lat]).addTo(map!);
-            photoMarkers.push({ el, thumbUrl: photo.thumbUrl, color: day.color });
+            photoMarkers.push({ skin, thumbUrl: photo.thumbUrl, color: day.color });
           }
         }
 
