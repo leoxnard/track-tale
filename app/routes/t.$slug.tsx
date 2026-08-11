@@ -588,7 +588,7 @@ function TripMap({
                   layout: {
                     "icon-image": icon,
                     "symbol-placement": "line",
-                    "symbol-spacing": 140,
+                    "symbol-spacing": 100,
                     // Upright whatever the line is doing: a locomotive aligned
                     // to the map runs backwards and upside down half the time.
                     "icon-rotation-alignment": "viewport",

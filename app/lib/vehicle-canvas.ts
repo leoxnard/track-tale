@@ -11,17 +11,17 @@ import { artBounds, PAPER, RAIL_Y, vehicleArt, type Shape } from "./vehicle-art"
 import type { TransitMode } from "./transport";
 
 /**
- * How big the badge is on the map, in CSS pixels.
+ * How big the badge is on the map, in CSS pixels: the size of a photo marker,
+ * which is what everything else pinned to this map measures.
  *
- * Settled by looking at it on a line at real size. Much under this and the
- * locomotive inside is a smudge — an emoji is drawn to survive being tiny and
- * a line drawing is not — while much over it and the badge stops being a note
- * on the route and starts being the point of the map.
+ * There is no room to waste at that size, so the vehicle is fitted right up
+ * to the ring — a line drawing has none of an emoji's knack for surviving
+ * being tiny, and every pixel of padding was coming out of the locomotive.
  */
-export const BADGE_PX = 36;
-/** Ring thickness, and the air between it and the vehicle inside. */
+export const BADGE_PX = 26;
+/** Ring thickness. There is no padding inside it; see above. */
 const RING_PX = 2;
-const BADGE_PAD = 2;
+const BADGE_PAD = 0;
 
 function roundedRect(
   ctx: CanvasRenderingContext2D,
