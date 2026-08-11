@@ -120,7 +120,12 @@ const en = {
     liveNow: "Live now",
     liveNowHint: "Zoom the map to where they are right now",
     livePosition: "Live position",
-    progress: (done: string, total: string, pct: number) => `${done} of ${total} km · ${pct}%`,
+    /**
+     * How far along the planned route the journey has got — position, not
+     * distance ridden, which is on the page too and is a different number.
+     */
+    progress: (done: string, total: string, pct: number) =>
+      `${done} of ${total} km along the route · ${pct}%`,
     notStarted: "The journey hasn't started yet — check back soon.",
     loadingMap: "Loading map…",
     wholeTour: "Whole tour",
@@ -250,7 +255,8 @@ const de: Messages = {
     liveNow: "Jetzt live",
     liveNowHint: "Karte auf die aktuelle Position zoomen",
     livePosition: "Live-Position",
-    progress: (done: string, total: string, pct: number) => `${done} von ${total} km · ${pct} %`,
+    progress: (done: string, total: string, pct: number) =>
+      `${done} von ${total} km der Route · ${pct} %`,
     notStarted: "Die Reise hat noch nicht begonnen — schau bald wieder vorbei.",
     loadingMap: "Karte wird geladen…",
     wholeTour: "Ganze Tour",

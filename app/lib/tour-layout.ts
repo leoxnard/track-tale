@@ -81,6 +81,24 @@ export interface TourLayout {
   reachedM: number;
 }
 
+/**
+ * How far along the plan the traveller has got, in metres.
+ *
+ * Not the same number as what they have ridden, and the difference is the
+ * whole point: a day that wanders rides further than the route advances, and
+ * a leg taken by train advances the route without riding any of it. "62% of
+ * the way there" is a question about position, so it is answered by where the
+ * riding actually landed on the plan — the same figure the whole-tour chart
+ * marks with its line.
+ */
+export function reachedAlongPlan(
+  planPoints: TrackPoint[],
+  planM: number,
+  days: TourDayInput[],
+): number {
+  return layDays(planPoints, planM, days).reachedM;
+}
+
 /** A gap in a day's line, and what carried the traveller across it. */
 export interface TourHop {
   dayNumber: number;

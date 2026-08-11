@@ -254,9 +254,12 @@ export function tripPickerView(
 /** The /trip screen: where the trip stands, and everything you can do to it. */
 export async function tripStatusView(trip: DbTrip): Promise<View> {
   const totals = await tripTotals(trip.id);
+  // Ridden against planned, and labelled as exactly that. The family page
+  // reports position along the route instead, which needs every day's geometry
+  // — too much to pull down for a chat message that only wants a headline.
   const progress =
     totals.planM > 0
-      ? ` (${Math.min(100, Math.round((totals.distanceM / totals.planM) * 100))}% of plan)`
+      ? ` (${Math.min(100, Math.round((totals.distanceM / totals.planM) * 100))}% of the plan ridden)`
       : "";
 
   const liveMs = trip.live_expires_at ? Date.parse(trip.live_expires_at) : NaN;

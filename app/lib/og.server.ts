@@ -8,6 +8,8 @@ import { makeMercatorLayout, polylinePoints as polyline } from "./geo-project";
 import { basemapSvg, BASEMAP_ATTRIBUTION, BASEMAP_TILE_PX } from "./basemap.server";
 import { fromGeoJson, type TrackGeoJson, type TrackPoint } from "./track";
 import { isTransit } from "./transport";
+import { riddenStretches, toPieces, type StoredSegment } from "./day-stretches";
+import { reachedAlongPlan } from "./tour-layout";
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -69,6 +71,8 @@ interface OgData {
   dayTracks: { color: string; points: TrackPoint[] }[];
   totalKm: number;
   planKm: number;
+  /** How far along the plan the journey has got — not what it has ridden. */
+  reachedKm: number;
   totalUp: number;
   dayCount: number;
   current: TrackPoint | null;
@@ -116,7 +120,10 @@ async function buildSvg(data: OgData): Promise<string> {
   }
 
   const bandY = HEIGHT - BAND_H;
-  const pct = data.planKm > 0 ? Math.min(100, Math.round((data.totalKm / data.planKm) * 100)) : null;
+  // Position along the route, not distance ridden: the two part company on a
+  // day that wanders, and again on one that took a train.
+  const pct =
+    data.planKm > 0 ? Math.min(100, Math.round((data.reachedKm / data.planKm) * 100)) : null;
 
   const statParts = [
     `${data.totalKm.toFixed(0)} km`,
@@ -210,12 +217,31 @@ export async function renderOgCard(tripId: string): Promise<string | null> {
     }
   }
 
+  const planKm = (planRows ?? []).reduce((s, p) => s + p.distance_m, 0) / 1000;
   const svg = await buildSvg({
     name: trip.name,
     planPoints: (planRows ?? []).map((p) => fromGeoJson(p.geojson as TrackGeoJson)),
     dayTracks,
     totalKm,
-    planKm: (planRows ?? []).reduce((s, p) => s + p.distance_m, 0) / 1000,
+    planKm,
+    reachedKm:
+      reachedAlongPlan(
+        (planRows ?? []).flatMap((p) => fromGeoJson(p.geojson as TrackGeoJson)),
+        planKm * 1000,
+        (dayRows ?? []).map((day) => ({
+          dayNumber: day.day_number,
+          color: day.color,
+          // In the order they were ridden: grouping asks where each segment
+          // picks up from the one before, which is a question about sequence.
+          pieces: toPieces(
+            riddenStretches(
+              [...day.track_segments].sort(
+                (a, b) => Date.parse(a.started_at ?? 0) - Date.parse(b.started_at ?? 0),
+              ) as StoredSegment[],
+            ),
+          ),
+        })),
+      ) / 1000,
     totalUp,
     dayCount,
     current,
