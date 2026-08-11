@@ -41,14 +41,6 @@ export const TRAIN_PAD_PX = 4;
 export const MAX_CARRIAGES = 24;
 
 /**
- * What the map runs. Its train is one repeated image rather than something
- * fitted to a gap, so the length is a choice rather than a measurement — and
- * a long one would either swamp a short leg or have to be redrawn at every
- * zoom level.
- */
-export const MAP_CARRIAGES = 3;
-
-/**
  * Carriages for a gap this wide, or null when not even the locomotive fits —
  * which is the case a dashed line is still for.
  */
