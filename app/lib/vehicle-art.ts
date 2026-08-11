@@ -110,6 +110,37 @@ export const BUS: Shape[] = [
   wheel(18, 2.3),
 ];
 
+/**
+ * The topmost and bottommost pixel a drawing actually reaches.
+ *
+ * The box is sixteen tall because that is a convenient number to draw in, not
+ * because anything fills it — so anything centring a vehicle has to ask what
+ * it really occupies rather than assume the box.
+ */
+export function artBounds(shapes: Shape[]): { top: number; bottom: number } {
+  let top = VEHICLE_H;
+  let bottom = 0;
+  for (const shape of shapes) {
+    if (shape.kind === "rect") {
+      top = Math.min(top, shape.y);
+      bottom = Math.max(bottom, shape.y + shape.h);
+    } else if (shape.kind === "wheel") {
+      top = Math.min(top, RAIL_Y - 2 * shape.r);
+      bottom = Math.max(bottom, RAIL_Y);
+    } else {
+      // Every path here is written in absolute coordinate pairs — M, L, Q and
+      // Z, nothing that takes a lone number — so the odd numbers are the ys.
+      // A hull that ignored this would centre the ferry by its cabin.
+      const numbers = (shape.d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+      for (let i = 1; i < numbers.length; i += 2) {
+        top = Math.min(top, numbers[i]);
+        bottom = Math.max(bottom, numbers[i]);
+      }
+    }
+  }
+  return { top, bottom };
+}
+
 /** The single vehicle a mode is drawn as, and how wide it is. */
 export function vehicleArt(mode: TransitMode): { width: number; shapes: Shape[] } {
   if (mode === "ferry") return { width: VEHICLE_PX, shapes: FERRY };

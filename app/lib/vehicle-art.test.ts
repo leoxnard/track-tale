@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARRIAGE_PX, LOCO_PX, VEHICLE_PX } from "./train-fit";
 import {
+  artBounds,
   CARRIAGE,
   CARRIAGE_ART,
   RAIL_Y,
@@ -62,6 +63,22 @@ describe("vehicleArt", () => {
     // Sizes differ — a driving wheel, a bogie, a bus tyre — and that is the
     // reason wheels are positioned by their contact point rather than centred.
     expect(new Set(wheels.map((w) => w.kind === "wheel" && w.r)).size).toBeGreaterThan(2);
+  });
+
+  it("measures a hull drawn as a path, not just the cabin above it", () => {
+    // The badge centres a vehicle on what it occupies. Reading only the rects
+    // would put the ferry's middle somewhere in its wheelhouse and hang the
+    // hull out of the circle.
+    const ferry = artBounds(vehicleArt("ferry").shapes);
+    expect(ferry.bottom).toBeCloseTo(14, 5);
+    expect(ferry.top).toBeCloseTo(1.8, 5);
+  });
+
+  it("takes a wheel down to where it meets the rail", () => {
+    const loco = artBounds(vehicleArt("train").shapes);
+    expect(loco.bottom).toBe(RAIL_Y);
+    // The cab roof, which is the top of the engine.
+    expect(loco.top).toBeCloseTo(1.3, 5);
   });
 
   it("gives a ferry no wheels at all", () => {

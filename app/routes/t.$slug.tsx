@@ -47,8 +47,7 @@ import {
   resolveLocale,
   type Messages,
 } from "../lib/i18n";
-import { MAP_CARRIAGES } from "../lib/train-fit";
-import { drawTrain, trainIconSize } from "../lib/vehicle-canvas";
+import { BADGE_PX, drawVehicleBadge } from "../lib/vehicle-canvas";
 import { useLocale, useMessages } from "../lib/locale";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -379,19 +378,15 @@ const photoDotStyle = (color: string) =>
   `box-shadow:0 1px 3px rgba(0,0,0,.35);background:${color}`;
 
 /**
- * The same train the tour profile draws, on a canvas the map can repeat along
+ * The locomotive the tour profile draws, on a canvas the map can repeat along
  * a line — MapLibre puts images on a line, not components.
  *
- * It rides on a plate of the page's own paper, so where it sits the hatched
- * railway reads as breaking open to let the train through: a glance has to say
- * "this bit was not ridden" without anyone reading a legend.
- *
- * Its length is fixed rather than fitted. On the map the line is as long as the
- * leg was and changes with every zoom, so a train sized to it would have to be
- * redrawn constantly; three carriages is enough to read as a train and short
- * enough not to swamp a leg seen from far out.
+ * A disc of the page's own paper, ringed in the day's colour, so it sits in
+ * the hatched railway rather than on top of it. Just the engine: the line
+ * underneath already reads as a railway, and a train long enough to mean
+ * anything would have to be redrawn at every zoom.
  */
-function ensureTrainIcon(
+function ensureVehicleBadge(
   map: import("maplibre-gl").Map,
   mode: TransitMode,
   color: string,
@@ -399,18 +394,17 @@ function ensureTrainIcon(
   const id = `transit-${mode}-${color}`;
   if (map.hasImage(id)) return id;
 
-  const { width, height } = trainIconSize(mode, MAP_CARRIAGES);
   // Drawn at twice the size and handed over as such, so it stays crisp on the
   // phone screens most of these pages are read on.
   const scale = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = width * scale;
-  canvas.height = height * scale;
+  canvas.width = BADGE_PX * scale;
+  canvas.height = BADGE_PX * scale;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
   ctx.scale(scale, scale);
-  drawTrain(ctx, { mode, color, carriages: MAP_CARRIAGES });
+  drawVehicleBadge(ctx, { mode, color });
 
   map.addImage(id, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: scale });
   return id;
@@ -584,8 +578,8 @@ function TripMap({
                 layout: { "line-cap": "butt", "line-join": "round" },
               });
 
-              // …and the train itself, riding the line at intervals.
-              const icon = ensureTrainIcon(map!, track.mode, day.color);
+              // …and the vehicle itself, riding the line at intervals.
+              const icon = ensureVehicleBadge(map!, track.mode, day.color);
               if (icon) {
                 map!.addLayer({
                   id: `${id}-glyph`,
@@ -594,14 +588,12 @@ function TripMap({
                   layout: {
                     "icon-image": icon,
                     "symbol-placement": "line",
-                    // Wide enough that two trains never run into each other on
-                    // a winding line, given the icon is some 120 px long.
-                    "symbol-spacing": 260,
-                    // Upright whatever the line is doing: a train aligned to
-                    // the map runs backwards and upside down half the time.
+                    "symbol-spacing": 140,
+                    // Upright whatever the line is doing: a locomotive aligned
+                    // to the map runs backwards and upside down half the time.
                     "icon-rotation-alignment": "viewport",
                     "icon-allow-overlap": false,
-                    "icon-padding": 4,
+                    "icon-padding": 6,
                   },
                 });
               }
