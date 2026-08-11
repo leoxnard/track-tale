@@ -14,7 +14,11 @@ notes, stats and weather.
   distance nobody pedalled. A GPX says so in its `<type>` (`train`, `ferry`, `bus`), or just
   in its name ("Zugfahrt Aberdeen – Forres"). [scripts/rail-gpx.mjs](scripts/rail-gpx.mjs)
   builds such a file along the *real* line, taken from OpenStreetMap, rather than a straight
-  chord between the two stations.
+  chord between the two stations. A day that was imported with the crossing already inside it
+  — a recorded Komoot tour that ran straight through a ferry — is cut apart afterwards with
+  [scripts/split-transit.ts](scripts/split-transit.ts), which rewrites the day as
+  ride · crossing · ride and hands each part its share of the tour's own figures, so the day
+  still adds up to what it always did while the boat stops counting as riding.
 - Send **photos** (with captions) and **text** → the day's journal. Telegram strips GPS EXIF
   from compressed photos, so those are pinned to the route by timestamp; send a photo **as a
   file** instead and its own GPS fix and capture time survive, which puts it exactly where it

@@ -17,6 +17,9 @@
       "~/*": ["./app/*"]
     },
     "esModuleInterop": true,
+    // scripts/*.ts run straight off the source with node --experimental-strip-types,
+    // which resolves like ESM and so needs the extension spelled out.
+    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "resolveJsonModule": true,

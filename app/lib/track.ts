@@ -203,6 +203,98 @@ export function groupContinuous(segments: TrackPoint[][], gapM = RESUME_GAP_M): 
   return groups;
 }
 
+/**
+ * A stretch inside a recorded track that was travelled rather than ridden.
+ *
+ * Indices are inclusive and name the *shore* points: `from` is the last point
+ * before the boat pulls out, `to` the first one back on land. Both ends are
+ * kept by the ridden parts as well, so the day's line stays continuous where
+ * the crossing is cut out of it.
+ */
+export interface TransitCut {
+  from: number;
+  to: number;
+  /** The transit mode, stored in the segment's `sport` column. */
+  sport: string;
+  name?: string;
+}
+
+export interface TrackPart {
+  points: TrackPoint[];
+  stats: TrackStats;
+  sport?: string;
+  name?: string;
+}
+
+/**
+ * One recorded track cut into the parts it is really made of.
+ *
+ * A day imported as a single tour can contain a ferry: the line belongs on the
+ * map, the kilometres do not belong in what was ridden. Splitting it into
+ * ridden / transit / ridden rows is what lets the rest of the app tell them
+ * apart, because the distinction lives per segment.
+ */
+export function splitAtTransit(
+  points: TrackPoint[],
+  cuts: TransitCut[],
+  ridden: { sport?: string; name?: string } = {},
+): TrackPart[] {
+  const ordered = [...cuts].sort((a, b) => a.from - b.from);
+  const parts: TrackPart[] = [];
+  let cursor = 0;
+
+  const push = (slice: TrackPoint[], sport?: string, name?: string) => {
+    if (slice.length < 2) return;
+    parts.push({ points: slice, stats: computeStats(slice), sport, name });
+  };
+
+  for (const cut of ordered) {
+    if (cut.from < cursor || cut.to <= cut.from || cut.to >= points.length) {
+      throw new Error(`Transit cut ${cut.from}–${cut.to} is out of order or out of range`);
+    }
+    push(points.slice(cursor, cut.from + 1), ridden.sport, ridden.name);
+    push(points.slice(cut.from, cut.to + 1), cut.sport, cut.name);
+    cursor = cut.to;
+  }
+  push(points.slice(cursor), ridden.sport, ridden.name);
+
+  return parts;
+}
+
+/**
+ * Spread a segment's stored stats over the parts it was split into.
+ *
+ * Komoot's own figures for a tour are the ones the trip has always shown, and
+ * they are not quite what re-adding the GPS points gives. Splitting a day must
+ * not quietly restate its total, so each part takes its share of the official
+ * figure rather than its own recomputed one. Durations are left alone: they
+ * come from the timestamps, and the parts already add up because they share
+ * their boundary points.
+ */
+export function apportionStats(parts: TrackPart[], official: TrackStats): TrackPart[] {
+  const share = (pick: (s: TrackStats) => number) => {
+    const total = parts.reduce((sum, p) => sum + pick(p.stats), 0);
+    const target = pick(official);
+    return (part: TrackPart) => (total > 0 ? (pick(part.stats) / total) * target : 0);
+  };
+
+  const distance = share((s) => s.distanceM);
+  const moving = share((s) => s.movingS);
+  const up = share((s) => s.elevationUp);
+  const down = share((s) => s.elevationDown);
+
+  return parts.map((part) => ({
+    ...part,
+    stats: {
+      ...part.stats,
+      distanceM: distance(part),
+      movingS: moving(part),
+      elevationUp: up(part),
+      elevationDown: down(part),
+    },
+  }));
+}
+
 export interface ProfilePoint {
   /** cumulative metres from the start of the day */
   d: number;

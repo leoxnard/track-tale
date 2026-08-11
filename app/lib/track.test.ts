@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DAY_COLORS,
+  apportionStats,
   buildProfile,
   computeStats,
   dayColor,
@@ -11,6 +12,7 @@ import {
   layEndToEnd,
   planPointBudget,
   sortSegmentsByStart,
+  splitAtTransit,
   toGeoJson,
   type TrackPoint,
 } from "./track";
@@ -277,6 +279,87 @@ describe("layEndToEnd", () => {
   it("leaves a single stretch exactly as it was", () => {
     const only = buildProfile(ramp(10, (i) => 100 + i));
     expect(layEndToEnd([only])).toEqual(only);
+  });
+});
+
+describe("splitAtTransit", () => {
+  const day = ramp(11).map((p, i) => ({ ...p, time: t0 + i * 60_000 }));
+
+  it("cuts a crossing out of the middle and keeps both shores riding", () => {
+    const parts = splitAtTransit(day, [{ from: 3, to: 7, sport: "ferry", name: "Fähre" }], {
+      sport: "touringbicycle",
+      name: "Tag 1",
+    });
+
+    expect(parts.map((p) => p.sport)).toEqual(["touringbicycle", "ferry", "touringbicycle"]);
+    expect(parts[1].name).toBe("Fähre");
+    // The shore points belong to the ride and to the crossing, so the line the
+    // map draws has no hole in it.
+    expect(parts[0].points[parts[0].points.length - 1]).toEqual(day[3]);
+    expect(parts[1].points[0]).toEqual(day[3]);
+    expect(parts[1].points[parts[1].points.length - 1]).toEqual(day[7]);
+    expect(parts[2].points[0]).toEqual(day[7]);
+  });
+
+  it("adds the parts back up to the whole", () => {
+    const parts = splitAtTransit(day, [{ from: 3, to: 7, sport: "ferry" }]);
+    const whole = computeStats(day);
+    const summed = parts.reduce((sum, p) => sum + p.stats.distanceM, 0);
+
+    expect(summed).toBeCloseTo(whole.distanceM, 6);
+    expect(parts.reduce((sum, p) => sum + p.stats.durationS, 0)).toBe(whole.durationS);
+  });
+
+  it("drops a part that would be a single point", () => {
+    const parts = splitAtTransit(day, [{ from: 0, to: 4, sport: "ferry" }]);
+    expect(parts.map((p) => p.sport)).toEqual(["ferry", undefined]);
+  });
+
+  it("takes several crossings in one day", () => {
+    const parts = splitAtTransit(day, [
+      { from: 2, to: 4, sport: "ferry" },
+      { from: 6, to: 8, sport: "ferry" },
+    ]);
+    expect(parts.map((p) => p.sport)).toEqual([
+      undefined,
+      "ferry",
+      undefined,
+      "ferry",
+      undefined,
+    ]);
+  });
+
+  it("refuses cuts that overlap or point outside the track", () => {
+    expect(() => splitAtTransit(day, [{ from: 5, to: 99, sport: "ferry" }])).toThrow();
+    expect(() =>
+      splitAtTransit(day, [
+        { from: 2, to: 6, sport: "ferry" },
+        { from: 4, to: 8, sport: "ferry" },
+      ]),
+    ).toThrow();
+  });
+});
+
+describe("apportionStats", () => {
+  const day = ramp(11, (i) => i * 10).map((p, i) => ({ ...p, time: t0 + i * 60_000 }));
+
+  it("hands each part its share of the figures the trip already showed", () => {
+    const parts = splitAtTransit(day, [{ from: 3, to: 7, sport: "ferry" }]);
+    const official = { ...computeStats(day), distanceM: 2000, elevationUp: 400 };
+    const shared = apportionStats(parts, official);
+
+    expect(shared.reduce((sum, p) => sum + p.stats.distanceM, 0)).toBeCloseTo(2000, 6);
+    expect(shared.reduce((sum, p) => sum + p.stats.elevationUp, 0)).toBeCloseTo(400, 6);
+    // Four of the ten steps were the crossing.
+    expect(shared[1].stats.distanceM).toBeCloseTo(800, 0);
+    // Timestamps are facts, not shares.
+    expect(shared[1].stats.durationS).toBe(parts[1].stats.durationS);
+  });
+
+  it("leaves a figure at zero when there is nothing to share out", () => {
+    const parts = splitAtTransit(ramp(5), [{ from: 1, to: 3, sport: "ferry" }]);
+    const shared = apportionStats(parts, { ...computeStats(ramp(5)), elevationUp: 100 });
+    expect(shared.every((p) => p.stats.elevationUp === 0)).toBe(true);
   });
 });
 
