@@ -81,21 +81,13 @@ export function resolveLocale(request: Request): Locale {
 }
 
 /**
- * What each way of travelling is called, and what it looks like.
- *
- * The glyph is the same one the bot replies with and the one dropped into the
- * gap the leg left in the tour profile, so a train is a train wherever it
- * turns up.
+ * What each way of travelling is called. What it *looks* like is in
+ * lib/vehicle-art now — the page draws its own train rather than borrowing a
+ * different one from every browser's emoji font.
  */
 export const TRANSIT_NOUNS: Record<Locale, Record<TransitMode, string>> = {
   en: { train: "train", ferry: "ferry", bus: "bus" },
   de: { train: "Zug", ferry: "Fähre", bus: "Bus" },
-};
-
-export const TRANSIT_GLYPHS: Record<TransitMode, string> = {
-  train: "🚆",
-  ferry: "⛴️",
-  bus: "🚌",
 };
 
 const en = {

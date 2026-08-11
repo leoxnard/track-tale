@@ -3,6 +3,7 @@ import {
   CARRIAGE_PX,
   COUPLING_PX,
   LOCO_PX,
+  MAP_CARRIAGES,
   MAX_CARRIAGES,
   TRAIN_PAD_PX,
   carriagesFor,
@@ -52,5 +53,15 @@ describe("trainWidth", () => {
   it("is the locomotive plus a coupling and a carriage for each one pulled", () => {
     expect(trainWidth(0)).toBe(LOCO_PX);
     expect(trainWidth(3)).toBe(LOCO_PX + 3 * (CARRIAGE_PX + COUPLING_PX));
+  });
+});
+
+describe("MAP_CARRIAGES", () => {
+  it("keeps the map's train short enough to read on a leg seen from far out", () => {
+    // The map repeats one image rather than fitting a gap, so this is a choice
+    // and not a measurement — but a train longer than a few carriages would
+    // swamp a short leg at low zoom.
+    expect(MAP_CARRIAGES).toBeGreaterThan(0);
+    expect(MAP_CARRIAGES).toBeLessThanOrEqual(3);
   });
 });

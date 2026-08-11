@@ -28,13 +28,25 @@ export const VEHICLE_PX = 26;
 export const CARRIAGE_PX = 24;
 /** Air between two vehicles — the coupling, visually. */
 export const COUPLING_PX = 3;
-/** Breathing room at both ends, so the train never touches the ridden lines. */
-export const TRAIN_PAD_PX = 7;
+/**
+ * Breathing room at both ends, so the train never touches the ridden lines.
+ * Kept tight: every pixel here is a pixel the train cannot use, and it was
+ * costing a phone-width gap the one carriage that does fit in it.
+ */
+export const TRAIN_PAD_PX = 4;
 /**
  * A cap on the carriage count. A long ride zoomed right in would otherwise
  * grow a train of hundreds of DOM nodes, and nobody counts past a dozen.
  */
 export const MAX_CARRIAGES = 24;
+
+/**
+ * What the map runs. Its train is one repeated image rather than something
+ * fitted to a gap, so the length is a choice rather than a measurement — and
+ * a long one would either swamp a short leg or have to be redrawn at every
+ * zoom level.
+ */
+export const MAP_CARRIAGES = 3;
 
 /**
  * Carriages for a gap this wide, or null when not even the locomotive fits —

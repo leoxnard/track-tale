@@ -45,9 +45,10 @@ import {
   formatShortDate,
   messages,
   resolveLocale,
-  TRANSIT_GLYPHS,
   type Messages,
 } from "../lib/i18n";
+import { MAP_CARRIAGES } from "../lib/train-fit";
+import { drawTrain, trainIconSize } from "../lib/vehicle-canvas";
 import { useLocale, useMessages } from "../lib/locale";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -378,16 +379,19 @@ const photoDotStyle = (color: string) =>
   `box-shadow:0 1px 3px rgba(0,0,0,.35);background:${color}`;
 
 /**
- * The vehicle, drawn once into an image the map can repeat along a line.
+ * The same train the tour profile draws, on a canvas the map can repeat along
+ * a line — MapLibre puts images on a line, not components.
  *
- * On paper, with a ring in the day's own colour: dropped onto the hatched
- * railway at intervals it reads as the line breaking open to let the train
- * sit in it, which is the whole point — a glance has to say "this bit was not
- * ridden" without anyone reading a legend.
+ * It rides on a plate of the page's own paper, so where it sits the hatched
+ * railway reads as breaking open to let the train through: a glance has to say
+ * "this bit was not ridden" without anyone reading a legend.
+ *
+ * Its length is fixed rather than fitted. On the map the line is as long as the
+ * leg was and changes with every zoom, so a train sized to it would have to be
+ * redrawn constantly; three carriages is enough to read as a train and short
+ * enough not to swamp a leg seen from far out.
  */
-const GLYPH_PX = 44;
-
-function ensureGlyph(
+function ensureTrainIcon(
   map: import("maplibre-gl").Map,
   mode: TransitMode,
   color: string,
@@ -395,27 +399,20 @@ function ensureGlyph(
   const id = `transit-${mode}-${color}`;
   if (map.hasImage(id)) return id;
 
+  const { width, height } = trainIconSize(mode, MAP_CARRIAGES);
+  // Drawn at twice the size and handed over as such, so it stays crisp on the
+  // phone screens most of these pages are read on.
+  const scale = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = GLYPH_PX;
-  canvas.height = GLYPH_PX;
+  canvas.width = width * scale;
+  canvas.height = height * scale;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  const r = GLYPH_PX / 2;
-  ctx.beginPath();
-  ctx.arc(r, r, r - 3, 0, Math.PI * 2);
-  ctx.fillStyle = "#fbfaf7";
-  ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = color;
-  ctx.stroke();
+  ctx.scale(scale, scale);
+  drawTrain(ctx, { mode, color, carriages: MAP_CARRIAGES });
 
-  ctx.font = `${Math.round(GLYPH_PX * 0.52)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(TRANSIT_GLYPHS[mode], r, r + 1);
-
-  map.addImage(id, ctx.getImageData(0, 0, GLYPH_PX, GLYPH_PX), { pixelRatio: 2 });
+  map.addImage(id, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: scale });
   return id;
 }
 
@@ -587,22 +584,24 @@ function TripMap({
                 layout: { "line-cap": "butt", "line-join": "round" },
               });
 
-              // …and the vehicle itself, riding the line at intervals.
-              const glyph = ensureGlyph(map!, track.mode, day.color);
-              if (glyph) {
+              // …and the train itself, riding the line at intervals.
+              const icon = ensureTrainIcon(map!, track.mode, day.color);
+              if (icon) {
                 map!.addLayer({
                   id: `${id}-glyph`,
                   type: "symbol",
                   source: id,
                   layout: {
-                    "icon-image": glyph,
+                    "icon-image": icon,
                     "symbol-placement": "line",
-                    "symbol-spacing": 110,
-                    // Upright whatever the line is doing, and never so crowded
-                    // that the route disappears under a row of trains.
+                    // Wide enough that two trains never run into each other on
+                    // a winding line, given the icon is some 120 px long.
+                    "symbol-spacing": 260,
+                    // Upright whatever the line is doing: a train aligned to
+                    // the map runs backwards and upside down half the time.
                     "icon-rotation-alignment": "viewport",
                     "icon-allow-overlap": false,
-                    "icon-padding": 8,
+                    "icon-padding": 4,
                   },
                 });
               }
