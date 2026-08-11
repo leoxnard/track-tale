@@ -6,6 +6,7 @@ import {
   MAX_CARRIAGES,
   TRAIN_PAD_PX,
   carriagesFor,
+  dashRuns,
   trainWidth,
 } from "./train-fit";
 
@@ -52,5 +53,40 @@ describe("trainWidth", () => {
   it("is the locomotive plus a coupling and a carriage for each one pulled", () => {
     expect(trainWidth(0)).toBe(LOCO_PX);
     expect(trainWidth(3)).toBe(LOCO_PX + 3 * (CARRIAGE_PX + COUPLING_PX));
+  });
+});
+
+describe("dashRuns", () => {
+  it("dashes both sides of what stands in the gap", () => {
+    expect(dashRuns(0, 100, 40)).toEqual([
+      [0, 30],
+      [70, 100],
+    ]);
+  });
+
+  it("dashes the whole gap when nothing stands in it", () => {
+    expect(dashRuns(0, 100, 0)).toEqual([[0, 100]]);
+  });
+
+  it("drops a run too short to read as a line", () => {
+    // A train all but filling its gap leaves slivers at both ends; two dashes
+    // wedged against a locomotive are dirt, not information.
+    expect(dashRuns(0, 100, 96)).toEqual([]);
+    expect(dashRuns(0, 100, 90)).toEqual([
+      [0, 5],
+      [95, 100],
+    ]);
+  });
+
+  it("has nothing to draw for a gap with no width", () => {
+    expect(dashRuns(50, 50, 0)).toEqual([]);
+    expect(dashRuns(50, 50, 20)).toEqual([]);
+  });
+
+  it("keeps both runs the same length, wherever the gap sits", () => {
+    const [before, after] = dashRuns(220, 480, 60);
+    expect(before[1] - before[0]).toBeCloseTo(after[1] - after[0], 10);
+    expect(before[0]).toBe(220);
+    expect(after[1]).toBe(480);
   });
 });
