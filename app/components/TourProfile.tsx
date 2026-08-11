@@ -162,11 +162,16 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
       // the gap *on screen*, which the viewBox cannot tell us — the chart is
       // stretched to its box — so it is measured, and the vehicles are placed
       // in the overlay where nothing squashes them.
+      //
+      // Until that measurement arrives — on the server, and on the first paint
+      // before the observer has reported — there is no train, only the dashes.
+      // Guessing at the width instead drew one sized in viewBox units, which
+      // on any chart narrower than 960 px is a train too long for its gap.
       hops: hops.map((hop) => {
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
-        const perPx = W / (chartPx || W);
-        const gapPx = (toX - fromX) / perPx;
+        const perPx = chartPx > 0 ? W / chartPx : 0;
+        const gapPx = perPx > 0 ? (toX - fromX) / perPx : 0;
         const carriages = hop.mode === "train" ? carriagesFor(gapPx) : singleFits(gapPx);
 
         // What the train stands on, back in the chart's own units, with a
