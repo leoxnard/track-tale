@@ -55,3 +55,31 @@ export function carriagesFor(gapPx: number): number | null {
 export function trainWidth(carriages: number): number {
   return LOCO_PX + carriages * (CARRIAGE_PX + COUPLING_PX);
 }
+
+/**
+ * The stretches of a gap the train does not stand on, as `[from, to]` pairs.
+ *
+ * A train never fills its gap exactly — there is whatever was left over after
+ * the last whole carriage, at both ends. Left blank that reads as the line
+ * simply stopping; dashed, it reads as the journey carrying on past what the
+ * train had room to say.
+ *
+ * `occupied` is what the train takes up in the middle, clearance included, in
+ * the same units as `from` and `to`; zero for a gap with no train in it at
+ * all. Runs shorter than `minRun` are dropped — two dashes wedged against a
+ * locomotive are dirt, not information.
+ */
+export function dashRuns(
+  from: number,
+  to: number,
+  occupied: number,
+  minRun = 3,
+): [number, number][] {
+  if (occupied <= 0) return to - from >= minRun ? [[from, to]] : [];
+  const middle = (from + to) / 2;
+  const half = occupied / 2;
+  return ([
+    [from, middle - half],
+    [middle + half, to],
+  ] as [number, number][]).filter(([a, b]) => b - a >= minRun);
+}

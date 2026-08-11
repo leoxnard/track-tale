@@ -5,7 +5,7 @@ import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
 import { TransitVehicle } from "./TransitVehicle";
-import { carriagesFor, TRAIN_PAD_PX, VEHICLE_PX } from "../lib/train-fit";
+import { carriagesFor, dashRuns, trainWidth, TRAIN_PAD_PX, VEHICLE_PX } from "../lib/train-fit";
 
 const W = 960;
 const H = 200;
@@ -14,6 +14,9 @@ const PAD_BOTTOM = 22;
 const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
 
 const PLAN_COLOR = "#9aa59e";
+
+/** Air between the train and the dashes either side of it. */
+const DASH_CLEARANCE_PX = 5;
 
 /** A ferry or a bus pulls nothing, so it either fits whole or it does not. */
 function singleFits(gapPx: number): number | null {
@@ -162,19 +165,32 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
       hops: hops.map((hop) => {
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
-        const midX = (fromX + toX) / 2;
-        const gapPx = ((toX - fromX) / W) * (chartPx || 0);
+        const perPx = W / (chartPx || W);
+        const gapPx = (toX - fromX) / perPx;
         const carriages = hop.mode === "train" ? carriagesFor(gapPx) : singleFits(gapPx);
+
+        // What the train stands on, back in the chart's own units, with a
+        // little clearance so the dashes stop short of the buffers.
+        const vehiclePx =
+          carriages === null ? 0 : hop.mode === "train" ? trainWidth(carriages) : VEHICLE_PX;
+        const occupied = vehiclePx === 0 ? 0 : (vehiclePx + 2 * DASH_CLEARANCE_PX) * perPx;
+
+        // The hop hangs between the heights either side of it, so a dash run
+        // takes its ends from the line between them.
+        const heightAt = (px: number) => {
+          const along = toX === fromX ? 0 : (px - fromX) / (toX - fromX);
+          return y(hop.fromE + (hop.toE - hop.fromE) * along);
+        };
+
         return {
           ...hop,
-          midX,
+          midX: (fromX + toX) / 2,
           midY: y((hop.fromE + hop.toE) / 2),
           carriages,
-          // Dashes are what is left when not even the locomotive fits.
-          line:
-            carriages === null
-              ? `M${fromX.toFixed(1)},${y(hop.fromE).toFixed(1)}L${toX.toFixed(1)},${y(hop.toE).toFixed(1)}`
-              : "",
+          lines: dashRuns(fromX, toX, occupied).map(
+            ([a, b]) =>
+              `M${a.toFixed(1)},${heightAt(a).toFixed(1)}L${b.toFixed(1)},${heightAt(b).toFixed(1)}`,
+          ),
         };
       }),
     };
@@ -296,13 +312,12 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               />
             )}
 
-            {/* Only the hops too narrow for a locomotive keep a line. */}
-            {hops
-              .filter((hop) => hop.line)
-              .map((hop) => (
+            {/* The skipped stretch either side of whatever is standing in it. */}
+            {hops.flatMap((hop) =>
+              hop.lines.map((line, i) => (
                 <path
-                  key={`hop-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
-                  d={hop.line}
+                  key={`hop-${hop.dayNumber}-${hop.fromM.toFixed(0)}-${i}`}
+                  d={line}
                   fill="none"
                   stroke={hop.color}
                   strokeWidth={1.5}
@@ -311,7 +326,8 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
                   opacity={0.7}
                   vectorEffect="non-scaling-stroke"
                 />
-              ))}
+              )),
+            )}
 
             {dayPaths.map(({ day, line, area }) => (
               <g key={`${day.dayNumber}-${day.piece}`}>
