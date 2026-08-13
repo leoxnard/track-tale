@@ -102,6 +102,11 @@ const en = {
   language: {
     label: "Language",
   },
+  share: {
+    /** Both the button's name and its tooltip — it has no visible text. */
+    label: "Share",
+    copied: "Link copied",
+  },
   error: {
     oops: "Oops!",
     generic: "Error",
@@ -237,6 +242,10 @@ const de: Messages = {
   },
   language: {
     label: "Sprache",
+  },
+  share: {
+    label: "Teilen",
+    copied: "Link kopiert",
   },
   error: {
     oops: "Hoppla!",

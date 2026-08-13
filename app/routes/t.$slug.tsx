@@ -33,6 +33,7 @@ import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { ShareButton } from "../components/ShareButton";
 import {
   formatDayDate,
   formatDuration,
@@ -960,25 +961,30 @@ export function TripView({
               ? `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`
               : m.trip.since(formatDate(trip.startDate))}
           </p>
-          {trip.liveUrl && (
-            <a
-              href={trip.liveUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto inline-flex items-center gap-2 rounded-full bg-live px-4 py-1.5 text-sm font-bold text-white"
-            >
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute h-full w-full animate-ping rounded-full bg-white/70" />
-                <span className="relative h-2.5 w-2.5 rounded-full bg-white" />
-              </span>
-              {trip.live
-                ? m.trip.live(
-                    (trip.live.distanceM / 1000).toFixed(1),
-                    trip.live.durationS > 0 ? formatHours(trip.live.durationS) : null,
-                  )
-                : m.trip.liveFollow}
-            </a>
-          )}
+          {/* Pushed to the right edge of the title row, live badge included, so
+              the two never fight over who gets the `ml-auto`. */}
+          <div className="ml-auto flex items-center gap-2 self-center">
+            {trip.liveUrl && (
+              <a
+                href={trip.liveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-full bg-live px-4 py-1.5 text-sm font-bold text-white"
+              >
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute h-full w-full animate-ping rounded-full bg-white/70" />
+                  <span className="relative h-2.5 w-2.5 rounded-full bg-white" />
+                </span>
+                {trip.live
+                  ? m.trip.live(
+                      (trip.live.distanceM / 1000).toFixed(1),
+                      trip.live.durationS > 0 ? formatHours(trip.live.durationS) : null,
+                    )
+                  : m.trip.liveFollow}
+              </a>
+            )}
+            <ShareButton title={trip.name} />
+          </div>
         </div>
         {progressPct !== null && (
           <div className="mx-auto max-w-5xl px-4 pb-3">
