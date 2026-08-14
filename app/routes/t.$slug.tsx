@@ -39,6 +39,7 @@ import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
+import { LivePhoto } from "../components/LivePhoto";
 import { DayWind, WindRose } from "../components/WindRose";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
@@ -57,6 +58,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 export interface ViewerPhoto {
   url: string;
   thumbUrl: string;
+  /** The three seconds behind a Live Photo, or null for an ordinary one. */
+  motionUrl: string | null;
   caption: string | null;
   lat: number | null;
   lng: number | null;
@@ -159,7 +162,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     supabase()
       .from("days")
       .select(
-        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, caption, matched_lat, matched_lng, telegram_date, taken_at, created_at, author_name), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
+        "id, day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, thumb_path, motion_path, caption, matched_lat, matched_lng, telegram_date, taken_at, created_at, author_name), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
       )
       .eq("trip_id", trip.id)
       .order("day_number"),
@@ -219,6 +222,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
           .map((m) => ({
             url: storage.getPublicUrl(m.storage_path).data.publicUrl,
             thumbUrl: storage.getPublicUrl(m.thumb_path ?? m.storage_path).data.publicUrl,
+            motionUrl: m.motion_path ? storage.getPublicUrl(m.motion_path).data.publicUrl : null,
             caption: m.caption,
             lat: m.matched_lat,
             lng: m.matched_lng,
@@ -1121,6 +1125,7 @@ export function TripView({
         day.photos.map((photo) => ({
           url: photo.url,
           thumbUrl: photo.thumbUrl,
+          motionUrl: photo.motionUrl,
           caption: photo.caption,
           author: photo.author,
           dayNumber: day.dayNumber,
@@ -1534,11 +1539,12 @@ export function TripView({
                         }}
                         className="group relative block cursor-zoom-in overflow-hidden rounded-lg bg-trail/50"
                       >
-                        <img
-                          src={photo.thumbUrl}
+                        <LivePhoto
+                          stillUrl={photo.thumbUrl}
+                          motionUrl={photo.motionUrl}
                           alt={photo.caption ?? m.trip.photoAlt(day.dayNumber)}
-                          loading="lazy"
-                          className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                          liveLabel={m.lightbox.live}
+                          className="aspect-[4/3] w-full transition-transform duration-300 group-hover:scale-[1.03]"
                         />
                         {(photo.caption || (trip.showAuthors && photo.author)) && (
                           <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-6 text-xs text-white">

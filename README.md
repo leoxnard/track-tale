@@ -21,6 +21,15 @@ notes, stats and weather.
   was taken even if you upload the whole day from the hotel. The metadata is read off the
   original; what gets stored is a 2048 px copy, so a 9 MB export doesn't become a 9 MB
   download for everyone opening the page.
+- **Live Photos** from an iPhone keep their motion. Send the photo, then send the video that
+  came with it, one after the other, and the three seconds are stored behind that still — the
+  bot pairs a short video with the last photo sent that hasn't got one yet, so an ordinary
+  photo sent earlier is never quietly turned into a Live Photo. It works in either order:
+  a video that arrives before its still waits five minutes for one. Anything longer than six
+  seconds is treated as a clip and declined, because the page has nowhere to show one. Send
+  the video the normal compressed way rather than as a file — Telegram re-encodes it to MP4,
+  which every browser plays, whereas the untouched `.MOV` off an iPhone is HEVC and plays only
+  on Apple devices.
 - Send an **edited version** of a photo as a file and it is recognised as the same shot — by
   what the picture looks like, not its name — and swapped in on the day it already lives on,
   keeping its caption and its place. Photos are ordered by capture time everywhere they are
@@ -119,6 +128,13 @@ notes, stats and weather.
   a half-transparent arrow under a 5 px coloured line is simply not there.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
+- A **Live Photo** moves. In the day's grid it plays when the mouse points at it, and on a
+  phone — where there is no pointer at all — when it scrolls into the middle of the screen.
+  Opening one full screen plays it once, and after that press and hold, as on the phone it
+  came from, or tap the **Live** badge. The still stays underneath the whole time, so a photo
+  whose motion is still loading is a photograph rather than an empty tile, and a reader whose
+  system asks for reduced motion gets the still and the badge and nothing that moves on its
+  own.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the
   other international routes in red, national in blue, regional and local paler — from
   [Waymarked Trails](https://cycling.waymarkedtrails.org/), which renders OpenStreetMap's
@@ -249,5 +265,6 @@ unused, but there is no cap on how far the circle spreads — the bot has one ow
 
 `/archive` produces a zip that needs neither network nor TrackTale: the map is
 inline SVG instead of tiles, elevation charts stay scrubbable via a small
-inlined script, photos are local files, and each day is written out as GPX.
+inlined script, photos are local files — a Live Photo's motion travels beside its still
+and plays on hover there too — and each day is written out as GPX.
 Drop the folder on any static host — including your own server — and it works.

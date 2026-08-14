@@ -75,6 +75,7 @@ does I/O and generally does not.
 | `bot-access.server.ts` | allowlist, invites, `requireTrip`/`requireDay`/`requireTripManager` |
 | `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh, weather |
 | `bot-photos.server.ts` | photo + document upload, EXIF, compression, twin detection |
+| `bot-motion.server.ts` | the video half of a Live Photo: pairing it with a still, or parking it until one arrives |
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |
@@ -119,6 +120,12 @@ Messages are **edited in place** rather than re-sent — that is the established
   series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
   of its hour and must never be interpolated; temperature is an instant and must be. Both
   cope with rows cached before those fields were fetched, where the arrays are simply absent.
+- `live-photo.ts` — which still an incoming video is the motion of. Pure, because the rule is
+  a guess and a guess needs tests: Telegram carries the two halves of a Live Photo across as
+  two unrelated updates, with the photo's file name stripped, so pairing is by *order and
+  closeness* — the newest still inside a five-minute window that hasn't already got motion.
+  The comment at the top says why newest rather than oldest; it is the difference between the
+  motion landing on the Live Photo and landing on a plain shot sent four minutes earlier.
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
   same shot, pinning a photo to the route by time, and ordering by capture time.
 - `og.server.ts`, `basemap.server.ts`, `archive.server.ts` — server-rendered SVG for the

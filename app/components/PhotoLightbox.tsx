@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMessages } from "../lib/locale";
 
 /**
@@ -17,6 +17,8 @@ import { useMessages } from "../lib/locale";
 export interface LightboxPhoto {
   url: string;
   thumbUrl: string;
+  /** The three seconds behind a Live Photo, or null for an ordinary one. */
+  motionUrl: string | null;
   caption: string | null;
   author: string | null;
   dayNumber: number;
@@ -30,6 +32,103 @@ interface Props {
   onClose: () => void;
   /** Names are only worth showing when more than one person contributed. */
   showAuthors: boolean;
+}
+
+/** A tap short enough to be a tap rather than the start of a hold. */
+const TAP_MS = 300;
+
+/**
+ * The picture itself, and the motion behind it when there is any.
+ *
+ * A Live Photo plays once as it opens, which is the closest the web gets to the
+ * moment on an iPhone where the picture you just tapped moves before it
+ * settles. After that it is press-and-hold, the gesture anyone with an iPhone
+ * already has in their fingers — and a tap, which plays it through, because on
+ * a desktop "hold the mouse button down" is not a gesture anyone has ever been
+ * taught.
+ *
+ * Its own component so that opening the next photo mounts a fresh one: keyed by
+ * URL, the effect below runs again and the new photo plays itself, which a
+ * shared video element would not do without tracking the change by hand.
+ */
+function LightboxFrame({ photo, alt }: { photo: LightboxPhoto; alt: string }) {
+  const m = useMessages();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const pressedAt = useRef(0);
+  const [playing, setPlaying] = useState(false);
+
+  const start = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = 0;
+    void video.play().then(
+      () => setPlaying(true),
+      () => setPlaying(false),
+    );
+  }, []);
+
+  const stop = useCallback(() => {
+    setPlaying(false);
+    videoRef.current?.pause();
+  }, []);
+
+  // Play once on opening, unless the reader has asked the system for less of
+  // exactly this.
+  useEffect(() => {
+    if (!photo.motionUrl) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    start();
+  }, [photo.motionUrl, start]);
+
+  return (
+    <div
+      className="relative flex max-h-full max-w-full items-center justify-center"
+      onPointerDown={() => {
+        if (!photo.motionUrl) return;
+        pressedAt.current = Date.now();
+        start();
+      }}
+      onPointerUp={() => {
+        // A hold ends when the finger lifts; a tap lets it run to the end.
+        if (photo.motionUrl && Date.now() - pressedAt.current > TAP_MS) stop();
+      }}
+      onPointerLeave={stop}
+    >
+      <img
+        src={photo.url}
+        alt={alt}
+        className="max-h-full max-w-full object-contain transition-opacity duration-200"
+        style={playing ? { opacity: 0 } : undefined}
+      />
+      {photo.motionUrl && (
+        <>
+          <video
+            ref={videoRef}
+            src={photo.motionUrl}
+            muted
+            playsInline
+            preload="auto"
+            onEnded={stop}
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${
+              playing ? "opacity-100" : "opacity-0"
+            }`}
+          />
+          <button
+            type="button"
+            onClick={start}
+            aria-label={m.lightbox.livePlay}
+            title={m.lightbox.liveHint}
+            className={`absolute left-2 top-2 rounded bg-black/50 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wider text-white transition-opacity hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-white ${
+              playing ? "opacity-0" : "opacity-90"
+            }`}
+          >
+            {m.lightbox.live}
+          </button>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function PhotoLightbox({ photos, index, onIndex, onClose, showAuthors }: Props) {
@@ -161,11 +260,10 @@ export function PhotoLightbox({ photos, index, onIndex, onClose, showAuthors }: 
           </button>
         )}
 
-        <img
+        <LightboxFrame
           key={photo.url}
-          src={photo.url}
+          photo={photo}
           alt={photo.caption ?? m.trip.photoAlt(photo.dayNumber)}
-          className="max-h-full max-w-full object-contain"
         />
 
         {photos.length > 1 && (

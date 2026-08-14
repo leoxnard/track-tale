@@ -25,6 +25,8 @@ import { parseFit, parseGpx } from "./gpx";
 import { fromGeoJson, type TrackGeoJson } from "./track";
 import { transitMode } from "./transport";
 import { imageDocument } from "./photo-file";
+import { motionFormat } from "./live-photo";
+import { saveMotion } from "./bot-motion.server";
 import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
@@ -1218,6 +1220,23 @@ export function createBot(): Bot {
     const isFit = name.endsWith(".fit");
 
     if (!isGpx && !isFit) {
+      // A Live Photo's MOV, sent as a file so it keeps its quality. Ahead of
+      // the image check because a video is not a picture and would otherwise
+      // fall through to "I can only read tracks and photos".
+      if (motionFormat(doc.mime_type ?? null, doc.file_name ?? null)) {
+        const trip = await requireTrip(ctx);
+        if (!trip) return;
+        await saveMotion(ctx, bot, trip, {
+          fileId: doc.file_id,
+          // A document carries no duration; `looksLikeMotion` falls back to size.
+          durationS: null,
+          fileName: doc.file_name ?? null,
+          mimeType: doc.mime_type ?? null,
+          fileSize: doc.file_size ?? null,
+        });
+        return;
+      }
+
       const image = imageDocument(doc.mime_type, name);
       if (image === "unreadable") {
         await ctx.reply(
@@ -1327,6 +1346,22 @@ export function createBot(): Bot {
     } catch (err) {
       await ctx.reply(`⚠️ Photo upload failed: ${err instanceof Error ? err.message : "unknown error"}`);
     }
+  });
+
+  // A video is only ever the motion behind a photo here — see bot-motion.
+  // `animation` is the same thing arriving soundless, which is what a Live
+  // Photo's MOV often becomes once Telegram has re-encoded it.
+  bot.on(["message:video", "message:animation"], async (ctx) => {
+    const clip = ctx.message.video ?? ctx.message.animation!;
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    await saveMotion(ctx, bot, trip, {
+      fileId: clip.file_id,
+      durationS: clip.duration ?? null,
+      fileName: clip.file_name ?? null,
+      mimeType: clip.mime_type ?? "video/mp4",
+      fileSize: clip.file_size ?? null,
+    });
   });
 
   bot.on("message:text", async (ctx) => {

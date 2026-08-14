@@ -22,6 +22,7 @@ import {
   undoKeyboard,
   TELEGRAM_DOWNLOAD_LIMIT,
 } from "./bot-chrome.server";
+import { attachParkedMotion } from "./bot-motion.server";
 import { replaceDayView } from "./manage.server";
 import { requireDay, requireTrip } from "./bot-access.server";
 
@@ -259,6 +260,11 @@ export async function savePhoto(
     .single();
   if (error) throw error;
 
+  // The motion half of a Live Photo can arrive first — Telegram delivers an
+  // album in the order its items were picked. If one is waiting, this is the
+  // still it was waiting for.
+  const live = await attachParkedMotion(ctx.chat!.id, trip.id, inserted.id).catch(() => false);
+
   const where =
     located?.source === "exif"
       ? " and pinned where it was taken"
@@ -266,7 +272,7 @@ export async function savePhoto(
         ? " and pinned on the map"
         : "";
   const sent = await ctx
-    .reply(`📸 Added to day ${day.day_number}${where}.`, {
+    .reply(`${live ? "🎬" : "📸"} Added to day ${day.day_number}${where}${live ? ", with its motion" : ""}.`, {
       reply_markup: undoKeyboard("media", inserted.id, day.day_number),
     })
     .catch(() => undefined);

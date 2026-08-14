@@ -108,6 +108,11 @@ create table if not exists media (
   -- Difference hash of the picture, so an edited re-upload can be recognised
   -- as the same shot and swapped in rather than added alongside.
   phash text,
+  -- The motion half of an iPhone Live Photo: the three seconds behind the
+  -- still, stored beside it and played on the page. NULL for an ordinary photo,
+  -- which is nearly all of them.
+  motion_path text,
+  motion_ms integer,
   author_telegram_id bigint,
   author_name text,
   created_at timestamptz not null default now()
@@ -171,6 +176,19 @@ create table if not exists pending_replacements (
   created_at timestamptz not null default now()
 );
 
+-- The motion half of a Live Photo that arrived before its still. Telegram
+-- delivers an album's items in the order they were picked, which on iOS can put
+-- the video first, so it waits here — already uploaded — until the next photo
+-- claims it. One per chat: two Live Photos in flight at once is a burst, and a
+-- burst arrives still-then-motion, which never lands here at all.
+create table if not exists pending_motions (
+  chat_id bigint primary key references chats(chat_id) on delete cascade,
+  trip_id uuid not null references trips(id) on delete cascade,
+  storage_path text not null,
+  duration_ms integer,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists track_segments_day_idx on track_segments(day_id);
 create index if not exists days_trip_idx on days(trip_id);
 create index if not exists media_day_idx on media(day_id);
@@ -194,6 +212,7 @@ alter table comments enable row level security;
 alter table bot_actions enable row level security;
 alter table weather_cache enable row level security;
 alter table pending_replacements enable row level security;
+alter table pending_motions enable row level security;
 
 grant usage on schema public to service_role;
 grant all privileges on all tables in schema public to service_role;
@@ -229,6 +248,10 @@ update media set location_source = 'track' where matched_lat is not null and loc
 -- Recognises an edited re-upload as the same photograph. Filled in lazily, so
 -- existing rows need no backfill here.
 alter table media add column if not exists phash text;
+-- The three seconds behind an iPhone Live Photo. Existing rows are stills and
+-- stay stills, so there is nothing to backfill.
+alter table media add column if not exists motion_path text;
+alter table media add column if not exists motion_ms integer;
 -- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
 alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;

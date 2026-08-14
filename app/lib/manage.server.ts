@@ -398,10 +398,10 @@ export async function clearDay(trip: DbTrip, dayNumber: number): Promise<DayTall
   // left to name it.
   const { data: media } = await supabase()
     .from("media")
-    .select("id, storage_path, thumb_path")
+    .select("id, storage_path, thumb_path, motion_path")
     .eq("day_id", day.id);
   const paths = (media ?? []).flatMap((m) =>
-    [m.storage_path, m.thumb_path].filter(Boolean),
+    [m.storage_path, m.thumb_path, m.motion_path].filter(Boolean),
   ) as string[];
   if (paths.length > 0) await supabase().storage.from("photos").remove(paths);
 

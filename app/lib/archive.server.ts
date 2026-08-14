@@ -41,7 +41,15 @@ interface ArchiveDay {
   movingS: number;
   segments: TrackPoint[][];
   profile: ProfilePoint[];
-  photos: { file: string; caption: string | null; author: string | null; lat: number | null; lng: number | null }[];
+  photos: {
+    file: string;
+    /** The three seconds behind a Live Photo, bundled beside the still. */
+    motion: string | null;
+    caption: string | null;
+    author: string | null;
+    lat: number | null;
+    lng: number | null;
+  }[];
   notes: { text: string; author: string | null }[];
   comments: { author: string; text: string; at: string }[];
   weather: DayWeather | null;
@@ -92,6 +100,12 @@ figcaption { display: flex; justify-content: space-between; font-size: .8rem; co
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-top: 14px; }
 .grid a { position: relative; display: block; border-radius: 8px; overflow: hidden; background: ${TRAIL}; }
 .grid img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+.grid video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  opacity: 0; transition: opacity .2s; pointer-events: none; }
+.has-live:hover video { opacity: 1; }
+.live { position: absolute; top: 6px; left: 6px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(0,0,0,.45); color: #fff; font-size: .6rem; letter-spacing: .08em; }
+.has-live:hover .live { opacity: 0; }
 .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 8px 6px; font-size: .75rem;
   color: #fff; background: linear-gradient(to top, rgba(0,0,0,.72), transparent); }
 .comments { margin-top: 18px; }
@@ -289,7 +303,19 @@ function buildHtml(opts: {
           ? `<div class="grid">${day.photos
               .map((p) => {
                 const label = [p.caption, opts.showAuthors ? p.author : null].filter(Boolean).join(" — ");
-                return `<a href="${p.file}"><img src="${p.file}" alt="${esc(p.caption ?? `Day ${day.dayNumber} photo`)}" loading="lazy">${
+                // A Live Photo plays where it sits, on hover, much as it does on
+                // the trip page. The hover has to be read off the tile rather
+                // than the video, which is behind `pointer-events: none` so it
+                // never swallows the click that opens the picture.
+                const live = p.motion
+                  ? `<video src="${p.motion}" muted loop playsinline preload="none"></video>` +
+                    `<span class="live">LIVE</span>`
+                  : "";
+                const plays = p.motion
+                  ? ` onmouseenter="this.querySelector('video').play()"` +
+                    ` onmouseleave="const v=this.querySelector('video');v.pause();v.currentTime=0"`
+                  : "";
+                return `<a href="${p.file}" class="${p.motion ? "has-live" : ""}"${plays}><img src="${p.file}" alt="${esc(p.caption ?? `Day ${day.dayNumber} photo`)}" loading="lazy">${live}${
                   label ? `<span class="cap">${esc(label)}</span>` : ""
                 }</a>`;
               })
@@ -376,7 +402,7 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
     db
       .from("days")
       .select(
-        "day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, caption, author_name, matched_lat, matched_lng, telegram_date, taken_at, created_at), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
+        "day_number, date, color, track_segments(geojson, distance_m, moving_s, elevation_up, sport, started_at), media(storage_path, motion_path, caption, author_name, matched_lat, matched_lng, telegram_date, taken_at, created_at), notes(text, created_at, author_name), comments(author_name, text, created_at), weather_cache(data)",
       )
       .eq("trip_id", tripId)
       .order("day_number"),
@@ -406,9 +432,24 @@ export async function buildArchive(tripId: string, appOrigin: string): Promise<A
       const file = `photos/day-${d.day_number}-${String(i + 1).padStart(2, "0")}${ext}`;
       const { data: blob } = await db.storage.from("photos").download(m.storage_path);
       if (blob) files[file] = new Uint8Array(await blob.arrayBuffer());
+
+      // A Live Photo's motion travels with its still, under the same name, so
+      // the two stay together however the folder is later sorted or moved.
+      let motion: string | null = null;
+      if (m.motion_path) {
+        const motionExt = /\.[a-z0-9]+$/i.exec(m.motion_path)?.[0] ?? ".mp4";
+        const motionFile = `${file.replace(/\.[a-z0-9]+$/i, "")}-live${motionExt}`;
+        const { data: motionBlob } = await db.storage.from("photos").download(m.motion_path);
+        if (motionBlob) {
+          files[motionFile] = new Uint8Array(await motionBlob.arrayBuffer());
+          motion = motionFile;
+        }
+      }
+
       if (m.author_name) contributors.add(m.author_name);
       photos.push({
         file,
+        motion,
         caption: m.caption,
         author: m.author_name,
         lat: m.matched_lat,

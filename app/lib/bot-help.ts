@@ -45,6 +45,8 @@ _Most of these open a keyboard — /trip is the hub, and every screen carries th
   used, so photos uploaded in the evening still land where you took them
 • Send an edited version as a file later and I recognise the shot: it replaces
   the one already on the trip, on its own day, no /replace needed
+• Live Photo? Send the still, then the video it came with, and the page plays
+  the motion behind the picture — hover, scroll past it, or hold it open
 • Any other text → journal entry
 
 *Oops*

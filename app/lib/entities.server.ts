@@ -38,10 +38,12 @@ export async function deleteEntity(entityType: EntityType, entityId: string): Pr
   if (entityType === "media") {
     const { data } = await supabase()
       .from("media")
-      .select("storage_path, thumb_path")
+      .select("storage_path, thumb_path, motion_path")
       .eq("id", entityId)
       .maybeSingle();
-    const paths = [data?.storage_path, data?.thumb_path].filter(Boolean) as string[];
+    const paths = [data?.storage_path, data?.thumb_path, data?.motion_path].filter(
+      Boolean,
+    ) as string[];
     if (paths.length > 0) await supabase().storage.from("photos").remove(paths);
   }
 

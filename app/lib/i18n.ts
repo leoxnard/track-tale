@@ -162,6 +162,9 @@ const en = {
     position: (n: number, total: number) => `${n} of ${total}`,
     hint: "Arrow keys to browse, Esc to close",
     openOriginal: "Open the original",
+    live: "Live",
+    livePlay: "Play the live photo",
+    liveHint: "Hold to play",
   },
   guestbook: {
     yourName: "Your name",
@@ -344,6 +347,9 @@ const de: Messages = {
     position: (n: number, total: number) => `${n} von ${total}`,
     hint: "Pfeiltasten zum Blättern, Esc zum Schließen",
     openOriginal: "Original öffnen",
+    live: "Live",
+    livePlay: "Live-Foto abspielen",
+    liveHint: "Gedrückt halten zum Abspielen",
   },
   guestbook: {
     yourName: "Dein Name",
