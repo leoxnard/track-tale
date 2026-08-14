@@ -46,7 +46,8 @@ notes, stats and weather.
   than its own odometer — a day that rides 95 km to advance 86 km of route sits in those
   86 km instead of overhanging its neighbours. What was ridden is in the day's own stats.
 - Every day carries the **wind it was ridden into**, as a **wind rose** — the figure a weather
-  station has drawn for a century, so it reads on sight — with a little bicycle in the middle.
+  station has drawn for a century, so it reads on sight — with an arrow in the middle marking
+  the direction of travel.
   Each petal is a direction the wind blew *from*; how far it reaches is how many kilometres
   were ridden under it, with the rings labelled so a petal is a number and not just a shape;
   and each petal is banded by speed class from the hub outwards, on Beaufort's boundaries,
