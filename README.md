@@ -126,8 +126,15 @@ notes, stats and weather.
   count. The two are handled differently on purpose: a temperature is an instant and may be
   interpolated between hours, while rain is an accumulation over the hour *before* its stamp,
   so a moment falls inside one bucket and gets the share of it the rider spent there. A whole
-  day's rain becomes one number — how much fell on them — with the wet kilometres in the
-  tooltip. The little weather icon is still the day's sky, not the ride's.
+  day's rain becomes one number — how much fell on them — and that number opens a panel with
+  the kilometres ridden wet against dry, the heaviest hour, and what the whole day dropped by
+  comparison: a day that saw 14 mm and gave the rider 2 of them is a different day from one
+  that gave them all 14. The temperature opens the same way, onto the curve it followed over
+  the riding hours, marked at its coldest and warmest. **Only one panel is ever open** — these
+  sit inside a day's block, and two at once push the next day's photographs down the screen to
+  explain the last one's weather. Neither chart puts a clock on anything: the hourly stamps
+  are absolute and the trip's timezone is not on the page, so they are shaped by the ride and
+  labelled by value. The little weather icon is still the day's sky, not the ride's.
 - **A day with no route still gets its weather, from where the photos were taken.** A rest
   day, a day the tracker stayed off, a day somebody only sent pictures — none of them have a
   line for the weather to follow, and they used to show no temperature at all. A photo out of

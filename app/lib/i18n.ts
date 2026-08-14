@@ -268,7 +268,17 @@ const en = {
   riding: {
     /** Wraps the weather word so the line says these are the hours ridden. */
     whileRiding: (weather: string) => `${weather} — while riding`,
-    wet: (km: string) => `${km} km of it in the rain`,
+    mean: (c: number) => `${c}°C on average`,
+    /** The x-axis is the ride, not a clock: the trip's timezone isn't on the page. */
+    overHours: (n: number) => `across ${n} ${n === 1 ? "hour" : "hours"} of riding`,
+    tempAria: (lo: number, hi: number) => `Temperature while riding, ${lo} to ${hi}°C`,
+    tempChip: (c: number) => `${c}°C on average while riding — tap for the day's curve`,
+    rainChip: "Rain while riding — tap for the detail",
+    onTheRider: "fell on the rider",
+    dayTotal: (mm: string) => `${mm} mm fell that day in all`,
+    wetKm: (km: string) => `${km} km in the rain`,
+    dryKm: (km: string) => `${km} km dry`,
+    heaviest: (mmh: string) => `Heaviest hour: ${mmh} mm/h`,
   },
   weather: {
     clear: "Clear",
@@ -449,7 +459,16 @@ const de: Messages = {
   },
   riding: {
     whileRiding: (weather: string) => `${weather} — während der Fahrt`,
-    wet: (km: string) => `davon ${km} km im Regen`,
+    mean: (c: number) => `im Schnitt ${c}°C`,
+    overHours: (n: number) => `über ${n} ${n === 1 ? "Fahrstunde" : "Fahrstunden"}`,
+    tempAria: (lo: number, hi: number) => `Temperatur unterwegs, ${lo} bis ${hi}°C`,
+    tempChip: (c: number) => `im Schnitt ${c}°C unterwegs — für den Verlauf antippen`,
+    rainChip: "Regen unterwegs — für Details antippen",
+    onTheRider: "sind auf dich gefallen",
+    dayTotal: (mm: string) => `am ganzen Tag fielen ${mm} mm`,
+    wetKm: (km: string) => `${km} km im Regen`,
+    dryKm: (km: string) => `${km} km trocken`,
+    heaviest: (mmh: string) => `Stärkste Stunde: ${mmh} mm/h`,
   },
   weather: {
     clear: "Klar",

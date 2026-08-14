@@ -137,6 +137,62 @@ describe("analyseRidingWeather", () => {
     expect(analyseRidingWeather([{ points: ride(10, 2), sites: sitesOf(old) }])).toBeNull();
   });
 
+  it("gives the ride hour by hour, only the hours it was out in", () => {
+    const rain = Array(24).fill(0);
+    rain[12] = 6;
+    const temp = Array.from({ length: 24 }, (_, i) => i);
+    const a = analyseRidingWeather([
+      { points: ride(10, 3), sites: sitesOf(day(rain, temp)) },
+    ])!;
+    // 10:00 to 13:00 falls in the buckets stamped 11, 12 and 13.
+    expect(a.hours.map((h) => new Date(h.at).getUTCHours())).toEqual([11, 12, 13]);
+    expect(a.hours.every((h) => h.seconds > 0)).toBe(true);
+    // The rain sits in the hour it fell in, not spread over the ride.
+    expect(a.hours.find((h) => new Date(h.at).getUTCHours() === 12)!.rainMm).toBeCloseTo(6, 1);
+    expect(a.hours.find((h) => new Date(h.at).getUTCHours() === 11)!.rainMm).toBe(0);
+    // Temperatures rise through the morning, as the series says.
+    const temps = a.hours.map((h) => h.tempC!);
+    expect(temps[0]).toBeLessThan(temps[2]);
+  });
+
+  it("means the temperature over time, not over the two extremes", () => {
+    // Three hours at 10°C and one at 20°C is 12.5, not 15.
+    const temp = Array(24).fill(10);
+    temp[13] = 20;
+    temp[14] = 20;
+    const a = analyseRidingWeather([
+      { points: ride(10, 4), sites: sitesOf(day(Array(24).fill(0), temp)) },
+    ])!;
+    expect(a.tempMeanC).toBeGreaterThan(a.tempMinC);
+    expect(a.tempMeanC).toBeLessThan((a.tempMinC + a.tempMaxC) / 2 + 2);
+    expect(a.tempMeanC).toBeLessThan(a.tempMaxC);
+  });
+
+  it("leaves a hole in the hours where a day was interrupted", () => {
+    // Ride 08–10, then nothing until 14, then ride to 15.
+    const points = [...ride(8, 2), ...ride(14, 1)];
+    const a = analyseRidingWeather([{ points, sites: sitesOf(day(Array(24).fill(0))) }])!;
+    const hours = a.hours.map((h) => new Date(h.at).getUTCHours());
+    expect(hours).toContain(9);
+    expect(hours).toContain(15);
+    expect(hours).not.toContain(12);
+  });
+
+  it("reads a track whose clock runs backwards the same as one that does not", () => {
+    // A reversed route is the same ride written the other way up; it must not
+    // cost the day its rain, which is what subtracting the stamps in order did.
+    const rain = Array(24).fill(0);
+    rain[12] = 4;
+    const forwards = ride(10, 3);
+    const backwards = [...forwards].reverse();
+    const a = analyseRidingWeather([{ points: forwards, sites: sitesOf(day(rain)) }])!;
+    const b = analyseRidingWeather([{ points: backwards, sites: sitesOf(day(rain)) }])!;
+    expect(b).not.toBeNull();
+    expect(b.rainMm).toBeCloseTo(a.rainMm, 5);
+    expect(b.seconds).toBeCloseTo(a.seconds, 5);
+    expect(b.hours.length).toBe(a.hours.length);
+  });
+
   it("has nothing to say without a clock or without a series", () => {
     const timeless = ride(10, 2).map(({ lat, lng }) => ({ lat, lng }));
     expect(analyseRidingWeather([{ points: timeless, sites: sitesOf(day(Array(24).fill(0))) }])).toBeNull();

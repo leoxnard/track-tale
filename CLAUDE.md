@@ -120,7 +120,10 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `riding-weather.ts` — rain and temperature over the *riding hours*, off the same hourly
   series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
   of its hour and must never be interpolated; temperature is an instant and must be. Both
-  cope with rows cached before those fields were fetched, where the arrays are simply absent.
+  cope with rows cached before those fields were fetched, where the arrays are simply absent,
+  and with a track whose clock runs backwards. `hours` is the ride hour by hour, which is what
+  the temperature panel draws; `DayWeather.tsx` holds those panels and their chips, and
+  `t.$slug.tsx` keeps the one-panel-at-a-time state for the whole page.
 - `photo-sites.ts` — where to ask about the weather on a day with no route: the places its
   photos were taken, one per weather grid cell. Deliberately *not* `sampleSites` on the photo
   positions — that measures along the sequence and would answer for ground between two shots

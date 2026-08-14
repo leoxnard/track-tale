@@ -41,6 +41,12 @@ import { TourProfile } from "../components/TourProfile";
 import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
 import { LivePhoto } from "../components/LivePhoto";
 import { WindChip, WindRose } from "../components/WindRose";
+import {
+  RainChip,
+  RainPanel,
+  TemperatureChip,
+  TemperaturePanel,
+} from "../components/DayWeather";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
 import {
@@ -54,6 +60,9 @@ import {
 import { BADGE_PX, drawVehicleBadge } from "../lib/vehicle-canvas";
 import { useLocale, useMessages } from "../lib/locale";
 import "maplibre-gl/dist/maplibre-gl.css";
+
+/** The three things a day's weather line can unfold. */
+type PanelKind = "temp" | "rain" | "wind";
 
 export interface ViewerPhoto {
   url: string;
@@ -1107,14 +1116,21 @@ export function TripView({
   // Off until asked for, like the route network: it is an animation over the
   // whole trip, and nobody should pay for it by opening the page.
   const [showWind, setShowWind] = useState(false);
-  // Which days have their wind rose unfolded. Held here rather than in each
-  // day, because a day is rendered inside a map() and cannot hold state of its
-  // own; several may be open at once, which is what makes two days comparable.
-  const [openWind, setOpenWind] = useState<number[]>([]);
-  const toggleWind = useCallback((dayNumber: number) => {
-    setOpenWind((open) =>
-      open.includes(dayNumber) ? open.filter((n) => n !== dayNumber) : [...open, dayNumber],
-    );
+  /**
+   * Which single panel is unfolded, anywhere on the page — a day and which of
+   * its three it is.
+   *
+   * One at a time, deliberately: these sit inside a day's own block, so two open
+   * at once push the second day's photographs down the screen to explain the
+   * first day's weather. Opening one closes whatever was open, which also means
+   * a reader never has to tidy up after themselves.
+   *
+   * Held here rather than in each day because a day is rendered inside a map()
+   * and cannot hold state of its own.
+   */
+  const [openPanel, setOpenPanel] = useState<{ day: number; kind: PanelKind } | null>(null);
+  const togglePanel = useCallback((day: number, kind: PanelKind) => {
+    setOpenPanel((open) => (open?.day === day && open.kind === kind ? null : { day, kind }));
   }, []);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -1438,6 +1454,12 @@ export function TripView({
             const wi = weatherIcon(w?.weatherCode ?? null, locale);
             const wind = dayWind.get(day.dayNumber);
             const riding = dayRiding.get(day.dayNumber);
+            const panel = openPanel?.day === day.dayNumber ? openPanel.kind : null;
+            // Whether there is a drop of rain worth a word, from whichever
+            // source the line is reading.
+            const rainShown = riding
+              ? riding.rainMm >= 0.2
+              : w?.precipitationMm != null && w.precipitationMm > 0.5;
             return (
               <article
                 key={day.dayNumber}
@@ -1466,32 +1488,30 @@ export function TripView({
                       title={riding ? m.riding.whileRiding(wi.label) : wi.label}
                     >
                       {wi.icon}{" "}
-                      {riding && hasTemperature(riding)
-                        ? `${Math.round(riding.tempMinC)}–${Math.round(riding.tempMaxC)}°C`
-                        : `${w?.tempMinC !== null && w?.tempMinC !== undefined ? `${Math.round(w.tempMinC)}–` : ""}${
-                            w?.tempMaxC !== null && w?.tempMaxC !== undefined
-                              ? `${Math.round(w.tempMaxC)}°C`
-                              : ""
-                          }`}
-                      {riding
-                        ? riding.rainMm >= 0.2 && (
-                            <span title={m.riding.wet(km(riding.wetM))}>
-                              {" · 💧 "}
-                              {riding.rainMm.toFixed(1)} mm
-                            </span>
-                          )
-                        : w?.precipitationMm != null &&
-                          w.precipitationMm > 0.5 && <> · 💧 {w.precipitationMm.toFixed(0)} mm</>}
-                      {/* The wind joins the line it belongs on, beside the rain
-                          and the temperature: an arrow, a speed, and the rose a
-                          tap away for anyone who wants it. */}
+                      <TemperatureChip
+                        riding={riding ?? null}
+                        weather={w}
+                        open={panel === "temp"}
+                        onToggle={() => togglePanel(day.dayNumber, "temp")}
+                      />
+                      {rainShown && (
+                        <>
+                          {" · "}
+                          <RainChip
+                            riding={riding ?? null}
+                            weather={w}
+                            open={panel === "rain"}
+                            onToggle={() => togglePanel(day.dayNumber, "rain")}
+                          />
+                        </>
+                      )}
                       {wind && (
                         <>
                           {" · "}
                           <WindChip
                             wind={wind}
-                            open={openWind.includes(day.dayNumber)}
-                            onToggle={() => toggleWind(day.dayNumber)}
+                            open={panel === "wind"}
+                            onToggle={() => togglePanel(day.dayNumber, "wind")}
                           />
                         </>
                       )}
@@ -1521,8 +1541,10 @@ export function TripView({
                   </p>
                 )}
 
-                {wind && openWind.includes(day.dayNumber) && (
-                  <WindRose wind={wind} color={day.color} />
+                {panel === "wind" && wind && <WindRose wind={wind} color={day.color} />}
+                {panel === "temp" && riding && <TemperaturePanel riding={riding} />}
+                {panel === "rain" && riding && (
+                  <RainPanel riding={riding} weather={w} distanceM={day.distanceM} />
                 )}
 
                 {day.pieces.some((piece) => piece.profile.length > 1) && (

@@ -32,6 +32,20 @@ const GAP_MS = 20 * 60 * 1000;
 /** Below this hourly rate nothing is falling that anyone would call rain. */
 const RAINING_MM_H = 0.15;
 
+/** One hour of the ride, as the hourly series had it. */
+export interface RidingHour {
+  /** The hour's stamp, epoch milliseconds. */
+  at: number;
+  /** Mean temperature over the minutes ridden inside this hour, °C. */
+  tempC: number | null;
+  /** Millimetres that fell on the rider during those minutes. */
+  rainMm: number;
+  /** Rate while it was falling, mm per hour — what a heavy hour is heavy at. */
+  rateMmH: number;
+  /** Seconds of riding inside this hour. */
+  seconds: number;
+}
+
 export interface RidingWeather {
   /** Millimetres that fell while riding. */
   rainMm: number;
@@ -40,10 +54,19 @@ export interface RidingWeather {
   /** Coldest and warmest it was out there, °C. */
   tempMinC: number;
   tempMaxC: number;
+  /** Time-weighted mean, which is not the middle of min and max. */
+  tempMeanC: number;
   /** Seconds of riding these figures cover. */
   seconds: number;
   /** How much of the ridden distance had both a clock and an hourly series. */
   coverage: number;
+  /**
+   * The ride hour by hour, in order — enough to draw the shape of a morning
+   * that started cold, and no more. Only hours with riding in them appear, so a
+   * day split by a train is two runs of hours with a hole between them, which
+   * is the truth about that day.
+   */
+  hours: RidingHour[];
 }
 
 /**
@@ -66,6 +89,14 @@ export function rainAt(hourly: HourlyWeather, timeMs: number): number | null {
   if (timeMs < t[0] - step || timeMs > t[t.length - 1] + step) return null;
   const i = t.findIndex((stamp) => stamp >= timeMs);
   return hourly.precipMm[i === -1 ? t.length - 1 : i] ?? null;
+}
+
+/** Which hour of the series a moment belongs to — the same bucket `rainAt` uses. */
+function hourStamp(hourly: HourlyWeather, timeMs: number): number | null {
+  const t = hourly.time;
+  if (t.length === 0) return null;
+  const i = t.findIndex((stamp) => stamp >= timeMs);
+  return t[i === -1 ? t.length - 1 : i] ?? null;
 }
 
 /** Temperature at one moment, interpolated between the hours either side. */
@@ -101,7 +132,12 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
   let totalM = 0;
   let tempMinC = Infinity;
   let tempMaxC = -Infinity;
+  let tempSum = 0;
+  let tempSeconds = 0;
   let sawTemp = false;
+  // Keyed by the hour's own stamp, so the two halves of an interrupted day land
+  // in the hours they happened in rather than in a row of their own.
+  const byHour = new Map<number, { tempSum: number; seconds: number; rainMm: number; rateMmH: number }>();
 
   for (const ride of rides) {
     const pts = ride.points;
@@ -111,17 +147,24 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
       const d = haversineM(a, b);
       totalM += d;
       if (ride.sites.length === 0 || a.time === undefined || b.time === undefined) continue;
-      const dt = b.time - a.time;
-      if (dt <= 0 || dt > GAP_MS) continue;
+      // How long the rider spent between two adjacent points does not depend on
+      // which order the file lists them in. A track whose clock runs backwards —
+      // a reversed route, a merge sorted the wrong way — used to drop out of
+      // here entirely and take the day's whole rain and temperature with it,
+      // while the wind rose, which never subtracts two stamps, carried on
+      // reporting the same day quite happily.
+      const dt = Math.abs(b.time - a.time);
+      if (dt === 0 || dt > GAP_MS) continue;
 
       const hourly = nearestSite(ride.sites, a).hourly;
-      const middle = a.time + dt / 2;
+      const middle = (a.time + b.time) / 2;
 
       const rate = rainAt(hourly, middle);
+      const fell = rate === null ? 0 : rate * (dt / 3600000);
       if (rate !== null) {
         // Only the slice of the hour spent here, so a shower is shared out
         // between the riders' minutes in it rather than counted whole.
-        rainMm += rate * (dt / 3600000);
+        rainMm += fell;
         if (rate >= RAINING_MM_H) wetM += d;
       }
 
@@ -129,12 +172,23 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
       if (temp !== null) {
         tempMinC = Math.min(tempMinC, temp);
         tempMaxC = Math.max(tempMaxC, temp);
+        tempSum += temp * (dt / 1000);
+        tempSeconds += dt / 1000;
         sawTemp = true;
       }
 
       if (rate !== null || temp !== null) {
         seconds += dt / 1000;
         sampledM += d;
+        const stamp = hourStamp(hourly, middle);
+        if (stamp !== null) {
+          const bucket = byHour.get(stamp) ?? { tempSum: 0, seconds: 0, rainMm: 0, rateMmH: 0 };
+          bucket.seconds += dt / 1000;
+          if (temp !== null) bucket.tempSum += temp * (dt / 1000);
+          bucket.rainMm += fell;
+          bucket.rateMmH = Math.max(bucket.rateMmH, rate ?? 0);
+          byHour.set(stamp, bucket);
+        }
       }
     }
   }
@@ -145,8 +199,18 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
     wetM,
     tempMinC: sawTemp ? tempMinC : NaN,
     tempMaxC: sawTemp ? tempMaxC : NaN,
+    tempMeanC: tempSeconds > 0 ? tempSum / tempSeconds : NaN,
     seconds,
     coverage: totalM > 0 ? sampledM / totalM : 0,
+    hours: [...byHour.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([at, bucket]) => ({
+        at,
+        tempC: bucket.seconds > 0 && bucket.tempSum !== 0 ? bucket.tempSum / bucket.seconds : null,
+        rainMm: bucket.rainMm,
+        rateMmH: bucket.rateMmH,
+        seconds: bucket.seconds,
+      })),
   };
 }
 
