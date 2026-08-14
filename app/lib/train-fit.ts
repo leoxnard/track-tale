@@ -101,6 +101,59 @@ export function visibleGap(from: number, to: number, viewFrom: number, viewTo: n
   return Math.max(0, Math.min(to, viewTo) - Math.max(from, viewFrom));
 }
 
+/** Air between the train and the dashes either side of it. */
+export const DASH_CLEARANCE_PX = 5;
+
+export interface Fitted {
+  /** Carriages to draw, or null when nothing fits and the gap is only dashed. */
+  carriages: number | null;
+  /** Where the vehicle hangs, in chart units; null when there is nowhere. */
+  centre: number | null;
+  /** What it stands on, clearance included, in chart units. */
+  occupied: number;
+}
+
+/**
+ * Everything about a hop that depends on the zoom, in one place.
+ *
+ * This lives here rather than in the chart because it is where the bug was, and
+ * because it is the one calculation in the chart that mixes two coordinate
+ * systems: the gap arrives in the SVG's own stretched units, every size a
+ * vehicle has is in CSS pixels, and the answer has to go back into stretched
+ * units to be positioned. `unitsPerPx` is the exchange rate, and getting it the
+ * wrong way up draws a train that looks right on a 960 px screen and nowhere
+ * else — hence a pure function with the arithmetic pinned by tests.
+ *
+ * `pulls` is what separates a train, which is as long as its gap has room for,
+ * from a ferry or a bus, which is one shape that either fits or does not.
+ */
+export function fitVehicle(
+  fromX: number,
+  toX: number,
+  viewFrom: number,
+  viewTo: number,
+  unitsPerPx: number,
+  pulls: boolean,
+): Fitted {
+  const nothing: Fitted = { carriages: null, centre: null, occupied: 0 };
+  // No measurement yet — on the server, and on the first paint before the
+  // resize observer has reported. Dashes only; a guessed width draws a train
+  // too long for its gap on every chart narrower than the viewBox.
+  if (!(unitsPerPx > 0)) return nothing;
+
+  // The room is the part of the gap that is on screen, not the whole gap:
+  // zoomed into one end of a long crossing, the rest of that gap is off the
+  // side of the chart and cannot hold anything.
+  const gapPx = visibleGap(fromX, toX, viewFrom, viewTo) / unitsPerPx;
+  const carriages = pulls ? carriagesFor(gapPx) : gapPx - 2 * TRAIN_PAD_PX >= VEHICLE_PX ? 0 : null;
+  if (carriages === null) return nothing;
+
+  const widthPx = pulls ? trainWidth(carriages) : VEHICLE_PX;
+  const occupied = (widthPx + 2 * DASH_CLEARANCE_PX) * unitsPerPx;
+  const centre = trainCentre(fromX, toX, viewFrom, viewTo, occupied);
+  return centre === null ? nothing : { carriages, centre, occupied };
+}
+
 /**
  * The stretches of a gap the train does not stand on, as `[from, to]` pairs.
  *

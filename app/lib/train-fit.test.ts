@@ -7,6 +7,7 @@ import {
   TRAIN_PAD_PX,
   carriagesFor,
   dashRuns,
+  fitVehicle,
   trainCentre,
   trainWidth,
   visibleGap,
@@ -154,5 +155,82 @@ describe("trainCentre", () => {
     expect(trainCentre(-500, -20, 0, 960, 60)).toBeNull();
     expect(trainCentre(1200, 3000, 0, 960, 60)).toBeNull();
     expect(trainCentre(400, 400, 0, 960, 60)).toBeNull();
+  });
+});
+
+describe("fitVehicle", () => {
+  // The tour profile's own numbers: a 960-unit viewBox stretched across a
+  // phone-ish 480 px of screen, so one CSS pixel is two viewBox units.
+  const W = 960;
+  const unitsPerPx = W / 480;
+
+  /** Where a hop's two ends land in viewBox units for a given zoom window. */
+  const at = (metres: number, from: number, to: number) => ((metres - from) / (to - from)) * W;
+
+  /** A 200 km train crossing in the middle of a 1000 km tour. */
+  const hop = (from: number, to: number) =>
+    fitVehicle(at(300_000, from, to), at(500_000, from, to), 0, W, unitsPerPx, true);
+
+  it("draws the train with the whole tour on screen", () => {
+    const { carriages, centre } = hop(0, 1_000_000);
+    expect(carriages).not.toBeNull();
+    expect(centre).toBeCloseTo(W * 0.4, 6); // the middle of the crossing
+  });
+
+  it("still draws it zoomed past the point where the crossing's middle is off screen", () => {
+    // The reported bug: a window over the first tenth of the crossing. Its
+    // midpoint is miles off to the right, and the train used to vanish.
+    const { carriages, centre } = hop(300_000, 320_000);
+    expect(carriages).not.toBeNull();
+    expect(centre).not.toBeNull();
+    expect(centre!).toBeGreaterThanOrEqual(0);
+    expect(centre!).toBeLessThanOrEqual(W);
+  });
+
+  it("still draws it zoomed into the far end of the crossing", () => {
+    const { carriages, centre } = hop(480_000, 500_000);
+    expect(carriages).not.toBeNull();
+    expect(centre!).toBeGreaterThanOrEqual(0);
+    expect(centre!).toBeLessThanOrEqual(W);
+  });
+
+  it("draws it wherever a window sits inside the crossing", () => {
+    for (let start = 300_000; start < 500_000; start += 5_000) {
+      const { carriages, centre } = hop(start, Math.min(start + 20_000, 500_000));
+      expect(carriages, `window from ${start} m`).not.toBeNull();
+      expect(centre, `window from ${start} m`).not.toBeNull();
+    }
+  });
+
+  it("draws nothing for a crossing the window has left behind", () => {
+    // A window over the last stretch of the tour, long past the train.
+    expect(hop(900_000, 1_000_000)).toEqual({ carriages: null, centre: null, occupied: 0 });
+  });
+
+  it("keeps the train inside the chart it was measured against", () => {
+    const { centre, occupied } = hop(300_000, 340_000);
+    expect(centre! - occupied / 2).toBeGreaterThanOrEqual(-0.000001);
+    expect(centre! + occupied / 2).toBeLessThanOrEqual(W + 0.000001);
+  });
+
+  it("sizes the train in screen pixels, not in stretched viewBox units", () => {
+    // The same gap on a narrow screen has room for fewer carriages than on a
+    // wide one, however identical the two look in viewBox coordinates.
+    const narrow = fitVehicle(0, W, 0, W, W / 320, true);
+    const wide = fitVehicle(0, W, 0, W, W / 1200, true);
+    expect(narrow.carriages!).toBeLessThan(wide.carriages!);
+  });
+
+  it("has no train at all until the chart has been measured", () => {
+    expect(fitVehicle(0, W, 0, W, 0, true)).toEqual({
+      carriages: null,
+      centre: null,
+      occupied: 0,
+    });
+  });
+
+  it("gives a ferry one shape or none, never a string of them", () => {
+    expect(fitVehicle(0, W, 0, W, unitsPerPx, false).carriages).toBe(0);
+    expect(fitVehicle(0, 20, 0, W, unitsPerPx, false).carriages).toBeNull();
   });
 });

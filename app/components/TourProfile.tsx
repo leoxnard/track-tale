@@ -5,15 +5,7 @@ import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
 import { TransitVehicle } from "./TransitVehicle";
-import {
-  carriagesFor,
-  dashRuns,
-  trainCentre,
-  trainWidth,
-  visibleGap,
-  TRAIN_PAD_PX,
-  VEHICLE_PX,
-} from "../lib/train-fit";
+import { dashRuns, fitVehicle } from "../lib/train-fit";
 
 const W = 960;
 const H = 200;
@@ -22,14 +14,6 @@ const PAD_BOTTOM = 22;
 const PLOT_H = H - PAD_TOP - PAD_BOTTOM;
 
 const PLAN_COLOR = "#9aa59e";
-
-/** Air between the train and the dashes either side of it. */
-const DASH_CLEARANCE_PX = 5;
-
-/** A ferry or a bus pulls nothing, so it either fits whole or it does not. */
-function singleFits(gapPx: number): number | null {
-  return gapPx - 2 * TRAIN_PAD_PX >= VEHICLE_PX ? 0 : null;
-}
 
 export type { TourDayInput };
 
@@ -166,31 +150,22 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         line: toPath(day.points),
         area: `${toPath(day.points)}L${x(day.endM).toFixed(1)},${H - PAD_BOTTOM}L${x(day.startM).toFixed(1)},${H - PAD_BOTTOM}Z`,
       })),
-      // The train that fills the hole. How much of one depends on the width of
-      // the gap *on screen*, which the viewBox cannot tell us — the chart is
-      // stretched to its box — so it is measured, and the vehicles are placed
-      // in the overlay where nothing squashes them.
-      //
-      // Until that measurement arrives — on the server, and on the first paint
-      // before the observer has reported — there is no train, only the dashes.
-      // Guessing at the width instead drew one sized in viewBox units, which
-      // on any chart narrower than 960 px is a train too long for its gap.
+      // The train that fills the hole. How much of one, and where it stands,
+      // both depend on the chart's real width in pixels, which the viewBox
+      // cannot tell us — the chart is stretched to its box — so it is measured.
+      // The arithmetic is in lib/train-fit; the vehicles themselves are placed
+      // in the overlay below, where nothing squashes them.
       hops: hops.map((hop) => {
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
-        const perPx = chartPx > 0 ? W / chartPx : 0;
-        // The room the train has is the part of the gap that is on screen, not
-        // the whole gap: zoomed into one end of a long crossing, most of that
-        // gap is somewhere off the side of the chart and cannot hold anything.
-        const gapPx = perPx > 0 ? visibleGap(fromX, toX, 0, W) / perPx : 0;
-        const carriages = hop.mode === "train" ? carriagesFor(gapPx) : singleFits(gapPx);
-
-        // What the train stands on, back in the chart's own units, with a
-        // little clearance so the dashes stop short of the buffers.
-        const vehiclePx =
-          carriages === null ? 0 : hop.mode === "train" ? trainWidth(carriages) : VEHICLE_PX;
-        const occupied = vehiclePx === 0 ? 0 : (vehiclePx + 2 * DASH_CLEARANCE_PX) * perPx;
-        const centreX = carriages === null ? null : trainCentre(fromX, toX, 0, W, occupied);
+        const { carriages, centre, occupied } = fitVehicle(
+          fromX,
+          toX,
+          0,
+          W,
+          chartPx > 0 ? W / chartPx : 0,
+          hop.mode === "train",
+        );
 
         // The hop hangs between the heights either side of it, so a dash run
         // takes its ends from the line between them.
@@ -203,10 +178,10 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           ...hop,
           // Where the vehicle is hung, which is the middle of the gap until
           // zooming pushes that middle off screen.
-          trainX: centreX,
-          trainY: centreX === null ? 0 : heightAt(centreX),
+          trainX: centre,
+          trainY: centre === null ? 0 : heightAt(centre),
           carriages,
-          lines: dashRuns(fromX, toX, occupied, centreX ?? (fromX + toX) / 2).map(
+          lines: dashRuns(fromX, toX, occupied, centre ?? (fromX + toX) / 2).map(
             ([a, b]) =>
               `M${a.toFixed(1)},${heightAt(a).toFixed(1)}L${b.toFixed(1)},${heightAt(b).toFixed(1)}`,
           ),
