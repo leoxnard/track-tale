@@ -100,6 +100,15 @@ notes, stats and weather.
   so a moment falls inside one bucket and gets the share of it the rider spent there. A whole
   day's rain becomes one number — how much fell on them — with the wet kilometres in the
   tooltip. The little weather icon is still the day's sky, not the ride's.
+- **A day with no route still gets its weather, from where the photos were taken.** A rest
+  day, a day the tracker stayed off, a day somebody only sent pictures — none of them have a
+  line for the weather to follow, and they used to show no temperature at all. A photo out of
+  a phone carries its own GPS fix, which is all the day card needs: the places the day was
+  photographed become the sites, one per weather grid cell, and the shot nearest the middle
+  of the day supplies the temperature and the icon. Only a camera's own fix counts — a
+  position inferred from a track says nothing the track had not already said. A day that has
+  a ridden track keeps the route's answer, which is the better one. `/refreshweather` fills
+  in older photo-only days the same way.
 - A **Wind** button lays the wind itself over the map: a channel of arrows in lanes either
   side of the route, each pointing the way the wind was blowing *there*, at the hour that
   stretch was ridden, coloured by the same speed classes as the rose's petals and drifting
@@ -200,7 +209,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/archive` | download the trip as a self-contained bundle |
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
-| `/refreshweather` | fill in weather and wind for older days, from the historical archive |
+| `/refreshweather` | fill in weather and wind for older days, from the historical archive — including days with no route, from where their photos were taken |
 | `/compressphotos` | shrink photos stored at full camera resolution |
 | `/regeneratelink` | new family link for this trip |
 | `/invite` | one-time invite code for a friend, valid 7 days |

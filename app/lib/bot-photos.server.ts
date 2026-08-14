@@ -24,6 +24,7 @@ import {
 } from "./bot-chrome.server";
 import { replaceDayView } from "./manage.server";
 import { requireDay, requireTrip } from "./bot-access.server";
+import { cacheDayWeatherFromPhotos } from "./day-weather.server";
 
 /**
  * Everything that happens to a photograph between Telegram and the trip page:
@@ -194,7 +195,7 @@ export async function savePhoto(
   ctx: Context,
   bot: Bot,
   trip: DbTrip,
-  day: { id: string; day_number: number },
+  day: { id: string; day_number: number; date: string },
   incoming: IncomingPhoto,
 ) {
   const id = nanoid(8);
@@ -259,6 +260,12 @@ export async function savePhoto(
     .single();
   if (error) throw error;
 
+  // A day with no ridden track has nothing for the weather to follow, so this
+  // photo's own fix is the only thing that can put a temperature on the day
+  // card. Never worth failing an upload over, and skipped entirely once the
+  // day's pictures are all near somewhere already asked about.
+  if (located?.source === "exif") await cacheDayWeatherFromPhotos(day).catch(() => false);
+
   const where =
     located?.source === "exif"
       ? " and pinned where it was taken"
@@ -307,6 +314,17 @@ export async function swapPendingPhoto(
     }
 
     const pinned = await applyExifLocation(pending.mediaId, exif);
+    // Re-uploading a day's exports as files is how a trackless day gets its
+    // first positions at all — the compressed originals arrived without any.
+    if (pinned) {
+      const { data: day } = await supabase()
+        .from("days")
+        .select("id, date")
+        .eq("trip_id", trip.id)
+        .eq("day_number", pending.dayNumber)
+        .maybeSingle();
+      if (day) await cacheDayWeatherFromPhotos(day).catch(() => false);
+    }
 
     // A share card built from a photo is now built from the old one.
     await renderOgCard(trip.id).catch(() => {});

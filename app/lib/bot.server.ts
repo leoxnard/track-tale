@@ -78,8 +78,8 @@ import {
   savePhotoDocument,
   swapPendingPhoto,
 } from "./bot-photos.server";
+import { cacheDayWeather, cacheDayWeatherFromPhotos } from "./day-weather.server";
 import {
-  cacheDayWeather,
   ingestKomootUrl,
   refreshPlan,
   saveNote,
@@ -1097,7 +1097,13 @@ export function createBot(): Bot {
       const segments = (
         day as { track_segments: { geojson: TrackGeoJson; sport: string | null }[] }
       ).track_segments.filter((s) => transitMode(s.sport) === null);
-      if (segments.length === 0) continue;
+      if (segments.length === 0) {
+        // No route to follow, but a rest day photographed on a phone knows
+        // where it was. Days with neither stay silent rather than counting as
+        // unavailable — there was never anything to fetch for them.
+        if (await cacheDayWeatherFromPhotos(day, { force: true })) filled++;
+        continue;
+      }
       const points = segments.flatMap((s) => fromGeoJson(s.geojson));
       if (await cacheDayWeather(day.id, day.date, points)) filled++;
       else skipped++;

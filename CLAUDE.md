@@ -73,7 +73,8 @@ does I/O and generally does not.
 | Module | Owns |
 |---|---|
 | `bot-access.server.ts` | allowlist, invites, `requireTrip`/`requireDay`/`requireTripManager` |
-| `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh, weather |
+| `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh |
+| `day-weather.server.ts` | filling `weather_cache` for a day — from its route, or from its photos when it has none |
 | `bot-photos.server.ts` | photo + document upload, EXIF, compression, twin detection |
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
@@ -119,6 +120,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
   of its hour and must never be interpolated; temperature is an instant and must be. Both
   cope with rows cached before those fields were fetched, where the arrays are simply absent.
+- `photo-sites.ts` — where to ask about the weather on a day with no route: the places its
+  photos were taken, one per weather grid cell. Deliberately *not* `sampleSites` on the photo
+  positions — that measures along the sequence and would answer for ground between two shots
+  that nobody stood on. `sitesCovered` is what keeps a camera roll from costing one request
+  per picture. Route days are untouched; the wiring lives in `day-weather.server.ts`.
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
   same shot, pinning a photo to the route by time, and ordering by capture time.
 - `og.server.ts`, `basemap.server.ts`, `archive.server.ts` — server-rendered SVG for the
