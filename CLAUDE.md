@@ -73,7 +73,8 @@ does I/O and generally does not.
 | Module | Owns |
 |---|---|
 | `bot-access.server.ts` | allowlist, invites, `requireTrip`/`requireDay`/`requireTripManager` |
-| `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh, weather |
+| `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh |
+| `day-weather.server.ts` | filling `weather_cache` for a day — from its route, or from its photos when it has none |
 | `bot-photos.server.ts` | photo + document upload, EXIF, compression, twin detection |
 | `bot-motion.server.ts` | the video half of a Live Photo: matching it to its still by sight, or parking it until one arrives |
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
@@ -120,6 +121,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
   of its hour and must never be interpolated; temperature is an instant and must be. Both
   cope with rows cached before those fields were fetched, where the arrays are simply absent.
+- `photo-sites.ts` — where to ask about the weather on a day with no route: the places its
+  photos were taken, one per weather grid cell. Deliberately *not* `sampleSites` on the photo
+  positions — that measures along the sequence and would answer for ground between two shots
+  that nobody stood on. `sitesCovered` is what keeps a camera roll from costing one request
+  per picture. Route days are untouched; the wiring lives in `day-weather.server.ts`.
 - `live-photo.ts` + `bot-motion.server.ts` — which still an incoming video is the motion of.
   Telegram carries the two halves of a Live Photo across as two unrelated updates with the
   photo's file name stripped, so it is worked out twice. First **by sight**: Telegram's cover

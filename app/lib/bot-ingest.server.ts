@@ -2,9 +2,8 @@ import type { Context } from "grammy";
 import { supabase } from "./supabase.server";
 import type { DbTrip } from "./db.server";
 import { fetchKomootTour, parseKomootUrl } from "./komoot";
-import { decimate, planPointBudget, toGeoJson, type NormalizedTrack, type TrackPoint } from "./track";
-import { fetchDayWeather } from "./weather";
-import { sampleSites } from "./wind";
+import { decimate, planPointBudget, toGeoJson, type NormalizedTrack } from "./track";
+import { cacheDayWeather } from "./day-weather.server";
 import { renderOgCard } from "./og.server";
 import { escapeErr, escapeMd } from "./telegram-md";
 import { km } from "./screens.server";
@@ -19,35 +18,6 @@ const MODE_ICON: Record<TransitMode, string> = { train: "🚆", ferry: "⛴️",
  * Taking in what a day is made of — a ridden track, the planned route it was
  * measured against, the weather over it, and the evening's note.
  */
-
-/**
- * Cache a day's weather, taken along the route it covers.
- *
- * The temperature and the icon come from the middle of the day; the wind is
- * asked about at up to four places spread along it, because a long stage does
- * not have one wind. All of it is one request either way — Open-Meteo answers
- * for a list of coordinates at once.
- *
- * Returns whether anything was stored: callers on the upload path ignore it,
- * since weather is never worth failing an upload over.
- */
-export async function cacheDayWeather(
-  dayId: string,
-  date: string,
-  points: TrackPoint[],
-): Promise<boolean> {
-  if (points.length === 0) return false;
-  try {
-    const weather = await fetchDayWeather(sampleSites(points), date);
-    if (!weather) return false;
-    await supabase()
-      .from("weather_cache")
-      .upsert({ day_id: dayId, data: weather, fetched_at: new Date().toISOString() });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export async function saveTrackSegment(
   ctx: Context,

@@ -74,7 +74,7 @@ const HEAD_DEG = 60;
  * the same numbers rather than better ones. It is also about the scale a rider
  * notices: over ten kilometres a valley turns, a coast arrives, a forest ends.
  */
-const SITE_SPACING_M = 10000;
+export const SITE_SPACING_M = 10000;
 
 /**
  * A ceiling, not a target. It only binds on a very long day, and when it does
@@ -82,7 +82,7 @@ const SITE_SPACING_M = 10000;
  * route. It exists because every site is a set of hourly readings that has to
  * be stored on the day and shipped to whoever opens the page.
  */
-const MAX_SITES = 24;
+export const MAX_SITES = 24;
 
 /**
  * Where along a day's route to ask what the wind was doing.
