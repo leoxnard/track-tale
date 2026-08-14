@@ -29,7 +29,8 @@ notes, stats and weather.
   no cover frame to go on, it falls back to the last photo sent that hasn't got motion yet,
   so an ordinary photo sent earlier is never quietly turned into a Live Photo. A video that
   arrives before its still waits five minutes for one, and will not accept a photo that
-  doesn't look like it. Anything longer than six seconds is treated as a clip and declined,
+  doesn't look like it; several can wait at once, and the nightly cron clears out whatever
+  was never claimed. Anything longer than six seconds is treated as a clip and declined,
   because the page has nowhere to show one. Send the video the normal compressed way rather
   than as a file — Telegram re-encodes it to MP4, which every browser plays, whereas the
   untouched `.MOV` off an iPhone is HEVC and plays only on Apple devices.

@@ -176,13 +176,17 @@ create table if not exists pending_replacements (
   created_at timestamptz not null default now()
 );
 
--- The motion half of a Live Photo that arrived before its still. Telegram
--- delivers an album's items in the order they were picked, which on iOS can put
--- the video first, so it waits here — already uploaded — until the next photo
--- claims it. One per chat: two Live Photos in flight at once is a burst, and a
--- burst arrives still-then-motion, which never lands here at all.
+-- The motion half of a Live Photo with no still to attach to yet: it arrived
+-- before its photo, or nothing on the trip looked like it. It waits here —
+-- already uploaded — until a photo claims it, and the nightly cron clears out
+-- whatever never was.
+--
+-- Several per chat, deliberately. Keying this by chat and overwriting looked
+-- reasonable until six edited photos were sent and then six videos: each one
+-- would have thrown away the last, and the uploads with it.
 create table if not exists pending_motions (
-  chat_id bigint primary key references chats(chat_id) on delete cascade,
+  id uuid primary key default gen_random_uuid(),
+  chat_id bigint not null references chats(chat_id) on delete cascade,
   trip_id uuid not null references trips(id) on delete cascade,
   storage_path text not null,
   duration_ms integer,
@@ -191,6 +195,7 @@ create table if not exists pending_motions (
   cover_phash text,
   created_at timestamptz not null default now()
 );
+create index if not exists pending_motions_chat_idx on pending_motions(chat_id);
 
 create index if not exists track_segments_day_idx on track_segments(day_id);
 create index if not exists days_trip_idx on days(trip_id);
@@ -255,7 +260,6 @@ alter table media add column if not exists phash text;
 -- stay stills, so there is nothing to backfill.
 alter table media add column if not exists motion_path text;
 alter table media add column if not exists motion_ms integer;
-alter table pending_motions add column if not exists cover_phash text;
 -- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
 alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;

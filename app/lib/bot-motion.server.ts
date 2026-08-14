@@ -7,6 +7,7 @@ import {
   motionFormat,
   parkedMotionIsFresh,
   pickStillForMotion,
+  LIVE_PAIR_WINDOW_MS,
   type IncomingMotion,
   type MotionCandidate,
 } from "./live-photo";
@@ -126,68 +127,66 @@ async function coverHashOf(bot: Bot, thumbFileId: string | null): Promise<string
 }
 
 interface ParkedMotion {
+  id: string;
   storagePath: string;
   durationMs: number | null;
   coverHash: string | null;
 }
 
-/** Whatever motion this chat has waiting, or null. Does not clear it. */
-async function peekParkedMotion(chatId: number, tripId: string): Promise<ParkedMotion | null> {
+/**
+ * The motions this chat has waiting, oldest first, with anything stale swept up
+ * on the way past. Stale means past the pairing window or left over from
+ * another trip: not ours to use, but ours to clear out rather than leave in the
+ * bucket with nothing naming it.
+ */
+async function parkedMotions(chatId: number, tripId: string): Promise<ParkedMotion[]> {
   const { data } = await supabase()
     .from("pending_motions")
-    .select("storage_path, duration_ms, cover_phash, trip_id, created_at")
+    .select("id, storage_path, duration_ms, cover_phash, trip_id, created_at")
     .eq("chat_id", chatId)
-    .maybeSingle();
-  if (!data) return null;
+    .order("created_at", { ascending: true });
+  if (!data || data.length === 0) return [];
 
-  if (data.trip_id !== tripId || !parkedMotionIsFresh(Date.parse(data.created_at), Date.now())) {
-    // Stale, or left over from another trip: not ours to use, but ours to
-    // clean up rather than leave in the bucket with nothing naming it.
-    await discardParkedMotion(chatId, data.storage_path);
-    return null;
+  const fresh = data.filter(
+    (row) => row.trip_id === tripId && parkedMotionIsFresh(Date.parse(row.created_at), Date.now()),
+  );
+  const stale = data.filter((row) => !fresh.includes(row));
+  if (stale.length > 0) {
+    await supabase()
+      .from("pending_motions")
+      .delete()
+      .in("id", stale.map((row) => row.id));
+    await supabase().storage.from("photos").remove(stale.map((row) => row.storage_path));
   }
-  return {
-    storagePath: data.storage_path,
-    durationMs: data.duration_ms,
-    coverHash: data.cover_phash,
-  };
+
+  return fresh.map((row) => ({
+    id: row.id,
+    storagePath: row.storage_path,
+    durationMs: row.duration_ms,
+    coverHash: row.cover_phash,
+  }));
 }
 
-async function discardParkedMotion(chatId: number, storagePath: string): Promise<void> {
-  await supabase().from("pending_motions").delete().eq("chat_id", chatId);
-  await supabase().storage.from("photos").remove([storagePath]);
-}
-
-/** Park an already-uploaded video until the photo it belongs to turns up. */
+/**
+ * Park an already-uploaded video until the photo it belongs to turns up.
+ *
+ * Several can wait at once. Keying this by chat and overwriting looked
+ * reasonable — one Live Photo at a time is how a person sends them — right up
+ * until six edited photos went up and then six videos: each would have thrown
+ * away the last, and the upload with it.
+ */
 async function parkMotion(
   chatId: number,
   tripId: string,
-  motion: ParkedMotion,
+  motion: Omit<ParkedMotion, "id">,
 ): Promise<void> {
-  // One at a time: whatever was waiting here has been superseded, and its file
-  // would otherwise sit in the bucket unreferenced.
-  const { data: previous } = await supabase()
-    .from("pending_motions")
-    .select("storage_path")
-    .eq("chat_id", chatId)
-    .maybeSingle();
-  if (previous) await supabase().storage.from("photos").remove([previous.storage_path]);
-
-  await supabase()
-    .from("pending_motions")
-    .upsert(
-      {
-        chat_id: chatId,
-        trip_id: tripId,
-        storage_path: motion.storagePath,
-        duration_ms: motion.durationMs,
-        cover_phash: motion.coverHash,
-        // Explicit, because an upsert over an existing row keeps the old
-        // default and this one has to restart the clock.
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: "chat_id" },
-    );
+  await supabase().from("pending_motions").insert({
+    chat_id: chatId,
+    trip_id: tripId,
+    storage_path: motion.storagePath,
+    duration_ms: motion.durationMs,
+    cover_phash: motion.coverHash,
+  });
 }
 
 /**
@@ -211,16 +210,13 @@ export async function attachParkedMotion(
   mediaId: string,
   photoHash: string | null,
 ): Promise<boolean> {
-  const parked = await peekParkedMotion(chatId, tripId);
+  const waiting = await parkedMotions(chatId, tripId);
+  if (waiting.length === 0) return false;
+
+  const parked = pickParkedFor(waiting, photoHash);
   if (!parked) return false;
 
-  if (parked.coverHash && photoHash && hammingDistance(parked.coverHash, photoHash) > MOTION_MAX_DISTANCE) {
-    // A recording of something else. Leave it parked: the photo it belongs to
-    // may still be uploading behind this one.
-    return false;
-  }
-
-  await supabase().from("pending_motions").delete().eq("chat_id", chatId);
+  await supabase().from("pending_motions").delete().eq("id", parked.id);
   const { error } = await supabase()
     .from("media")
     .update({ motion_path: parked.storagePath, motion_ms: parked.durationMs })
@@ -230,6 +226,52 @@ export async function attachParkedMotion(
     return false;
   }
   return true;
+}
+
+/**
+ * Which of the waiting motions is a recording of this photo.
+ *
+ * A fingerprint on both sides settles it, and settles it in the photo's favour
+ * only if they actually look alike — that is what lets a Live Photo and an
+ * ordinary photo be sent in either order without the ordinary one collecting
+ * three seconds of somewhere else. With nothing to compare, the oldest waiting
+ * motion is the best guess available, which is the same guess the order rule
+ * makes.
+ */
+function pickParkedFor(waiting: ParkedMotion[], photoHash: string | null): ParkedMotion | null {
+  if (photoHash) {
+    const seen = waiting
+      .filter((m) => m.coverHash)
+      .map((m) => ({ motion: m, distance: hammingDistance(m.coverHash!, photoHash) }))
+      .filter((m) => m.distance <= MOTION_MAX_DISTANCE)
+      .sort((a, b) => a.distance - b.distance);
+    if (seen.length > 0) return seen[0].motion;
+  }
+  // Every waiting motion knows what it is a recording of, and none of them is
+  // this. Leave them be: their photos may still be uploading behind this one.
+  if (waiting.every((m) => m.coverHash) && photoHash) return null;
+  return waiting.find((m) => !m.coverHash) ?? null;
+}
+
+/**
+ * Clear out motions nobody ever claimed, files and all. Called from the nightly
+ * cron: a video whose photo never arrived is only found by a photo, so without
+ * this it would sit in the bucket for the life of the project.
+ */
+export async function sweepParkedMotions(): Promise<number> {
+  const cutoff = new Date(Date.now() - LIVE_PAIR_WINDOW_MS).toISOString();
+  const { data } = await supabase()
+    .from("pending_motions")
+    .select("id, storage_path")
+    .lt("created_at", cutoff);
+  if (!data || data.length === 0) return 0;
+
+  await supabase()
+    .from("pending_motions")
+    .delete()
+    .in("id", data.map((row) => row.id));
+  await supabase().storage.from("photos").remove(data.map((row) => row.storage_path));
+  return data.length;
 }
 
 export interface IncomingVideo extends IncomingMotion {
@@ -300,8 +342,17 @@ export async function saveMotion(
 
   if (!still) {
     await parkMotion(ctx.chat!.id, trip.id, { storagePath: path, durationMs, coverHash });
+    // Which of the two situations this is matters to the person reading it:
+    // nothing on the trip looking like the video is a dead end they should stop
+    // repeating, whereas an empty trip is simply the photo not being here yet.
+    const nothingLikeIt = coverHash && pool.some((c) => !c.hasMotion);
     await ctx.reply(
-      `🎬 Held onto that motion — send the photo it belongs to and I'll put them together.${caveat}`,
+      nothingLikeIt
+        ? `🎬 Held onto that motion, but nothing on the trip looks like it — a crop or a ` +
+            `straighten in an editor will do that. Send the photo it belongs to and I'll pair ` +
+            `them.${caveat}`
+        : `🎬 Held onto that motion — send the photo it belongs to and I'll put them ` +
+            `together.${caveat}`,
     );
     return;
   }

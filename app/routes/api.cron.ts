@@ -3,6 +3,7 @@ import { env } from "../lib/env.server";
 import { supabase } from "../lib/supabase.server";
 import { refreshPlan } from "../lib/bot-ingest.server";
 import { ensureTapsDelivered } from "../lib/bot-chrome.server";
+import { sweepParkedMotions } from "../lib/bot-motion.server";
 
 /**
  * Daily maintenance, triggered by Vercel Cron (schedule in vercel.json).
@@ -86,6 +87,13 @@ export async function loader({ request }: { request: Request }) {
     }
   } catch (err) {
     failures.push(`checking what Telegram delivers: ${message(err)}`);
+  }
+
+  try {
+    const swept = await sweepParkedMotions();
+    if (swept > 0) report.push(`swept ${swept} unclaimed Live Photo videos`);
+  } catch (err) {
+    failures.push(`sweeping unclaimed Live Photo videos: ${message(err)}`);
   }
 
   try {
