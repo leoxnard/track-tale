@@ -239,7 +239,8 @@ first, and leaves the family's guestbook messages alone.
 
 `/replace` is the same browser again, photos only: pick a day, tap a photo, send the new
 picture. The row survives the swap, so the caption, the pin the photo earned by matching the
-day's track, its place in the day's order and who took it all stay as they were — only the
+day's track, its place in the day's order, who took it and the motion behind it if it was a
+Live Photo all stay as they were — only the
 file changes. That matters when the whole trip's photos come back from an edit: deleting and
 re-sending them would strip every caption and drop each one at the end of the day it used to
 sit in the middle of. After a swap the day's photo list comes straight back, so working

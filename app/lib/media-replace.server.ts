@@ -143,6 +143,11 @@ export async function replacePhoto(mediaId: string, files: ReplacementFiles): Pr
     else written.push(thumbPath);
   }
 
+  // `motion_path` is deliberately absent: a Live Photo edited in Lightroom
+  // comes back as a still, because that is all an editor exports, and the three
+  // seconds behind it are still a recording of this shot. Rewriting the
+  // fingerprint while keeping the video is the point — a later re-send of the
+  // same picture is matched against the edit, which is what is on the page now.
   const { data: updated, error } = await supabase()
     .from("media")
     .update({
