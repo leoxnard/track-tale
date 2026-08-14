@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Playing the three seconds behind a Live Photo, and the finger gestures that
@@ -19,6 +19,8 @@ import { useCallback, useRef, useState } from "react";
  *   open the link in a new tab. Both have to be turned off for the gesture to
  *   feel like the one people know from a phone, and only for tiles that
  *   actually have motion: a plain photo keeps its ordinary long-press menu.
+ * - **Rewinding is visible unless it is hidden on purpose.** See `start`/`stop`;
+ *   between them they cost two rounds of flicker to get right.
  */
 
 /** How long a finger has to stay put before it counts as a hold and not a tap. */
@@ -26,6 +28,13 @@ const HOLD_MS = 250;
 
 /** Past this a press is a scroll that started on a photo, not a hold. */
 const HOLD_SLOP_PX = 12;
+
+/**
+ * How long the still takes to fade back over the video. Must not be shorter
+ * than the CSS transition on the two elements — it is the window during which
+ * the video is still partly on screen and must therefore not move.
+ */
+const FADE_MS = 260;
 
 interface Options {
   /**
@@ -43,22 +52,52 @@ export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Opti
   const [playing, setPlaying] = useState(false);
 
   const hold = useRef<number | null>(null);
+  const rewind = useRef<number | null>(null);
   const from = useRef<{ x: number; y: number } | null>(null);
   const held = useRef(false);
   /** Set by a hold, read and cleared by the click that follows it. */
   const swallowClick = useRef(false);
 
+  /**
+   * Show the video only once a frame from its new position has actually been
+   * painted. Without this the element turns opaque the moment `play()` resolves
+   * — while it is still holding whatever frame it stopped on last time — so a
+   * replay read as: old last frame, first frame, motion.
+   */
+  const revealOnFirstFrame = (video: HTMLVideoElement) => {
+    if (typeof video.requestVideoFrameCallback === "function") {
+      video.requestVideoFrameCallback(() => setPlaying(true));
+    } else {
+      setPlaying(true);
+    }
+  };
+
   const start = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = 0;
-    // Autoplay is refused often enough — a muted inline video is normally
-    // allowed, but not always — and a rejected promise here is not an error
-    // worth anyone's console: the still is a perfectly good photograph.
-    void video.play().then(
-      () => setPlaying(true),
-      () => setPlaying(false),
-    );
+    if (rewind.current !== null) {
+      window.clearTimeout(rewind.current);
+      rewind.current = null;
+    }
+
+    const play = () =>
+      void video.play().then(
+        () => revealOnFirstFrame(video),
+        // Autoplay is refused often enough — a muted inline video is normally
+        // allowed, but not always — and a rejected promise here is not an error
+        // worth anyone's console: the still is a perfectly good photograph.
+        () => setPlaying(false),
+      );
+
+    // Usually already rewound by `stop`, once it was safe to. Not always: a
+    // replay asked for during the fade-out arrives before that, and then the
+    // seek has to happen here — before playing, and before anything is shown.
+    if (video.currentTime > 0 && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      video.addEventListener("seeked", play, { once: true });
+      video.currentTime = 0;
+      return;
+    }
+    play();
   }, []);
 
   const stop = useCallback(() => {
@@ -66,18 +105,30 @@ export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Opti
     setPlaying(false);
     if (!video) return;
     video.pause();
-    // Left where it stopped, deliberately. Rewinding here put frame one back on
-    // screen for the length of the cross-fade, so the end of a clip read as a
-    // flicker: last frame, first frame, photo. The video is on its way to
-    // invisible and the frame under it barely differs from the still, so the
-    // fade only works if nothing moves during it. `start` rewinds instead,
-    // while the element is still transparent.
+
+    // Rewound on a delay rather than here, because here the video is still on
+    // screen: it is fading out under the still, and jumping it back to frame
+    // one mid-fade put the beginning of the clip on screen just as the clip
+    // ended. Wait for the fade, then rewind where nobody can see it.
+    if (rewind.current !== null) window.clearTimeout(rewind.current);
+    rewind.current = window.setTimeout(() => {
+      rewind.current = null;
+      if (videoRef.current) videoRef.current.currentTime = 0;
+    }, FADE_MS);
   }, []);
 
   const clearHold = () => {
     if (hold.current !== null) window.clearTimeout(hold.current);
     hold.current = null;
   };
+
+  useEffect(
+    () => () => {
+      if (hold.current !== null) window.clearTimeout(hold.current);
+      if (rewind.current !== null) window.clearTimeout(rewind.current);
+    },
+    [],
+  );
 
   const press = {
     onPointerDown: (e: React.PointerEvent) => {
