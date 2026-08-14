@@ -108,6 +108,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   around. `directness` and `relativeConcentration` guard anything that would otherwise state
   a direction for such a ride. The tests exist mostly to keep those frames from being flipped
   by accident. `WindRose.tsx` lists its deviations from the standard figure at the top.
+- `wind-field.ts` — the map overlay's arrows: the same rides and sites as the rose, sampled
+  every 450 m into lanes either side of the route. Arrows point where the wind *went*
+  (`towardDeg`), the reverse of everything in `wind.ts`. `lod` thins the channel by zoom and
+  `driftAt` is the animation, fading to nothing at the moment each arrow snaps back so the
+  loop is never seen. The maplibre layer that draws it lives in `t.$slug.tsx`.
 - `riding-weather.ts` — rain and temperature over the *riding hours*, off the same hourly
   series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
   of its hour and must never be interpolated; temperature is an instant and must be. Both

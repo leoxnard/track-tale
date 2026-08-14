@@ -137,6 +137,8 @@ const en = {
     wholeTourHint: "Zoom the map back out and jump to the whole-tour profile",
     cycleRoutes: "Cycle routes",
     cycleRoutesHint: "Show signposted cycle routes — EuroVelo, national and regional",
+    windOverlay: "Wind",
+    windOverlayHint: "Show the wind that was blowing along the route, hour by hour",
     day: (n: number) => `Day ${n}`,
     /** Dropped on narrow screens, where only the day's number is shown. */
     dayPrefix: "Day ",
@@ -318,6 +320,8 @@ const de: Messages = {
     wholeTourHint: "Karte wieder herauszoomen und zum Profil der ganzen Tour springen",
     cycleRoutes: "Radrouten",
     cycleRoutesHint: "Ausgeschilderte Radrouten einblenden — EuroVelo, nationale und regionale",
+    windOverlay: "Wind",
+    windOverlayHint: "Den Wind einblenden, der unterwegs wehte — Stunde für Stunde",
     day: (n: number) => `Tag ${n}`,
     dayPrefix: "Tag ",
     focusDay: "Karte auf diesen Tag ausrichten",

@@ -93,6 +93,15 @@ notes, stats and weather.
   so a moment falls inside one bucket and gets the share of it the rider spent there. A whole
   day's rain becomes one number — how much fell on them — with the wet kilometres in the
   tooltip. The little weather icon is still the day's sky, not the ride's.
+- A **Wind** button lays the wind itself over the map: a channel of arrows in lanes either
+  side of the route, each pointing the way the wind was blowing *there*, at the hour that
+  stretch was ridden, coloured by the same speed classes as the rose's petals and drifting
+  along their own direction so the channel reads as weather moving through it. The rose says
+  whether the day was work; this says *where* — a day that was half headwind is usually a day
+  with one exposed valley in it, and only the map can show that. Like the route network it is
+  **off until asked for**, and the animation stops itself when the tab is hidden. The lanes
+  are a buffer in metres, so the channel is real ground either side of the line rather than a
+  fixed ribbon, and it thins out as you zoom away instead of curdling into a mat of arrows.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the

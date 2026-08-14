@@ -25,7 +25,8 @@ import { riddenStretches, toPieces, type StoredSegment } from "../lib/day-stretc
 import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather, type WeatherSite } from "../lib/weather";
-import { analyseWind, type Ride, type WindAnalysis } from "../lib/wind";
+import { analyseWind, BIN_COLORS, type Ride, type WindAnalysis } from "../lib/wind";
+import { driftAt, lodForZoom, windField, type WindArrow } from "../lib/wind-field";
 import {
   analyseRidingWeather,
   hasTemperature,
@@ -428,6 +429,50 @@ const CYCLE_ATTRIBUTION =
   '<a href="https://cycling.waymarkedtrails.org/" target="_blank" rel="noreferrer">Waymarked Trails</a> (CC BY-SA 3.0)';
 const CYCLE_LAYER = "cycle-routes";
 
+const WIND_LAYER = "wind-field";
+/** As many arrows as are drawn at once, whatever the zoom asks for. Beyond this
+ *  the channel is a texture rather than a reading, and the frame gets slower for
+ *  a picture that says less. */
+const WIND_MAX_ARROWS = 450;
+
+/**
+ * The arrow the wind channel is drawn with — one per speed class, in the same
+ * colours as the rose's petals, so the map and the figure agree.
+ *
+ * Drawn on a canvas rather than shipped as files: it is five little images that
+ * depend on the palette, and generating them keeps them in step with it.
+ * Pointing north, because `icon-rotate` turns clockwise from there.
+ */
+function ensureWindArrow(map: import("maplibre-gl").Map, bin: number): string {
+  const id = `wind-arrow-${bin}`;
+  if (map.hasImage(id)) return id;
+  const scale = 2;
+  const size = 22;
+  const canvas = document.createElement("canvas");
+  canvas.width = size * scale;
+  canvas.height = size * scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return id;
+  ctx.scale(scale, scale);
+  ctx.fillStyle = BIN_COLORS[bin];
+  ctx.strokeStyle = BIN_COLORS[bin];
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(size / 2, size - 3);
+  ctx.lineTo(size / 2, 8);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(size / 2, 2);
+  ctx.lineTo(size / 2 + 5.5, 10.5);
+  ctx.lineTo(size / 2, 8);
+  ctx.lineTo(size / 2 - 5.5, 10.5);
+  ctx.closePath();
+  ctx.fill();
+  map.addImage(id, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: scale });
+  return id;
+}
+
 type MapHandle = {
   flyToDay: (dayNumber: number) => void;
   /** Zoom back out to the whole journey, plan included. */
@@ -435,6 +480,7 @@ type MapHandle = {
   /** Close in on the live position, which is a speck at whole-tour zoom. */
   flyToLive: () => void;
   setCycleRoutes: (visible: boolean) => void;
+  setWind: (visible: boolean) => void;
   showScrub: (lngLat: [number, number] | null, color: string) => void;
 };
 
@@ -444,6 +490,8 @@ function TripMap({
   live,
   handleRef,
   cycleRoutes,
+  wind,
+  windArrows,
   onPhoto,
   m,
 }: {
@@ -453,6 +501,10 @@ function TripMap({
   handleRef: React.MutableRefObject<MapHandle | null>;
   /** Whether the cycle-route overlay is switched on. */
   cycleRoutes: boolean;
+  /** Whether the wind channel is switched on. */
+  wind: boolean;
+  /** The whole trip's wind field, built once by the page. */
+  windArrows: WindArrow[];
   /** Open a photo marker in the lightbox instead of navigating to the file. */
   onPhoto: (photo: ViewerPhoto) => void;
   m: Messages;
@@ -464,14 +516,25 @@ function TripMap({
   // silently switch itself off.
   const cycleRef = useRef(cycleRoutes);
   cycleRef.current = cycleRoutes;
+  const windRef = useRef(wind);
+  windRef.current = wind;
 
   useEffect(() => {
     handleRef.current?.setCycleRoutes(cycleRoutes);
   }, [cycleRoutes, handleRef]);
 
   useEffect(() => {
+    handleRef.current?.setWind(wind);
+  }, [wind, handleRef]);
+
+  useEffect(() => {
     let disposed = false;
     let map: import("maplibre-gl").Map | undefined;
+    // Declared out here so the cleanup can stop the wind animation: everything
+    // that starts it lives inside the async body, which the cleanup cannot see
+    // into.
+    let windFrame = 0;
+    let detachWind = () => {};
 
     (async () => {
       const maplibregl = (await import("maplibre-gl")).default;
@@ -541,6 +604,32 @@ function TripMap({
           // network read as context under them.
           paint: { "raster-opacity": 0.55 },
           layout: { visibility: cycleRef.current ? "visible" : "none" },
+        });
+
+        // The wind channel goes on next, still under the tour's own lines: it
+        // is weather around the route, not a thing to read the route through.
+        for (let bin = 0; bin < BIN_COLORS.length; bin++) ensureWindArrow(map, bin);
+        map.addSource(WIND_LAYER, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+        map.addLayer({
+          id: WIND_LAYER,
+          type: "symbol",
+          source: WIND_LAYER,
+          layout: {
+            "icon-image": ["concat", "wind-arrow-", ["to-string", ["get", "bin"]]],
+            "icon-rotate": ["get", "deg"],
+            // Turn with the map, since the angle is the whole content, and let
+            // them sit as close together as the field asks: the thinning by
+            // zoom is what keeps the channel legible, not collision.
+            "icon-rotation-alignment": "map",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 14, 0.85],
+            visibility: windRef.current ? "visible" : "none",
+          },
+          paint: { "icon-opacity": ["get", "o"] },
         });
 
         plan.forEach((segment, i) => {
@@ -668,6 +757,11 @@ function TripMap({
             "width:18px;height:18px;border-radius:50%;background:#d64533;border:3px solid #fff;box-shadow:0 0 0 rgba(214,69,51,.7);animation:tt-pulse 2s infinite";
           new maplibregl.Marker({ element: el }).setLngLat(live.current).addTo(map);
         }
+
+        // Only now do the source and the layer exist, so an overlay switched on
+        // while the style was still loading gets its first frame here rather
+        // than never: `setWind` ran too early to find anything to draw into.
+        if (windRef.current) drawWind();
       });
 
       // One reusable marker follows the elevation chart as it's scrubbed.
@@ -676,6 +770,76 @@ function TripMap({
         "width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45);transition:background .15s";
       const scrubMarker = new maplibregl.Marker({ element: scrubEl });
       let scrubAttached = false;
+
+      /**
+       * The channel's animation.
+       *
+       * The positions and opacities change every frame, so this rewrites the
+       * source rather than styling it: there is no paint property that can
+       * carry a per-arrow drift. What keeps that affordable is throwing most of
+       * the field away first — everything off screen, and everything above the
+       * detail level this zoom asks for — so a few hundred features are rebuilt
+       * per frame rather than fifteen thousand.
+       *
+       * The loop only runs while the overlay is on, and stops itself when the
+       * tab is hidden, because an invisible animation is pure battery.
+       */
+      const drawWind = () => {
+        windFrame = 0;
+        if (!map || !windRef.current || !map.getSource(WIND_LAYER)) return;
+        const now = performance.now();
+        const maxLod = lodForZoom(map.getZoom());
+        const b = map.getBounds();
+        // A margin, so arrows drift in from off screen instead of appearing at
+        // the edge.
+        const pad = 0.02;
+        const west = b.getWest() - pad;
+        const east = b.getEast() + pad;
+        const south = b.getSouth() - pad;
+        const north = b.getNorth() + pad;
+
+        const onScreen = (arrow: WindArrow) =>
+          arrow.lod <= maxLod &&
+          arrow.lng >= west &&
+          arrow.lng <= east &&
+          arrow.lat >= south &&
+          arrow.lat <= north;
+
+        // Counted first, then taken every nth, rather than filled up and cut
+        // off: stopping at the cap would draw the whole channel across the
+        // first days of a trip and leave the last ones bare, which reads as
+        // "no wind there" and is the one thing the overlay must not say.
+        let candidates = 0;
+        for (const arrow of windArrows) if (onScreen(arrow)) candidates++;
+        const stride = Math.max(1, Math.ceil(candidates / WIND_MAX_ARROWS));
+
+        const features: GeoJSON.Feature[] = [];
+        let seen = 0;
+        for (const arrow of windArrows) {
+          if (!onScreen(arrow)) continue;
+          if (seen++ % stride !== 0) continue;
+          const { lat, lng, opacity } = driftAt(arrow, now);
+          features.push({
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [lng, lat] },
+            properties: { deg: arrow.towardDeg, bin: arrow.bin, o: opacity },
+          });
+        }
+        (map.getSource(WIND_LAYER) as import("maplibre-gl").GeoJSONSource).setData({
+          type: "FeatureCollection",
+          features,
+        });
+        if (!document.hidden) windFrame = requestAnimationFrame(drawWind);
+      };
+      const resumeWind = () => {
+        if (!document.hidden && windRef.current && !windFrame) drawWind();
+      };
+      document.addEventListener("visibilitychange", resumeWind);
+      detachWind = () => {
+        if (windFrame) cancelAnimationFrame(windFrame);
+        windFrame = 0;
+        document.removeEventListener("visibilitychange", resumeWind);
+      };
 
       handleRef.current = {
         showScrub(lngLat, color) {
@@ -701,6 +865,15 @@ function TripMap({
           if (!map || !live?.current) return;
           map.flyTo({ center: live.current, zoom: 13, duration: 1200 });
         },
+        setWind(visible) {
+          if (!map?.getLayer(WIND_LAYER)) return;
+          map.setLayoutProperty(WIND_LAYER, "visibility", visible ? "visible" : "none");
+          if (visible) drawWind();
+          else if (windFrame) {
+            cancelAnimationFrame(windFrame);
+            windFrame = 0;
+          }
+        },
         setCycleRoutes(visible) {
           // A toggle during the style's first load has nothing to set yet; the
           // load handler reads the same ref and picks the choice up there.
@@ -723,10 +896,11 @@ function TripMap({
 
     return () => {
       disposed = true;
+      detachWind();
       map?.remove();
       handleRef.current = null;
     };
-  }, [days, plan, live, handleRef, onPhoto, m]);
+  }, [days, plan, live, windArrows, handleRef, onPhoto, m]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -896,6 +1070,9 @@ export function TripView({
   // Off to begin with: the overlay is a third-party tile request, and it stays
   // unmade until someone asks for it.
   const [cycleRoutes, setCycleRoutes] = useState(false);
+  // Off until asked for, like the route network: it is an animation over the
+  // whole trip, and nobody should pay for it by opening the page.
+  const [showWind, setShowWind] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -959,7 +1136,7 @@ export function TripView({
    * Only the ridden segments count. An hour on a train has a heading and a wind
    * and no bearing whatsoever on how hard the day was.
    */
-  const { dayWind, dayRiding, tripWind } = useMemo(() => {
+  const { dayWind, dayRiding, tripWind, windArrows } = useMemo(() => {
     const perDay = new Map<number, WindAnalysis>();
     const perDayRiding = new Map<number, RidingWeather>();
     const all: Ride[] = [];
@@ -989,7 +1166,15 @@ export function TripView({
       const riding = analyseRidingWeather(rides);
       if (riding) perDayRiding.set(day.dayNumber, riding);
     }
-    return { dayWind: perDay, dayRiding: perDayRiding, tripWind: analyseWind(all) };
+    return {
+      dayWind: perDay,
+      dayRiding: perDayRiding,
+      tripWind: analyseWind(all),
+      // Built once for the whole trip, not per day: the map draws one channel
+      // across the lot, and rebuilding it on a toggle would reshuffle nothing
+      // but cost a pause.
+      windArrows: windField(all),
+    };
   }, [trip.days]);
 
   const scrollToDay = (dayNumber: number) => {
@@ -1066,6 +1251,8 @@ export function TripView({
                 live={trip.live}
                 handleRef={mapHandle}
                 cycleRoutes={cycleRoutes}
+                wind={showWind}
+                windArrows={windArrows}
                 onPhoto={openByUrl}
                 m={m}
               />
@@ -1088,6 +1275,20 @@ export function TripView({
               >
                 <span aria-hidden>🚲</span> {m.trip.cycleRoutes}
               </button>
+              {windArrows.length > 0 && (
+                <button
+                  onClick={() => setShowWind((on) => !on)}
+                  aria-pressed={showWind}
+                  className={`absolute left-2 top-11 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold shadow-sm focus-visible:outline-2 focus-visible:outline-pine ${
+                    showWind
+                      ? "border-pine bg-pine text-paper"
+                      : "border-trail bg-paper text-pine hover:border-pine-soft"
+                  }`}
+                  title={m.trip.windOverlayHint}
+                >
+                  <span aria-hidden>💨</span> {m.trip.windOverlay}
+                </button>
+              )}
             </>
           ) : (
             <div className="flex h-full items-center justify-center text-faint">
