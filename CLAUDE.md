@@ -98,8 +98,10 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the
   *plan* it covered, matched by coordinates rather than stacked in sequence. Both files
   carry long comments explaining why the obvious approach is wrong; read them first.
-- `wind.ts` — the wind rose behind the family page: hourly wind from `weather.ts` matched to
-  a track's timestamps, then summed **by distance** into headwind, crosswind and the petals,
+- `wind.ts` — the wind rose behind the family page: hourly wind from `weather.ts`, sampled at
+  up to four sites along the route (`sampleSites`, one Open-Meteo request for all of them) and
+  matched to a track's timestamps by nearest site, then summed **by distance** into headwind,
+  crosswind and the petals,
   each petal split across the Beaufort speed classes the legend names. Wind directions are
   meteorological (where it blows *from*) throughout; the tests exist mostly to keep that from
   being flipped by accident. `WindRose.tsx` draws the standard figure on purpose — north up,

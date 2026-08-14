@@ -24,7 +24,7 @@ import { fromGeoJson, haversineM, type TrackGeoJson, type TrackPoint } from "../
 import { riddenStretches, toPieces, type StoredSegment } from "../lib/day-stretches";
 import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
-import { weatherIcon, type DayWeather } from "../lib/weather";
+import { weatherIcon, type DayWeather, type WindSite } from "../lib/weather";
 import { analyseWind, type Ride, type WindAnalysis } from "../lib/wind";
 import { byPhotoTime } from "../lib/photo-order";
 import { env } from "../lib/env.server";
@@ -957,15 +957,24 @@ export function TripView({
     const perDay = new Map<number, WindAnalysis>();
     const all: Ride[] = [];
     for (const day of trip.days) {
+      // Days cached before the route was sampled in several places have the one
+      // midpoint reading instead; it stands in for a site list of one, and the
+      // nearest-site lookup then has nothing to choose between.
       const hourly = day.weather?.hourlyWind ?? null;
+      const sites: WindSite[] =
+        day.weather?.windSites?.length
+          ? day.weather.windSites
+          : hourly
+            ? [{ lat: 0, lng: 0, hourly }]
+            : [];
       const rides: Ride[] = day.tracks
         .filter((t) => t.mode === null)
-        .map((t) => ({ points: fromGeoJson(t.geojson), hourly }));
+        .map((t) => ({ points: fromGeoJson(t.geojson), sites }));
       // A day with no cached wind still goes into the trip's total, carrying no
       // wind of its own: that is what makes the trip's "covers x% of the riding"
       // tell the truth instead of quietly answering for the days it can.
       all.push(...rides);
-      if (!hourly) continue;
+      if (sites.length === 0) continue;
       const analysis = analyseWind(rides);
       if (analysis) perDay.set(day.dayNumber, analysis);
     }

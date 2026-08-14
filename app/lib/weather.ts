@@ -24,6 +24,16 @@ export interface HourlyWind {
   gustKmh: (number | null)[];
 }
 
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
+/** One place the wind was asked about, and what it said there all day. */
+export interface WindSite extends LatLng {
+  hourly: HourlyWind;
+}
+
 export interface DayWeather {
   tempMaxC: number | null;
   tempMinC: number | null;
@@ -33,11 +43,20 @@ export interface DayWeather {
   /** The day's prevailing wind direction, as the API summarises it. */
   windFromDeg?: number | null;
   /**
-   * Optional because rows cached before the wind rose existed do not have it.
-   * `/refreshweather` fills them in; everything reading this must cope with a
-   * day that simply has no wind detail rather than assume the field is there.
+   * The wind at the *middle* of the route, kept for rows cached before the day
+   * was sampled in several places — and as the fallback when a day only ever
+   * had the one site. `/refreshweather` upgrades an old row to `windSites`.
    */
   hourlyWind?: HourlyWind | null;
+  /**
+   * The wind along the route, one entry per place it was asked about.
+   *
+   * A hundred-kilometre day does not have *a* wind. Asking at the midpoint and
+   * calling it the day was the first version, and on a long stage — or anywhere
+   * a range or a coast sits between morning and evening — it answered for
+   * ground the rider had left hours earlier.
+   */
+  windSites?: WindSite[];
 }
 
 interface DailyResponse {
@@ -59,13 +78,15 @@ interface DailyResponse {
 
 async function fetchDaily(
   endpoint: string,
-  lat: number,
-  lng: number,
+  sites: LatLng[],
   isoDate: string,
-): Promise<DailyResponse | null> {
+): Promise<DailyResponse[] | null> {
   const url = new URL(endpoint);
-  url.searchParams.set("latitude", String(lat));
-  url.searchParams.set("longitude", String(lng));
+  // Open-Meteo answers for a list of coordinates in one request and replies with
+  // one object per site, in order. Four sites along a day's route therefore cost
+  // exactly what one used to.
+  url.searchParams.set("latitude", sites.map((s) => s.lat).join(","));
+  url.searchParams.set("longitude", sites.map((s) => s.lng).join(","));
   url.searchParams.set("start_date", isoDate);
   url.searchParams.set("end_date", isoDate);
   url.searchParams.set(
@@ -83,10 +104,13 @@ async function fetchDaily(
 
   const res = await fetch(url);
   if (!res.ok) return null;
-  const data = (await res.json()) as DailyResponse;
+  const body = (await res.json()) as DailyResponse | DailyResponse[];
+  // A single coordinate still comes back as a bare object rather than a list of
+  // one, so both shapes have to be accepted.
+  const all = Array.isArray(body) ? body : [body];
   // A day inside the window has every array populated; one it doesn't cover
   // comes back with the arrays present but full of nulls.
-  return data.daily?.temperature_2m_max?.[0] != null ? data : null;
+  return all[0]?.daily?.temperature_2m_max?.[0] != null ? all : null;
 }
 
 /** Only worth storing if at least one hour actually has a wind in it. */
@@ -126,17 +150,21 @@ const ARCHIVE_LAG_DAYS = 5;
  * range alone, and the handover between them is not a sharp line.
  */
 export async function fetchDayWeather(
-  lat: number,
-  lng: number,
+  sites: LatLng[],
   isoDate: string,
 ): Promise<DayWeather | null> {
+  if (sites.length === 0) return null;
   const ageDays = (Date.now() - Date.parse(isoDate + "T00:00:00Z")) / 86400000;
   const [first, second] =
     ageDays > ARCHIVE_LAG_DAYS ? [ARCHIVE_API, FORECAST_API] : [FORECAST_API, ARCHIVE_API];
 
-  const res =
-    (await fetchDaily(first, lat, lng, isoDate)) ?? (await fetchDaily(second, lat, lng, isoDate));
-  if (!res) return null;
+  const all =
+    (await fetchDaily(first, sites, isoDate)) ?? (await fetchDaily(second, sites, isoDate));
+  if (!all) return null;
+  // The day's temperature, rain and icon stay one number for the day, taken at
+  // the site the caller put first — spreading those over the route would only
+  // raise the question of which one the day card should show.
+  const res = all[0];
   const d = res.daily!;
   return {
     tempMaxC: d.temperature_2m_max?.[0] ?? null,
@@ -146,6 +174,9 @@ export async function fetchDayWeather(
     windFromDeg: d.wind_direction_10m_dominant?.[0] ?? null,
     weatherCode: d.weather_code?.[0] ?? null,
     hourlyWind: toHourlyWind(res.hourly),
+    windSites: all
+      .map((site, i) => ({ ...sites[i], hourly: toHourlyWind(site.hourly) }))
+      .filter((site): site is WindSite => site.hourly !== null),
   };
 }
 

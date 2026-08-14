@@ -23,6 +23,7 @@ import { findLiveTrackUrl } from "./live-link";
 import { probeLiveSession } from "./livetrack.server";
 import { parseFit, parseGpx } from "./gpx";
 import { fromGeoJson, type TrackGeoJson } from "./track";
+import { transitMode } from "./transport";
 import { imageDocument } from "./photo-file";
 import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { renderOgCard } from "./og.server";
@@ -1081,7 +1082,7 @@ export function createBot(): Bot {
     if (!trip) return;
     const { data: days } = await supabase()
       .from("days")
-      .select("id, day_number, date, track_segments(geojson)")
+      .select("id, day_number, date, track_segments(geojson, sport)")
       .eq("trip_id", trip.id)
       .order("day_number");
 
@@ -1089,9 +1090,15 @@ export function createBot(): Bot {
     let filled = 0;
     let skipped = 0;
     for (const day of days ?? []) {
-      const segments = (day as { track_segments: { geojson: TrackGeoJson }[] }).track_segments;
+      // Every ridden segment, not just the first: the sample sites are spread
+      // along what is passed in, and a day split by a lunch stop would otherwise
+      // be sampled entirely across its morning. A train leg is left out — where
+      // it went says nothing about where the riding was.
+      const segments = (
+        day as { track_segments: { geojson: TrackGeoJson; sport: string | null }[] }
+      ).track_segments.filter((s) => transitMode(s.sport) === null);
       if (segments.length === 0) continue;
-      const points = fromGeoJson(segments[0].geojson);
+      const points = segments.flatMap((s) => fromGeoJson(s.geojson));
       if (await cacheDayWeather(day.id, day.date, points)) filled++;
       else skipped++;
     }

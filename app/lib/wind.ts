@@ -26,7 +26,7 @@
  */
 
 import { haversineM, type TrackPoint } from "./track";
-import type { HourlyWind } from "./weather";
+import type { HourlyWind, WindSite } from "./weather";
 
 /** A 16-point rose: the compass names people actually use, and fine enough that
  *  a day of riding lands in several petals rather than all in one. */
@@ -53,9 +53,60 @@ const GAP_M = 5000;
  *  lands roughly evenly across the three rather than piling into the middle. */
 const HEAD_DEG = 60;
 
+/**
+ * How far apart two sample sites have to be to be worth keeping both.
+ *
+ * ERA5's grid cell is about 31 km across, so two sites closer than this are
+ * usually reading the same cell and would cost bytes to say the same thing
+ * twice. It is also why a short day ends up with a single site and only a long
+ * one gets four.
+ */
+const SITE_GAP_M = 15000;
+
+/** At most this many places asked about per day — four quarters of a route. */
+const MAX_SITES = 4;
+
+/**
+ * Where along a day's route to ask what the wind was doing.
+ *
+ * The midpoint comes first, because the day's temperature and rain are taken
+ * from whichever site leads the list and the middle is the fairest single
+ * answer to "what was the weather that day". The rest are the centres of the
+ * four quarters, kept only where they are far enough from what is already in
+ * the list to be a different place.
+ */
+export function sampleSites(points: TrackPoint[]): TrackPoint[] {
+  if (points.length === 0) return [];
+
+  const cumulative: number[] = [0];
+  for (let i = 1; i < points.length; i++) {
+    cumulative.push(cumulative[i - 1] + haversineM(points[i - 1], points[i]));
+  }
+  const total = cumulative[cumulative.length - 1];
+  const at = (fraction: number) => {
+    const target = total * fraction;
+    let i = cumulative.findIndex((d) => d >= target);
+    if (i === -1) i = points.length - 1;
+    return points[i];
+  };
+
+  const chosen: TrackPoint[] = [at(0.5)];
+  for (let q = 0; q < MAX_SITES; q++) {
+    if (chosen.length >= MAX_SITES) break;
+    const candidate = at((2 * q + 1) / (2 * MAX_SITES));
+    if (chosen.every((site) => haversineM(site, candidate) >= SITE_GAP_M)) chosen.push(candidate);
+  }
+  return chosen;
+}
+
 export interface Ride {
   points: TrackPoint[];
-  hourly: HourlyWind | null | undefined;
+  /**
+   * The wind, at one or more places along this ride. With several, each stretch
+   * of riding is answered by whichever site is nearest to it — which is the
+   * whole point of asking in more than one place.
+   */
+  sites: WindSite[];
 }
 
 export interface WindSector {
@@ -176,6 +227,20 @@ function vectorAt(
   return { u: s * Math.sin(r), v: s * Math.cos(r), fromDeg: d };
 }
 
+/** The site that answers for a stretch of riding: the closest one to it. */
+export function nearestSite(sites: WindSite[], at: TrackPoint): WindSite {
+  let best = sites[0];
+  let bestM = Infinity;
+  for (const site of sites) {
+    const d = haversineM(site, at);
+    if (d < bestM) {
+      bestM = d;
+      best = site;
+    }
+  }
+  return best;
+}
+
 /**
  * Roll up any number of ridden tracks against their days' hourly wind.
  *
@@ -219,8 +284,8 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
       if (d === 0 || d > GAP_M) continue;
       totalM += d;
 
-      if (!ride.hourly || a.time === undefined || b.time === undefined) continue;
-      const wind = windAt(ride.hourly, (a.time + b.time) / 2);
+      if (ride.sites.length === 0 || a.time === undefined || b.time === undefined) continue;
+      const wind = windAt(nearestSite(ride.sites, a).hourly, (a.time + b.time) / 2);
       if (!wind) continue;
 
       const travel = bearingDeg(a, b);

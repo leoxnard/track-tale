@@ -8,6 +8,8 @@ import {
   bearingDeg,
   binLabel,
   binOf,
+  nearestSite,
+  sampleSites,
   sectorOf,
   verdictOf,
   windAt,
@@ -39,6 +41,11 @@ function line(
     lng: from.lng + dLng * i,
     time: START + HOUR + i * 10 * 60 * 1000,
   }));
+}
+
+/** A ride reads its wind from a list of sites; most tests only need the one. */
+function sitesOf(hourly: HourlyWind | null) {
+  return hourly ? [{ lat: 50, lng: 8, hourly }] : [];
 }
 
 const NORTHWARD = line({ lat: 50, lng: 8 }, 0.01, 0);
@@ -107,7 +114,7 @@ describe("windAt", () => {
 
 describe("analyseWind", () => {
   it("calls wind from the north a headwind when riding north", () => {
-    const a = analyseWind([{ points: NORTHWARD, hourly: steady(20, 0) }])!;
+    const a = analyseWind([{ points: NORTHWARD, sites: sitesOf(steady(20, 0)) }])!;
     expect(a.headwindKmh).toBeCloseTo(20, 0);
     expect(a.crosswindKmh).toBeCloseTo(0, 1);
     expect(a.tailM).toBe(0);
@@ -117,14 +124,14 @@ describe("analyseWind", () => {
 
   it("calls the same wind a tailwind when riding south", () => {
     const south = line({ lat: 50, lng: 8 }, -0.01, 0);
-    const a = analyseWind([{ points: south, hourly: steady(20, 0) }])!;
+    const a = analyseWind([{ points: south, sites: sitesOf(steady(20, 0)) }])!;
     expect(a.headwindKmh).toBeCloseTo(-20, 0);
     expect(a.headM).toBe(0);
     expect(verdictOf(a)).toBe("tailwind");
   });
 
   it("splits a wind off the side into crosswind", () => {
-    const a = analyseWind([{ points: EASTWARD, hourly: steady(20, 0) }])!;
+    const a = analyseWind([{ points: EASTWARD, sites: sitesOf(steady(20, 0)) }])!;
     expect(a.headwindKmh).toBeCloseTo(0, 1);
     expect(a.crosswindKmh).toBeCloseTo(20, 0);
     expect(a.crossM).toBeGreaterThan(0);
@@ -137,15 +144,15 @@ describe("analyseWind", () => {
     const long = line({ lat: 50, lng: 8 }, 0.02, 0, 11);
     const short = line({ lat: 40, lng: 8 }, -0.02, 0, 2);
     const a = analyseWind([
-      { points: long, hourly: steady(20, 0) },
-      { points: short, hourly: steady(20, 0) },
+      { points: long, sites: sitesOf(steady(20, 0)) },
+      { points: short, sites: sitesOf(steady(20, 0)) },
     ])!;
     expect(a.headwindKmh).toBeGreaterThan(12);
     expect(a.headM).toBeGreaterThan(a.tailM * 5);
   });
 
   it("puts the wind in the petal it came from and colours it by strength", () => {
-    const a = analyseWind([{ points: NORTHWARD, hourly: steady(20, 225) }])!;
+    const a = analyseWind([{ points: NORTHWARD, sites: sitesOf(steady(20, 225)) }])!;
     const busiest = a.sectors.reduce((x, y) => (y.distanceM > x.distanceM ? y : x));
     expect(busiest.fromDeg).toBe(225);
     expect(busiest.share).toBe(1);
@@ -155,7 +162,7 @@ describe("analyseWind", () => {
   });
 
   it("reports the mean direction of travel and of the wind", () => {
-    const a = analyseWind([{ points: EASTWARD, hourly: steady(20, 270) }])!;
+    const a = analyseWind([{ points: EASTWARD, sites: sitesOf(steady(20, 270)) }])!;
     expect(a.travelDeg).toBeCloseTo(90, 0);
     expect(a.windFromDeg).toBeCloseTo(270, 0);
   });
@@ -165,22 +172,22 @@ describe("analyseWind", () => {
       { lat: 50, lng: 8, time: START + HOUR },
       { lat: 51, lng: 8, time: START + 2 * HOUR },
     ];
-    expect(analyseWind([{ points: jumped, hourly: steady(20, 0) }])).toBeNull();
+    expect(analyseWind([{ points: jumped, sites: sitesOf(steady(20, 0)) }])).toBeNull();
   });
 
   it("reports how much of the riding it could actually answer for", () => {
     const half = analyseWind([
-      { points: NORTHWARD, hourly: steady(20, 0) },
-      { points: line({ lat: 40, lng: 8 }, 0.01, 0), hourly: null },
+      { points: NORTHWARD, sites: sitesOf(steady(20, 0)) },
+      { points: line({ lat: 40, lng: 8 }, 0.01, 0), sites: sitesOf(null) },
     ])!;
     expect(half.coverage).toBeCloseTo(0.5, 1);
-    expect(analyseWind([{ points: NORTHWARD, hourly: steady(20, 0) }])!.coverage).toBe(1);
+    expect(analyseWind([{ points: NORTHWARD, sites: sitesOf(steady(20, 0)) }])!.coverage).toBe(1);
   });
 
   it("has nothing to say without a clock, a wind or any movement", () => {
     const timeless = NORTHWARD.map(({ lat, lng }) => ({ lat, lng }));
-    expect(analyseWind([{ points: timeless, hourly: steady(20, 0) }])).toBeNull();
-    expect(analyseWind([{ points: NORTHWARD, hourly: null }])).toBeNull();
+    expect(analyseWind([{ points: timeless, sites: sitesOf(steady(20, 0)) }])).toBeNull();
+    expect(analyseWind([{ points: NORTHWARD, sites: sitesOf(null) }])).toBeNull();
     expect(analyseWind([])).toBeNull();
     expect(
       analyseWind([
@@ -189,15 +196,54 @@ describe("analyseWind", () => {
             { lat: 50, lng: 8, time: START + HOUR },
             { lat: 50, lng: 8, time: START + HOUR + 60000 },
           ],
-          hourly: steady(20, 0),
+          sites: sitesOf(steady(20, 0)),
         },
       ]),
     ).toBeNull();
   });
 
   it("keeps a calm day out of the verdicts", () => {
-    const a = analyseWind([{ points: NORTHWARD, hourly: steady(3, 0) }])!;
+    const a = analyseWind([{ points: NORTHWARD, sites: sitesOf(steady(3, 0)) }])!;
     expect(verdictOf(a)).toBe("calm");
+  });
+});
+
+describe("sampling the route", () => {
+  it("asks in one place on a short day and spreads out on a long one", () => {
+    // ~1 km of riding: one site, because four readings of the same grid cell
+    // are four copies of the same answer.
+    expect(sampleSites(line({ lat: 50, lng: 8 }, 0.001, 0, 10))).toHaveLength(1);
+    // ~440 km: four, one per quarter.
+    expect(sampleSites(line({ lat: 45, lng: 8 }, 0.04, 0, 100))).toHaveLength(4);
+  });
+
+  it("leads with the middle, since the day's temperature is read off it", () => {
+    const long = line({ lat: 45, lng: 8 }, 0.04, 0, 100);
+    const [first] = sampleSites(long);
+    const middle = long[Math.floor(long.length / 2)];
+    expect(Math.abs(first.lat - middle.lat)).toBeLessThan(0.5);
+  });
+
+  it("has nothing to sample on an empty track", () => {
+    expect(sampleSites([])).toEqual([]);
+  });
+});
+
+describe("several sites along one day", () => {
+  it("answers each stretch with the wind nearest to it", () => {
+    // Headwind in the south, tailwind in the north, riding north through both.
+    // One site would have called the whole day one or the other.
+    // Long series: this "ride" takes 17 hours, and a wind that ran out at hour
+    // 12 would drop the northern half and fake a headwind day.
+    const south = { lat: 50, lng: 8, hourly: steady(20, 0, 24) };
+    const north = { lat: 52, lng: 8, hourly: steady(20, 180, 24) };
+    const ride = line({ lat: 50, lng: 8 }, 0.02, 0, 100);
+    const a = analyseWind([{ points: ride, sites: [south, north] }])!;
+    expect(a.headM).toBeGreaterThan(0);
+    expect(a.tailM).toBeGreaterThan(0);
+    // Symmetrical setup, so the two halves should very nearly cancel.
+    expect(Math.abs(a.headwindKmh)).toBeLessThan(4);
+    expect(nearestSite([south, north], { lat: 51.9, lng: 8 })).toBe(north);
   });
 });
 
@@ -236,7 +282,7 @@ describe("the speed classes", () => {
       gustKmh: Array(12).fill(40),
     };
     const long = line({ lat: 50, lng: 8 }, 0.01, 0, 40);
-    const north = analyseWind([{ points: long, hourly: gusty }])!.sectors[0];
+    const north = analyseWind([{ points: long, sites: sitesOf(gusty) }])!.sectors[0];
     expect(north.bins[3]).toBeGreaterThan(0);
     expect(north.bins[1]).toBeGreaterThan(0);
     expect(north.bins.reduce((s, v) => s + v, 0)).toBeCloseTo(north.distanceM, 5);

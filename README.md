@@ -61,10 +61,18 @@ notes, stats and weather.
   the rose already spends colour on strength and a second meaning for the same red an arm's
   length away is how a figure stops being readable. The whole trip gets the same rose at the
   top of the page.
-  The wind is measured, not guessed: Open-Meteo's hourly reanalysis at the middle of each
-  day's route, matched to the track's own timestamps and interpolated between the hours, then
+  The wind is measured, not guessed: Open-Meteo's hourly reanalysis, asked at up to **four
+  places spread along the day's route** rather than only at its middle, so each stretch of
+  riding is answered by the nearest reading — a hundred-kilometre stage does not have one
+  wind. (Sites closer than 15 km to each other are dropped, since they read the same grid
+  cell, which is why a short day keeps just one; all of them cost a single request either
+  way.) That is matched to the track's own timestamps, interpolated between the hours, and
   weighted by distance rather than time — so an hour in a café with the flags snapping is not
-  an hour of headwind. Only pedalled kilometres count; a train has no headwind. Days without
+  an hour of headwind. Only pedalled kilometres count; a train has no headwind.
+  Worth knowing when reading the numbers: every wind figure is the meteorological standard
+  **10 m above ground**, so what a rider felt at saddle height, behind hedges and buildings,
+  was typically a good deal less. Direction and the headwind/tailwind verdict are the solid
+  part; the exact km/h is a model value. Days without
   a clock on the track, or cached before this existed, simply show no ring — `/refreshweather`
   fills them in from the archive.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
