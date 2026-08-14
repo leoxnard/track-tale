@@ -54,26 +54,35 @@ const GAP_M = 5000;
 const HEAD_DEG = 60;
 
 /**
- * How far apart two sample sites have to be to be worth keeping both.
+ * How often along the route to ask what the wind was doing.
  *
- * ERA5's grid cell is about 31 km across, so two sites closer than this are
- * usually reading the same cell and would cost bytes to say the same thing
- * twice. It is also why a short day ends up with a single site and only a long
- * one gets four.
+ * Ten kilometres is roughly the grid of the finest data actually behind the
+ * answer — ERA5-Land resolves about 9 km, the short-range forecast models a
+ * little finer — so it is the point where asking more often starts returning
+ * the same numbers rather than better ones. It is also about the scale a rider
+ * notices: over ten kilometres a valley turns, a coast arrives, a forest ends.
  */
-const SITE_GAP_M = 15000;
+const SITE_SPACING_M = 10000;
 
-/** At most this many places asked about per day — four quarters of a route. */
-const MAX_SITES = 4;
+/**
+ * A ceiling, not a target. It only binds on a very long day, and when it does
+ * the sites simply spread further apart rather than stopping partway along the
+ * route. It exists because every site is a set of hourly readings that has to
+ * be stored on the day and shipped to whoever opens the page.
+ */
+const MAX_SITES = 24;
 
 /**
  * Where along a day's route to ask what the wind was doing.
  *
- * The midpoint comes first, because the day's temperature and rain are taken
- * from whichever site leads the list and the middle is the fairest single
- * answer to "what was the weather that day". The rest are the centres of the
- * four quarters, kept only where they are far enough from what is already in
- * the list to be a different place.
+ * Every ten kilometres, at the middle of each ten-kilometre chunk, so no
+ * stretch of the ride is answered by a reading taken beyond the end of it.
+ *
+ * The site nearest the middle of the day is moved to the front, because the
+ * day's temperature, rain and icon are read off whichever site leads the list
+ * and the middle is the fairest single answer to "what was the weather that
+ * day". The order of the rest does not matter: each stretch of riding looks up
+ * the nearest site by distance, not by position in the list.
  */
 export function sampleSites(points: TrackPoint[]): TrackPoint[] {
   if (points.length === 0) return [];
@@ -83,20 +92,20 @@ export function sampleSites(points: TrackPoint[]): TrackPoint[] {
     cumulative.push(cumulative[i - 1] + haversineM(points[i - 1], points[i]));
   }
   const total = cumulative[cumulative.length - 1];
-  const at = (fraction: number) => {
-    const target = total * fraction;
-    let i = cumulative.findIndex((d) => d >= target);
+  const at = (distance: number) => {
+    let i = cumulative.findIndex((d) => d >= distance);
     if (i === -1) i = points.length - 1;
     return points[i];
   };
 
-  const chosen: TrackPoint[] = [at(0.5)];
-  for (let q = 0; q < MAX_SITES; q++) {
-    if (chosen.length >= MAX_SITES) break;
-    const candidate = at((2 * q + 1) / (2 * MAX_SITES));
-    if (chosen.every((site) => haversineM(site, candidate) >= SITE_GAP_M)) chosen.push(candidate);
-  }
-  return chosen;
+  const count = Math.min(MAX_SITES, Math.max(1, Math.round(total / SITE_SPACING_M)));
+  const step = total / count;
+  const chosen = Array.from({ length: count }, (_, i) => at((i + 0.5) * step));
+
+  // The middle chunk's site goes first; with an even number of chunks either of
+  // the two middle ones is as good an answer as the other.
+  const middle = Math.floor((count - 1) / 2);
+  return [chosen[middle], ...chosen.filter((_, i) => i !== middle)];
 }
 
 export interface Ride {

@@ -50,31 +50,33 @@ notes, stats and weather.
   bicycle in the middle. North is up; each petal is a compass direction the wind blew *from*;
   how far it reaches is how many kilometres were ridden under that wind, with the rings
   labelled so a petal is a number and not just a shape; and each petal is banded by speed
-  class from the hub outwards, on Beaufort's boundaries, with the key to those classes printed
-  once, on the trip's own rose at the top of the page. The
-  only thing changed from the convention is what the rings count: kilometres ridden rather
-  than hours observed. The bicycle is ours, and it is the point — it holds the day's average
-  heading, so petals crowding its nose *are* a day of headwind and petals behind the saddle
-  *are* a day of being pushed along, no number needed. Underneath, the numbers anyway: the mean
-  wind and where it came from, gusts, and the day split into kilometres ridden against the
-  wind, across it and with it — that last bar in dark-to-pale rather than in colour, because
-  the rose already spends colour on strength and a second meaning for the same red an arm's
-  length away is how a figure stops being readable. The whole trip gets the same rose at the
-  top of the page.
-  The wind is measured, not guessed: Open-Meteo's hourly reanalysis, asked at up to **four
-  places spread along the day's route** rather than only at its middle, so each stretch of
-  riding is answered by the nearest reading — a hundred-kilometre stage does not have one
-  wind. (Sites closer than 15 km to each other are dropped, since they read the same grid
-  cell, which is why a short day keeps just one; all of them cost a single request either
-  way.) That is matched to the track's own timestamps, interpolated between the hours, and
-  weighted by distance rather than time — so an hour in a café with the flags snapping is not
-  an hour of headwind. Only pedalled kilometres count; a train has no headwind.
-  Worth knowing when reading the numbers: every wind figure is the meteorological standard
-  **10 m above ground**, so what a rider felt at saddle height, behind hedges and buildings,
-  was typically a good deal less. Direction and the headwind/tailwind verdict are the solid
-  part; the exact km/h is a model value. Days without
-  a clock on the track, or cached before this existed, simply show no ring — `/refreshweather`
-  fills them in from the archive.
+  class from the hub outwards, on Beaufort's boundaries, with the key printed once, on the
+  trip's own rose at the top of the page. The only thing changed from the convention is what
+  the rings count: kilometres ridden rather than hours observed. The bicycle is ours, and it
+  is the point — it holds the day's average heading, so petals crowding its nose *are* a day
+  of headwind and petals behind the saddle *are* a day of being pushed along, no number
+  needed. Underneath, the numbers anyway: the mean wind and where it came from, gusts, and
+  the day split into kilometres ridden against the wind, across it and with it — that last
+  bar in dark-to-pale rather than in colour, because the rose already spends colour on
+  strength, and a second meaning for the same red an arm's length away is how a figure stops
+  being readable.
+- The wind is **measured, not guessed**: Open-Meteo's hourly reanalysis, asked **every 10 km
+  along the day's route** rather than only at its middle, so each stretch of riding is
+  answered by the reading nearest to it — a hundred-kilometre stage does not have one wind.
+  Ten kilometres is about the grid of the finest data behind the answer (ERA5-Land resolves
+  ~9 km), so asking more often returns the same numbers rather than better ones; a short day
+  keeps a single site, and a very long one spreads its sites wider once it reaches the
+  ceiling of 24. However many there are, they cost one request — Open-Meteo answers for a
+  list of coordinates at once — and if that list is ever refused the day falls back to its
+  midpoint alone rather than losing its weather. Readings are matched to the track's own
+  timestamps, interpolated between the hours, and weighted **by distance rather than time**,
+  so an hour in a café with the flags snapping is not an hour of headwind. Only pedalled
+  kilometres count; a train has no headwind. Worth knowing when reading the figures: wind is
+  reported at the meteorological standard of **10 m above ground**, so what a rider felt at
+  saddle height, behind hedges and buildings, was typically a good deal less — the direction
+  and the headwind/tailwind verdict are the solid part, the exact km/h is a model value. A
+  day with no clock on its track, or cached before any of this existed, simply shows no rose;
+  `/refreshweather` fills those in from the archive.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the

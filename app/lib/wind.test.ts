@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TrackPoint } from "./track";
+import { haversineM, type TrackPoint } from "./track";
 import type { HourlyWind } from "./weather";
 import {
   BIN_COLORS,
@@ -209,23 +209,47 @@ describe("analyseWind", () => {
 });
 
 describe("sampling the route", () => {
-  it("asks in one place on a short day and spreads out on a long one", () => {
-    // ~1 km of riding: one site, because four readings of the same grid cell
-    // are four copies of the same answer.
+  /** Metres between the first and last point of a straight line of them. */
+  const lengthOf = (points: TrackPoint[]) => haversineM(points[0], points[points.length - 1]);
+
+  it("asks about every ten kilometres of riding", () => {
+    // ~1 km: one site. Asking twice would be asking the same grid cell twice.
     expect(sampleSites(line({ lat: 50, lng: 8 }, 0.001, 0, 10))).toHaveLength(1);
-    // ~440 km: four, one per quarter.
-    expect(sampleSites(line({ lat: 45, lng: 8 }, 0.04, 0, 100))).toHaveLength(4);
+    // ~111 km of riding, so around eleven sites.
+    const day = line({ lat: 50, lng: 8 }, 0.01, 0, 101);
+    expect(lengthOf(day) / 1000).toBeCloseTo(111, -1);
+    expect(sampleSites(day)).toHaveLength(11);
+  });
+
+  it("spreads wider rather than stopping short on an enormous day", () => {
+    // ~440 km would be 44 sites at ten-kilometre spacing; capped at 24, they
+    // must still cover the whole route rather than the first 240 km of it.
+    const epic = line({ lat: 45, lng: 8 }, 0.04, 0, 100);
+    const sites = sampleSites(epic);
+    expect(sites).toHaveLength(24);
+    const north = Math.max(...sites.map((s) => s.lat));
+    const south = Math.min(...sites.map((s) => s.lat));
+    expect(north).toBeGreaterThan(epic[epic.length - 1].lat - 0.5);
+    expect(south).toBeLessThan(epic[0].lat + 0.5);
   });
 
   it("leads with the middle, since the day's temperature is read off it", () => {
-    const long = line({ lat: 45, lng: 8 }, 0.04, 0, 100);
-    const [first] = sampleSites(long);
-    const middle = long[Math.floor(long.length / 2)];
-    expect(Math.abs(first.lat - middle.lat)).toBeLessThan(0.5);
+    const day = line({ lat: 45, lng: 8 }, 0.01, 0, 101);
+    const [first] = sampleSites(day);
+    const middle = day[Math.floor(day.length / 2)];
+    expect(Math.abs(first.lat - middle.lat)).toBeLessThan(0.1);
   });
 
   it("has nothing to sample on an empty track", () => {
     expect(sampleSites([])).toEqual([]);
+  });
+
+  it("gives a standing-still day the one site it needs", () => {
+    const parked = [
+      { lat: 50, lng: 8, time: START },
+      { lat: 50, lng: 8, time: START + HOUR },
+    ];
+    expect(sampleSites(parked)).toHaveLength(1);
   });
 });
 

@@ -155,11 +155,22 @@ export async function fetchDayWeather(
 ): Promise<DayWeather | null> {
   if (sites.length === 0) return null;
   const ageDays = (Date.now() - Date.parse(isoDate + "T00:00:00Z")) / 86400000;
-  const [first, second] =
+  const order =
     ageDays > ARCHIVE_LAG_DAYS ? [ARCHIVE_API, FORECAST_API] : [FORECAST_API, ARCHIVE_API];
 
-  const all =
-    (await fetchDaily(first, sites, isoDate)) ?? (await fetchDaily(second, sites, isoDate));
+  const fromEither = async (want: LatLng[]) => {
+    for (const endpoint of order) {
+      const res = await fetchDaily(endpoint, want, isoDate);
+      if (res) return res;
+    }
+    return null;
+  };
+
+  // A long day asks about two dozen places at once. If that is ever refused —
+  // a limit on how many coordinates one request may carry, a URL grown too
+  // long — the day should lose its wind detail, not its temperature: falling
+  // back to the middle alone is exactly what this used to do for every day.
+  const all = (await fromEither(sites)) ?? (sites.length > 1 ? await fromEither(sites.slice(0, 1)) : null);
   if (!all) return null;
   // The day's temperature, rain and icon stay one number for the day, taken at
   // the site the caller put first — spreading those over the route would only
@@ -174,8 +185,15 @@ export async function fetchDayWeather(
     windFromDeg: d.wind_direction_10m_dominant?.[0] ?? null,
     weatherCode: d.weather_code?.[0] ?? null,
     hourlyWind: toHourlyWind(res.hourly),
+    // Just the coordinates: the sample sites arrive as track points, and an
+    // altitude and a timestamp per site would be stored on every day and
+    // shipped to every reader for nothing.
     windSites: all
-      .map((site, i) => ({ ...sites[i], hourly: toHourlyWind(site.hourly) }))
+      .map((site, i) => ({
+        lat: sites[i].lat,
+        lng: sites[i].lng,
+        hourly: toHourlyWind(site.hourly),
+      }))
       .filter((site): site is WindSite => site.hourly !== null),
   };
 }

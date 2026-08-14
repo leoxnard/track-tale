@@ -99,7 +99,7 @@ Messages are **edited in place** rather than re-sent — that is the established
   *plan* it covered, matched by coordinates rather than stacked in sequence. Both files
   carry long comments explaining why the obvious approach is wrong; read them first.
 - `wind.ts` — the wind rose behind the family page: hourly wind from `weather.ts`, sampled at
-  up to four sites along the route (`sampleSites`, one Open-Meteo request for all of them) and
+  one site per 10 km of route (`sampleSites`, one Open-Meteo request for all of them) and
   matched to a track's timestamps by nearest site, then summed **by distance** into headwind,
   crosswind and the petals,
   each petal split across the Beaufort speed classes the legend names. Wind directions are
