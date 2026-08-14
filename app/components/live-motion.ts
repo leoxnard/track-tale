@@ -26,7 +26,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /** How long a finger has to stay put before it counts as a hold and not a tap. */
 const HOLD_MS = 250;
 
-/** Past this a press is a scroll that started on a photo, not a hold. */
+/**
+ * Past this a press has travelled far enough to be a swipe. Only consulted
+ * where a swipe means something — see `playWhileScrolling`.
+ */
 const HOLD_SLOP_PX = 12;
 
 /**
@@ -45,9 +48,29 @@ interface Options {
   holdWithMouse?: boolean;
   /** Whether a short tap plays it through, rather than only a hold. */
   playOnTap?: boolean;
+  /**
+   * Whether a finger that rests on the picture and then scrolls the page still
+   * plays it.
+   *
+   * True in the grid, which is the way most of these are actually watched: you
+   * scroll through a day with a thumb on the pictures, and the one under it
+   * moving is the whole charm of the thing. It means letting the hold survive
+   * both the finger travelling and the browser taking the gesture away for
+   * scrolling — after `pointercancel` there are no more events at all, so the
+   * timer firing into the silence is precisely what says "the finger was on
+   * this picture when the page started to move".
+   *
+   * False full screen, where sideways *is* a gesture: a swipe to the next photo
+   * should not set the one being left behind playing on its way out.
+   */
+  playWhileScrolling?: boolean;
 }
 
-export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Options = {}) {
+export function useLiveMotion({
+  holdWithMouse = false,
+  playOnTap = false,
+  playWhileScrolling = false,
+}: Options = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
 
@@ -135,6 +158,10 @@ export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Opti
       if (e.pointerType === "mouse" && !holdWithMouse) return;
       from.current = { x: e.clientX, y: e.clientY };
       held.current = false;
+      // A press that was cancelled by a scroll never got its `pointerup`, so it
+      // may have left this set. Clearing it here rather than there is what stops
+      // a scroll swallowing the tap that comes after it.
+      swallowClick.current = false;
       clearHold();
       hold.current = window.setTimeout(() => {
         held.current = true;
@@ -142,8 +169,9 @@ export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Opti
       }, HOLD_MS);
     },
     onPointerMove: (e: React.PointerEvent) => {
-      // A finger that has travelled is scrolling the page. Let it, and don't
-      // start a video underneath it.
+      if (playWhileScrolling) return;
+      // Somewhere a sideways drag means something else. A finger that has
+      // travelled is on its way to the next photo, not asking for this one.
       const origin = from.current;
       if (!origin || held.current) return;
       if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > HOLD_SLOP_PX) clearHold();
@@ -166,6 +194,10 @@ export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Opti
       if (playOnTap) start();
     },
     onPointerCancel: () => {
+      // The browser has taken the gesture to scroll with. Where that counts as
+      // watching, leave the pending hold alone and let it play into a page that
+      // is already moving; the observer stops it again once the tile leaves.
+      if (playWhileScrolling) return;
       clearHold();
       if (held.current) {
         held.current = false;

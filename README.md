@@ -151,9 +151,10 @@ notes, stats and weather.
   swipe to run through every photo on the trip.
 - A **Live Photo** moves. In the day's grid, **hold a finger on it** and it plays — without
   the photo opening full screen when you let go, and without iOS's own press-and-hold menu
-  appearing over the top. A mouse plays it by pointing at it. Scrolling one into the middle
-  of the screen plays it once too, which is what makes the whole thing findable: nobody holds
-  a finger on a photo to see whether it might move. Full screen, it plays once as it opens
+  appearing over the top. Resting a thumb on a picture and **scrolling on** counts as holding
+  it, which is how a day actually gets looked at. A mouse plays it by pointing at it.
+  Scrolling one into the middle of the screen plays it once too, which is what makes the
+  whole thing findable: nobody holds a finger on a photo to see whether it might move. Full screen, it plays once as it opens
   and then on **a single tap**, on a hold, or from the **Live** badge. A hold starts the clip
   rather than gating it — letting go a moment later would show almost nothing, and three
   seconds is short enough to simply run. The still stays underneath throughout, so a photo

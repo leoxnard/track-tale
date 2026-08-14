@@ -7,8 +7,11 @@ import { useLiveMotion } from "./live-motion";
  * An iPhone plays a Live Photo when you press and hold it, and that gesture is
  * what this offers back: hold a finger on the tile and it plays, without the
  * photo opening full screen when the finger lifts and without iOS's own
- * press-and-hold menu appearing over the top. A mouse gets the same thing by
- * pointing, which is the desktop's version of dwelling on something.
+ * press-and-hold menu appearing over the top. Resting a thumb on a picture and
+ * scrolling on counts as holding it — that is how a day actually gets looked
+ * at, and the picture under the thumb moving is the point of the whole feature.
+ * A mouse gets the same thing by pointing, which is the desktop's version of
+ * dwelling on something.
  *
  * Scrolling one into the middle of the screen also plays it, once. That is the
  * part that makes the feature findable at all — nobody long-presses a photo to
@@ -43,7 +46,10 @@ const PLAY_VISIBILITY = 0.75;
 export function LivePhoto({ stillUrl, motionUrl, alt, liveLabel, className }: Props) {
   // Not with the mouse: the tile is a link, and a slow click still has to open
   // the photo rather than being eaten as a hold. Pointing plays it instead.
-  const { videoRef, playing, start, stop, press } = useLiveMotion({ holdWithMouse: false });
+  const { videoRef, playing, start, stop, press } = useLiveMotion({
+    holdWithMouse: false,
+    playWhileScrolling: true,
+  });
   const frameRef = useRef<HTMLDivElement>(null);
 
   // The phone half. Only where there is no pointer: on a desktop this would
