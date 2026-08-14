@@ -91,10 +91,15 @@ notes, stats and weather.
   was already there beside the temperature and the rain (`🌧️ 9–11°C · 💧 2.0 mm · ↘ 12 km/h`),
   and the rose opens on a tap. Expanded under every day of a three-week trip it pushed the
   photographs and the writing off the screen, which is the wrong way round — the wind is
-  context for a day, not the day. The arrow points **where the wind was going**, like every
-  arrow on the map rather than back at its source; where it came from is named in the
-  tooltip, in words, where there is no ambiguity to have. The trip's own rose at the top of
-  the page stays open, since it is the one worth the room and the one carrying the key.
+  context for a day, not the day. That arrow is in the **rider's frame**, exactly like the one
+  on the rose it opens: up is the direction of travel, so an arrow pointing down at you is
+  wind in the face and one pointing up is wind at your back. A compass arrow was the first
+  version and it answered the wrong question — "north-west" says nothing about a day unless
+  you also remember which way the road ran, which is why the rose left the compass in the
+  first place. On a ride that met the wind from every side the arrow gives way to a ring,
+  since there is no mean angle to point at; both directions are in the tooltip regardless, in
+  words. The trip's own rose at the top of the page stays open, since it is the one worth the
+  room and the one carrying the key.
 - The wind is **measured, not guessed**: Open-Meteo's hourly reanalysis, asked **every 10 km
   along the day's route** rather than only at its middle, so each stretch of riding is
   answered by the reading nearest to it — a hundred-kilometre stage does not have one wind.

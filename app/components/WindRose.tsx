@@ -424,11 +424,17 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
  * at all, because it joins a line that was already there beside the temperature
  * and the rain.
  *
- * The arrow points **where the wind was going**, like every arrow the map draws,
- * rather than back at where it came from. Both conventions exist in the wild and
- * a small arrow cannot say which one it is following, so the one thing that
- * settles it is that the product only uses one. The direction it came from is
- * named in the tooltip, and in words, where there is no ambiguity to have.
+ * The arrow is in the **rider's frame**, exactly like the one on the rose it
+ * opens: up is the direction of travel, so an arrow pointing down at you is the
+ * wind in your face and one pointing up is the wind at your back. A compass
+ * arrow was the first version and it was the wrong question — "north-west" tells
+ * a reader nothing about a day unless they also remember which way the road ran,
+ * which is the whole reason the rose stopped using the compass. Both directions
+ * are in the tooltip anyway, in words.
+ *
+ * On a ride that met the wind from every side there is no mean angle to draw,
+ * and the arrow gives way to a ring: the same restraint the rose shows, for the
+ * same reason. Pointing somewhere confident would be inventing an answer.
  */
 export function WindChip({
   wind,
@@ -441,35 +447,46 @@ export function WindChip({
 }) {
   const m = useMessages();
   const from = m.wind.points[Math.round(norm360(wind.windFromDeg) / 22.5) % 16];
+  const angle = m.wind.relative[Math.round(norm360(wind.relativeDeg) / 45) % 8];
+  const settled = wind.relativeConcentration > 0.2;
+  const colour = windColor(wind.windKmh);
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      title={m.wind.chip(Math.round(wind.windKmh), from)}
-      className="ml-1 inline-flex items-center gap-1 align-baseline rounded-full px-1 hover:text-pine focus-visible:outline-2 focus-visible:outline-pine"
+      title={
+        settled
+          ? m.wind.chip(Math.round(wind.windKmh), angle, from)
+          : m.wind.chipScattered(Math.round(wind.windKmh), from)
+      }
+      className="ml-1 inline-flex items-center gap-1 rounded-full px-1 align-baseline hover:text-pine focus-visible:outline-2 focus-visible:outline-pine"
     >
       <svg
         width={12}
         height={12}
         viewBox="0 0 24 24"
         aria-hidden
-        // Rounded, like everything else that reaches the markup: at full
+        // The rose puts its mean-wind arrow at `relativeDeg` pointing inward, so
+        // the air travels along `relativeDeg + 180`: at a headwind, down at the
+        // rider. Rounded like everything else that reaches the markup — at full
         // precision the server and the browser disagree in the last bits and
-        // React calls the whole thing a hydration mismatch.
-        style={{ transform: `rotate(${round(norm360(wind.windFromDeg + 180))}deg)` }}
+        // React calls it a hydration mismatch.
+        style={
+          settled
+            ? { transform: `rotate(${round(norm360(wind.relativeDeg + 180))}deg)` }
+            : undefined
+        }
         className="shrink-0"
       >
-        <path
-          d="M12 2 L18 13 L12 10.5 L6 13 Z"
-          fill={windColor(wind.windKmh)}
-        />
-        <path
-          d="M12 10 V22"
-          stroke={windColor(wind.windKmh)}
-          strokeWidth={2.6}
-          strokeLinecap="round"
-        />
+        {settled ? (
+          <>
+            <path d="M12 2 L18 13 L12 10.5 L6 13 Z" fill={colour} />
+            <path d="M12 10 V22" stroke={colour} strokeWidth={2.6} strokeLinecap="round" />
+          </>
+        ) : (
+          <circle cx={12} cy={12} r={7} fill="none" stroke={colour} strokeWidth={3} />
+        )}
       </svg>
       {Math.round(wind.windKmh)} km/h
       <span className="sr-only">{m.wind.expand}</span>
