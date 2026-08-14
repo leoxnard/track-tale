@@ -439,7 +439,7 @@ export function binLabel(bin: number): string {
 /**
  * The ramp, one step per speed class.
  *
- * Sequential, not categorical: lightness falls monotonically (0.92 → 0.80 →
+ * Sequential, not categorical: lightness falls monotonically (0.85 → 0.80 →
  * 0.69 → 0.54 → 0.38 in OKLab) so the order survives greyscale, a colourblind
  * reader and a bad screen, and the hue warms along with it because a rider
  * reading it expects the hard end to be the red end. The two middle steps sit
@@ -447,8 +447,12 @@ export function binLabel(bin: number): string {
  * never leans on colour alone: the classes are stacked in order from the hub
  * outwards, separated by a hairline of paper, listed in that order in the
  * legend, and spelled out in each petal's tooltip.
+ *
+ * The calm step is a sage rather than the near-paper it started as. On the
+ * rose that was merely quiet; on the map, where the same ramp colours the
+ * arrows and each one carries a paper-coloured halo, it was a ghost.
  */
-export const BIN_COLORS = ["#e2e6dc", "#e6b833", "#e0801f", "#c33320", "#79180f"];
+export const BIN_COLORS = ["#c9d2c3", "#e6b833", "#e0801f", "#c33320", "#79180f"];
 
 export function windColor(kmh: number): string {
   return BIN_COLORS[binOf(kmh)];

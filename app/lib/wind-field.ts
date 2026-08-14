@@ -6,11 +6,21 @@
  * says half headwind is often a day with one exposed valley in it, and the only
  * way to see that is on the map, over the ground it happened on.
  *
- * The arrows sit in lanes either side of the line rather than on it, because on
- * it they would bury the day's own colour under a row of chevrons — the route is
- * the subject and the wind is the weather around it. The lane spacing is in
- * metres, so the channel is a real buffer on the ground and narrows to the line
- * as you zoom out, rather than a fixed-width ribbon that means nothing.
+ * **Nothing here is positioned on the ground.** What is stored is a list of
+ * samples *on the route* — a place, a moment, a wind — and the channel around
+ * them is laid out fresh every frame from one number: how many metres a pixel is
+ * currently worth. The lanes therefore sit about a centimetre either side of the
+ * line whatever the zoom, which is kilometres of ground with a whole tour on
+ * screen and a few hundred metres in a valley. Baking the lanes into the field
+ * at a fixed width in metres was the first attempt, and it meant the channel was
+ * either a wide smear or a hairline depending on how far out you happened to be,
+ * with a visible jump each time a lane was dropped to cope.
+ *
+ * The density along the route is handled the same way and, more importantly,
+ * **fades between levels rather than switching**. Zoom in and the arrows halfway
+ * between the ones already there fade up into place; zoom out and they fade
+ * away again. A hard stride would pop a whole alternating set in and out at one
+ * pixel of zoom, which is the thing that makes an overlay look broken.
  *
  * Two directions to keep straight. The wind's own convention says where it comes
  * *from*; an arrow has to point where it is *going*, so `towardDeg` is the
@@ -22,57 +32,54 @@
 import { haversineM, type TrackPoint } from "./track";
 import { bearingDeg, binOf, nearestSite, norm360, windAt, type Ride } from "./wind";
 
-export interface WindArrow {
+/** One place on the route, with the wind that was over it at the time. */
+export interface WindSample {
+  /** On the route itself. The lanes are worked out from here at draw time. */
   lng: number;
   lat: number;
-  /** Degrees clockwise from north the wind blew *towards* — where the arrow points. */
+  /** Which way the riding was going here — the axis the lanes are square to. */
+  travelDeg: number;
+  /** Degrees clockwise from north the wind blew *towards* — where an arrow points. */
   towardDeg: number;
   speedKmh: number;
   /** Which speed class, for the colour it shares with the rose's petals. */
   bin: number;
   /**
-   * Which step along the route this arrow belongs to, counting from the start
-   * of the trip. Thinning takes every nth step, so what survives is spread
-   * evenly down the whole route rather than dense at the start and bare at the
-   * end, and the arrows that survive stay where they were rather than
-   * reshuffling as the map moves.
+   * Which step along the route this is, counting from the start of the trip.
+   * The thinning keeps steps divisible by a power of two, so what survives is
+   * spread evenly down the whole route, and — because the sets nest — zooming
+   * in only ever *adds* arrows between the ones already on screen.
    */
   step: number;
-  /** Which lane, -2..2 without 0. Outer lanes go first when the channel closes. */
-  lane: number;
   /** 0–1, so a hundred arrows do not drift and fade in lockstep. */
   phase: number;
 }
 
-/** How far apart the arrows sit along the route at full detail. */
+/** How far apart the samples sit along the route at full detail. */
 const STEP_M = 450;
-/** Lanes either side of the line, and the gap between them. */
-const LANES = 2;
-const LANE_GAP_M = 600;
-/**
- * How far apart the arrows should sit **on screen**, in CSS pixels.
- *
- * Screen distance rather than ground distance is the whole trick. Thinning by
- * zoom level was the first attempt and it emptied the map exactly when the map
- * was most worth looking at: zoomed out to the whole tour, the arrows were
- * fewer, smaller and no more visible than the paper they sat on. Ground spacing
- * is what should change with the zoom; how the channel *reads* should not.
- */
-const TARGET_SPACING_PX = 52;
+
+/** CSS pixels per centimetre at the CSS reference resolution. */
+const PX_PER_CM = 96 / 2.54;
 
 /**
- * How far apart two lanes must be on screen to be worth drawing as two.
+ * The channel's half-width and the gap between arrows, both on screen.
  *
- * Below the first threshold the outer pair sits on top of the inner one; below
- * the second, even the inner pair does, and the channel has become a single
- * file of arrows along the route. Drawing both anyway would stack two arrows on
- * one spot — twice the work for a smudge.
+ * A centimetre of buffer is wide enough to read as a channel around the route
+ * rather than decoration on it, and narrow enough that it still belongs to the
+ * line at a glance. The along-route gap is a little wider than the lane gap so
+ * the channel reads as flowing rather than as a grid.
  */
-const LANE_LEGIBLE_PX = 7;
-const LANE_DISTINCT_PX = 3.5;
+const BUFFER_CM = 1;
+const SPACING_CM = 1.15;
+/** Lanes either side; the outer pair sits at the full buffer width. */
+const LANES = [-2, -1, 1, 2];
 
 /** Metres to degrees, near enough at the scale of a lane's width. */
-function offsetPoint(p: TrackPoint, bearing: number, metres: number): { lat: number; lng: number } {
+function offsetPoint(
+  p: { lat: number; lng: number },
+  bearing: number,
+  metres: number,
+): { lat: number; lng: number } {
   const rad = (bearing * Math.PI) / 180;
   const north = Math.cos(rad) * metres;
   const east = Math.sin(rad) * metres;
@@ -83,14 +90,14 @@ function offsetPoint(p: TrackPoint, bearing: number, metres: number): { lat: num
 }
 
 /**
- * Build the field for any number of rides.
+ * Build the samples for any number of rides.
  *
- * Deterministic, including the phases: the arrows must land in the same places
+ * Deterministic, including the phases: the samples must land in the same places
  * on every render, or toggling the overlay would reshuffle the whole channel.
  */
-export function windField(rides: Ride[]): WindArrow[] {
-  const arrows: WindArrow[] = [];
-  let sinceLast = STEP_M; // so the first point of a ride gets an arrow
+export function windField(rides: Ride[]): WindSample[] {
+  const samples: WindSample[] = [];
+  let sinceLast = STEP_M; // so the first point of a ride gets a sample
   let index = 0;
 
   for (const ride of rides) {
@@ -107,71 +114,94 @@ export function windField(rides: Ride[]): WindArrow[] {
       const wind = windAt(nearestSite(ride.sites, a).hourly, a.time);
       if (!wind || wind.speedKmh <= 0) continue;
 
-      const travel = bearingDeg(a, b);
-      const towardDeg = norm360(wind.fromDeg + 180);
-      const bin = binOf(wind.speedKmh);
-      // A phase that walks around the cycle with the arrows rather than jumping
-      // about: neighbours differ a little, so the channel reads as something
-      // moving through it instead of everything blinking at once.
-      const phase = (index * 0.137) % 1;
-      const step = index;
+      samples.push({
+        lat: a.lat,
+        lng: a.lng,
+        travelDeg: bearingDeg(a, b),
+        towardDeg: norm360(wind.fromDeg + 180),
+        speedKmh: wind.speedKmh,
+        bin: binOf(wind.speedKmh),
+        step: index,
+        // A phase that walks around the cycle with the samples rather than
+        // jumping about: neighbours differ a little, so the channel reads as
+        // something moving through it instead of everything blinking at once.
+        phase: (index * 0.137) % 1,
+      });
       index++;
-
-      for (let lane = -LANES; lane <= LANES; lane++) {
-        if (lane === 0) continue; // the line itself belongs to the day's colour
-        const { lat, lng } = offsetPoint(a, travel + 90, lane * LANE_GAP_M);
-        arrows.push({
-          lat,
-          lng,
-          towardDeg,
-          speedKmh: wind.speedKmh,
-          bin,
-          step,
-          lane,
-          phase: (phase + Math.abs(lane) * 0.31) % 1,
-        });
-      }
     }
   }
-  return arrows;
+  return samples;
+}
+
+export interface Channel {
+  /** Ground distance between lanes, so the channel is a constant width on screen. */
+  laneGapM: number;
+  /** The lanes to draw, inner pair first. */
+  lanes: number[];
+  /** Samples on this stride are fully drawn. Always a power of two. */
+  coarse: number;
+  /** Samples on this stride are the in-between ones, fading by `blend`. */
+  fine: number;
+  /** 0 when the fine set is fully in, 1 when it has faded out entirely. */
+  blend: number;
 }
 
 /**
- * How the channel is thinned at a given scale: take every `stride`th step along
- * the route, and only lanes out to `lanes` either side.
+ * How to lay the channel out at a given scale.
  *
- * Both fall out of one number — how many metres a pixel is worth — so the
- * channel keeps the same look on screen whether it covers a village or a
- * country, and the arrows only ever get further apart on the ground.
+ * Everything falls out of metres-per-pixel, so the channel looks the same
+ * whether it covers a village or a country: about a centimetre of buffer, about
+ * a centimetre between arrows, and the arrows themselves kilometres apart on the
+ * ground when the whole tour is on screen.
+ *
+ * The two strides are powers of two so their sets nest — every arrow of the
+ * coarse set is also in the fine set — which is what lets one fade into the
+ * other without anything jumping sideways.
  */
-export function channelFor(metresPerPixel: number): { stride: number; lanes: number[] } {
-  const wanted = (TARGET_SPACING_PX * metresPerPixel) / STEP_M;
-  const gapPx = LANE_GAP_M / metresPerPixel;
+export function channelFor(metresPerPixel: number): Channel {
+  const wantedSteps = Math.max(1, (SPACING_CM * PX_PER_CM * metresPerPixel) / STEP_M);
+  const level = Math.log2(wantedSteps);
+  const floor = Math.max(0, Math.floor(level));
   return {
-    stride: Math.min(400, Math.max(1, Math.round(wanted))),
-    // The channel closes as the map pulls back: four lanes, then two, then one
-    // file of arrows following the route. It never closes to none.
-    lanes: gapPx >= LANE_LEGIBLE_PX ? [-2, -1, 1, 2] : gapPx >= LANE_DISTINCT_PX ? [-1, 1] : [1],
+    laneGapM: (BUFFER_CM / 2) * PX_PER_CM * metresPerPixel,
+    lanes: LANES,
+    coarse: 2 ** (floor + 1),
+    fine: 2 ** floor,
+    blend: Math.max(0, Math.min(1, level - floor)),
   };
 }
 
 /**
- * Where an arrow is, and how visible it is, at one moment of the drift.
+ * How visible one sample is at this level of detail: full for the arrows that
+ * survive to the next level out, fading for the ones that will not.
+ */
+export function detailAlpha(sample: WindSample, channel: Channel): number {
+  if (sample.step % channel.coarse === 0) return 1;
+  if (sample.step % channel.fine === 0) return 1 - channel.blend;
+  return 0;
+}
+
+/**
+ * Where one arrow of one sample is, and how visible, at this moment.
  *
- * Each arrow slides a short way along its own direction and fades out as it
- * goes, restarting from nothing — so the reset is never seen, which is the only
- * hard part of making a loop of this kind look like weather rather than a
+ * The lane offset is applied first — square to the direction of travel — and the
+ * drift along the wind on top of it. Each arrow slides a short way and fades out
+ * as it goes, restarting from nothing, so the reset is never seen: that is the
+ * only hard part of making a loop of this kind look like weather rather than a
  * carousel.
  */
-export function driftAt(
-  arrow: WindArrow,
+export function placeArrow(
+  sample: WindSample,
+  lane: number,
+  channel: Channel,
   nowMs: number,
   cycleMs = 3200,
-  driftM = 260,
 ): { lat: number; lng: number; opacity: number } {
-  const t = ((nowMs / cycleMs + arrow.phase) % 1 + 1) % 1;
-  const { lat, lng } = offsetPoint(arrow, arrow.towardDeg, t * driftM);
-  // Peaks well clear of the basemap: at 0.75 the calm classes were a rumour
-  // over anything but plain paper.
-  return { lat, lng, opacity: Math.sin(Math.PI * t) * 0.9 };
+  const t = (((nowMs / cycleMs + sample.phase) % 1) + 1) % 1;
+  const lanePoint = offsetPoint(sample, sample.travelDeg + 90, lane * channel.laneGapM);
+  // Drift scales with the channel too, so an arrow always travels about the same
+  // distance across the screen however far out the map is.
+  const drift = channel.laneGapM * 1.6;
+  const { lat, lng } = offsetPoint(lanePoint, sample.towardDeg, t * drift);
+  return { lat, lng, opacity: Math.sin(Math.PI * t) * detailAlpha(sample, channel) };
 }

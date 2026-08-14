@@ -108,12 +108,13 @@ Messages are **edited in place** rather than re-sent — that is the established
   around. `directness` and `relativeConcentration` guard anything that would otherwise state
   a direction for such a ride. The tests exist mostly to keep those frames from being flipped
   by accident. `WindRose.tsx` lists its deviations from the standard figure at the top.
-- `wind-field.ts` — the map overlay's arrows: the same rides and sites as the rose, sampled
-  every 450 m into lanes either side of the route. Arrows point where the wind *went*
-  (`towardDeg`), the reverse of everything in `wind.ts`. `channelFor` thins it by **metres per
-  pixel** rather than by zoom level — what should stay constant is how dense the channel looks
-  on screen, not how far apart the arrows are on the ground — and `driftAt` is the animation,
-  fading to nothing at the moment each arrow snaps back so the loop is never seen. The maplibre layer that draws it lives in `t.$slug.tsx`.
+- `wind-field.ts` — the map overlay's arrows. Stores samples **on the route** only; the lanes,
+  the spacing and the drift are all derived per frame from metres-per-pixel (`channelFor`), so
+  the channel is a constant ~1 cm either side at any zoom. `detailAlpha` cross-fades between
+  power-of-two strides — the sets nest, so zooming adds arrows between the existing ones
+  instead of swapping a whole set in at one pixel of zoom. Arrows point where the wind *went*
+  (`towardDeg`), the reverse of everything in `wind.ts`. The maplibre layer that draws it lives
+  in `t.$slug.tsx`, on top of the day lines, with a paper halo baked into each icon.
 - `riding-weather.ts` — rain and temperature over the *riding hours*, off the same hourly
   series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
   of its hour and must never be interpolated; temperature is an instant and must be. Both

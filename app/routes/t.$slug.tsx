@@ -26,7 +26,7 @@ import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather, type WeatherSite } from "../lib/weather";
 import { analyseWind, BIN_COLORS, type Ride, type WindAnalysis } from "../lib/wind";
-import { channelFor, driftAt, windField, type WindArrow } from "../lib/wind-field";
+import { channelFor, placeArrow, windField, type WindSample } from "../lib/wind-field";
 import {
   analyseRidingWeather,
   hasTemperature,
@@ -454,21 +454,30 @@ function ensureWindArrow(map: import("maplibre-gl").Map, bin: number): string {
   const ctx = canvas.getContext("2d");
   if (!ctx) return id;
   ctx.scale(scale, scale);
-  ctx.fillStyle = BIN_COLORS[bin];
-  ctx.strokeStyle = BIN_COLORS[bin];
-  ctx.lineWidth = 2.4;
+  const shaft = new Path2D();
+  shaft.moveTo(size / 2, size - 3);
+  shaft.lineTo(size / 2, 8);
+  const head = new Path2D();
+  head.moveTo(size / 2, 2);
+  head.lineTo(size / 2 + 6, 11);
+  head.lineTo(size / 2, 8.5);
+  head.lineTo(size / 2 - 6, 11);
+  head.closePath();
+
+  // A halo of paper first, so an arrow keeps its shape lying on top of the day's
+  // own line and over whatever the basemap puts underneath.
+  ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(size / 2, size - 3);
-  ctx.lineTo(size / 2, 8);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(size / 2, 2);
-  ctx.lineTo(size / 2 + 5.5, 10.5);
-  ctx.lineTo(size / 2, 8);
-  ctx.lineTo(size / 2 - 5.5, 10.5);
-  ctx.closePath();
-  ctx.fill();
+  ctx.strokeStyle = "#fbfaf7";
+  ctx.lineWidth = 5.4;
+  ctx.stroke(shaft);
+  ctx.stroke(head);
+
+  ctx.strokeStyle = BIN_COLORS[bin];
+  ctx.fillStyle = BIN_COLORS[bin];
+  ctx.lineWidth = 2.6;
+  ctx.stroke(shaft);
+  ctx.fill(head);
   map.addImage(id, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: scale });
   return id;
 }
@@ -504,7 +513,7 @@ function TripMap({
   /** Whether the wind channel is switched on. */
   wind: boolean;
   /** The whole trip's wind field, built once by the page. */
-  windArrows: WindArrow[];
+  windArrows: WindSample[];
   /** Open a photo marker in the lightbox instead of navigating to the file. */
   onPhoto: (photo: ViewerPhoto) => void;
   m: Messages;
@@ -629,7 +638,7 @@ function TripMap({
             // Slightly *larger* when zoomed out, not smaller. Shrinking them
             // there was backwards: that is the view where an arrow has the
             // least to sit against and the most work to do.
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 8, 0.95, 15, 0.8],
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 8, 1, 15, 0.85],
             visibility: windRef.current ? "visible" : "none",
           },
           paint: { "icon-opacity": ["get", "o"] },
@@ -761,6 +770,14 @@ function TripMap({
           new maplibregl.Marker({ element: el }).setLngLat(live.current).addTo(map);
         }
 
+        // The wind goes on top of everything the map draws. It was added early,
+        // under the tour's own lines, on the reasoning that the route is the
+        // subject — but a half-transparent arrow beneath a 5 px coloured line is
+        // simply not there, and the arrows are the whole point of switching the
+        // overlay on. The halo around each one is what lets them sit over the
+        // line without burying it.
+        map.moveLayer(WIND_LAYER);
+
         // Only now do the source and the layer exist, so an overlay switched on
         // while the style was still loading gets its first frame here rather
         // than never: `setWind` ran too early to find anything to draw into.
@@ -794,24 +811,24 @@ function TripMap({
         // Thinned by real scale, not by zoom number: a zoom level covers a very
         // different distance in Scotland than at the equator, and the channel
         // should read the same in both.
-        const { stride, lanes } = channelFor(metersPerCm(map) / CSS_PX_PER_CM);
-        const drawnLanes = new Set(lanes);
+        const channel = channelFor(metersPerCm(map) / CSS_PX_PER_CM);
+        // Room for a sample whose arrows sit a channel-width off the route and
+        // then drift further, so nothing pops in at the edge of the screen.
+        const reach = (channel.laneGapM * 4) / 111320;
         const b = map.getBounds();
         // A margin, so arrows drift in from off screen instead of appearing at
         // the edge.
-        const pad = 0.02;
-        const west = b.getWest() - pad;
-        const east = b.getEast() + pad;
-        const south = b.getSouth() - pad;
-        const north = b.getNorth() + pad;
+        const west = b.getWest() - reach;
+        const east = b.getEast() + reach;
+        const south = b.getSouth() - reach;
+        const north = b.getNorth() + reach;
 
-        const onScreen = (arrow: WindArrow) =>
-          arrow.step % stride === 0 &&
-          drawnLanes.has(arrow.lane) &&
-          arrow.lng >= west &&
-          arrow.lng <= east &&
-          arrow.lat >= south &&
-          arrow.lat <= north;
+        const onScreen = (sample: WindSample) =>
+          sample.step % channel.fine === 0 &&
+          sample.lng >= west &&
+          sample.lng <= east &&
+          sample.lat >= south &&
+          sample.lat <= north;
 
         // A floor under the screen spacing, for a route that doubles back
         // through one valley and stacks a week of channels into one view.
@@ -820,20 +837,23 @@ function TripMap({
         // first days of a trip and leave the last ones bare, which reads as
         // "no wind there" and is the one thing the overlay must not say.
         let candidates = 0;
-        for (const arrow of windArrows) if (onScreen(arrow)) candidates++;
-        const extra = Math.max(1, Math.ceil(candidates / WIND_MAX_ARROWS));
+        for (const sample of windArrows) if (onScreen(sample)) candidates++;
+        const extra = Math.max(1, Math.ceil((candidates * channel.lanes.length) / WIND_MAX_ARROWS));
 
         const features: GeoJSON.Feature[] = [];
         let seen = 0;
-        for (const arrow of windArrows) {
-          if (!onScreen(arrow)) continue;
+        for (const sample of windArrows) {
+          if (!onScreen(sample)) continue;
           if (seen++ % extra !== 0) continue;
-          const { lat, lng, opacity } = driftAt(arrow, now);
-          features.push({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [lng, lat] },
-            properties: { deg: arrow.towardDeg, bin: arrow.bin, o: opacity },
-          });
+          for (const lane of channel.lanes) {
+            const { lat, lng, opacity } = placeArrow(sample, lane, channel, now);
+            if (opacity <= 0.01) continue;
+            features.push({
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [lng, lat] },
+              properties: { deg: sample.towardDeg, bin: sample.bin, o: opacity },
+            });
+          }
         }
         (map.getSource(WIND_LAYER) as import("maplibre-gl").GeoJSONSource).setData({
           type: "FeatureCollection",

@@ -100,12 +100,17 @@ notes, stats and weather.
   along their own direction so the channel reads as weather moving through it. The rose says
   whether the day was work; this says *where* — a day that was half headwind is usually a day
   with one exposed valley in it, and only the map can show that. Like the route network it is
-  **off until asked for**, and the animation stops itself when the tab is hidden. The lanes
-  are a buffer in metres, so the channel is real ground either side of the line rather than a
-  fixed ribbon. How dense it looks, though, is fixed **on screen**, not on the ground: pull
-  back and the arrows spread out over more kilometres and the channel closes lane by lane
-  down to a single file following the route, so the whole tour reads the same as one valley
-  does — thinned, never emptied.
+  **off until asked for**, and the animation stops itself when the tab is hidden.
+- Nothing about that channel is fixed to the ground. What is stored is a list of samples *on*
+  the route — a place, a moment, a wind — and the lanes are laid out fresh every frame from
+  one number: how many metres a pixel is currently worth. So the buffer is about **a
+  centimetre either side whatever the zoom**, which is kilometres of ground with a whole tour
+  on screen and a few hundred metres in a valley, and the arrows are the same distance apart
+  on screen throughout. Zoom in and the arrows halfway between the ones already there **fade
+  up into place**; zoom out and they fade away again — the sets nest, so zooming only ever
+  adds arrows between the others rather than reshuffling them, and no set ever pops in or out
+  at one pixel of zoom. The arrows sit **over** the route with a paper-coloured halo, because
+  a half-transparent arrow under a 5 px coloured line is simply not there.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the
