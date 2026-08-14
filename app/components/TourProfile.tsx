@@ -5,7 +5,15 @@ import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
 import { TransitVehicle } from "./TransitVehicle";
-import { carriagesFor, dashRuns, trainWidth, TRAIN_PAD_PX, VEHICLE_PX } from "../lib/train-fit";
+import {
+  carriagesFor,
+  dashRuns,
+  trainCentre,
+  trainWidth,
+  visibleGap,
+  TRAIN_PAD_PX,
+  VEHICLE_PX,
+} from "../lib/train-fit";
 
 const W = 960;
 const H = 200;
@@ -171,7 +179,10 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
         const perPx = chartPx > 0 ? W / chartPx : 0;
-        const gapPx = perPx > 0 ? (toX - fromX) / perPx : 0;
+        // The room the train has is the part of the gap that is on screen, not
+        // the whole gap: zoomed into one end of a long crossing, most of that
+        // gap is somewhere off the side of the chart and cannot hold anything.
+        const gapPx = perPx > 0 ? visibleGap(fromX, toX, 0, W) / perPx : 0;
         const carriages = hop.mode === "train" ? carriagesFor(gapPx) : singleFits(gapPx);
 
         // What the train stands on, back in the chart's own units, with a
@@ -179,6 +190,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         const vehiclePx =
           carriages === null ? 0 : hop.mode === "train" ? trainWidth(carriages) : VEHICLE_PX;
         const occupied = vehiclePx === 0 ? 0 : (vehiclePx + 2 * DASH_CLEARANCE_PX) * perPx;
+        const centreX = carriages === null ? null : trainCentre(fromX, toX, 0, W, occupied);
 
         // The hop hangs between the heights either side of it, so a dash run
         // takes its ends from the line between them.
@@ -189,10 +201,12 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
 
         return {
           ...hop,
-          midX: (fromX + toX) / 2,
-          midY: y((hop.fromE + hop.toE) / 2),
+          // Where the vehicle is hung, which is the middle of the gap until
+          // zooming pushes that middle off screen.
+          trainX: centreX,
+          trainY: centreX === null ? 0 : heightAt(centreX),
           carriages,
-          lines: dashRuns(fromX, toX, occupied).map(
+          lines: dashRuns(fromX, toX, occupied, centreX ?? (fromX + toX) / 2).map(
             ([a, b]) =>
               `M${a.toFixed(1)},${heightAt(a).toFixed(1)}L${b.toFixed(1)},${heightAt(b).toFixed(1)}`,
           ),
@@ -419,12 +433,12 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           {/* The train standing in the hole it left, as long as the hole is
               wide: a locomotive and as many carriages as fit. */}
           {hops
-            .filter((hop) => hop.carriages !== null && hop.midX >= 0 && hop.midX <= W)
+            .filter((hop) => hop.carriages !== null && hop.trainX !== null)
             .map((hop) => (
               <span
                 key={`train-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
                 className="absolute -translate-x-1/2 -translate-y-1/2"
-                style={{ left: `${(hop.midX / W) * 100}%`, top: `${(hop.midY / H) * 100}%` }}
+                style={{ left: `${((hop.trainX ?? 0) / W) * 100}%`, top: `${(hop.trainY / H) * 100}%` }}
               >
                 <TransitVehicle
                   mode={hop.mode}

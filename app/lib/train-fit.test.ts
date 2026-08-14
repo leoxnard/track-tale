@@ -7,7 +7,9 @@ import {
   TRAIN_PAD_PX,
   carriagesFor,
   dashRuns,
+  trainCentre,
   trainWidth,
+  visibleGap,
 } from "./train-fit";
 
 /** The width a train of `n` carriages needs, padding included. */
@@ -88,5 +90,69 @@ describe("dashRuns", () => {
     expect(before[1] - before[0]).toBeCloseTo(after[1] - after[0], 10);
     expect(before[0]).toBe(220);
     expect(after[1]).toBe(480);
+  });
+
+  it("follows a train that slid off centre to stay on screen", () => {
+    // Shunted towards the left-hand end: the long dash is now on the right.
+    expect(dashRuns(0, 200, 40, 60)).toEqual([
+      [0, 40],
+      [80, 200],
+    ]);
+  });
+
+  it("drops the run on the side a train was shunted right up against", () => {
+    expect(dashRuns(0, 200, 40, 20)).toEqual([[40, 200]]);
+  });
+});
+
+describe("visibleGap", () => {
+  it("is the whole gap while the whole gap is on screen", () => {
+    expect(visibleGap(100, 300, 0, 960)).toBe(200);
+  });
+
+  it("is only the part inside the window once the window cuts it", () => {
+    expect(visibleGap(-500, 300, 0, 960)).toBe(300);
+    expect(visibleGap(700, 5000, 0, 960)).toBe(260);
+    expect(visibleGap(-500, 5000, 0, 960)).toBe(960);
+  });
+
+  it("is nothing for a gap the window has left behind", () => {
+    expect(visibleGap(-500, -100, 0, 960)).toBe(0);
+    expect(visibleGap(2000, 3000, 0, 960)).toBe(0);
+  });
+});
+
+describe("trainCentre", () => {
+  it("stands in the middle of a gap that is wholly on screen", () => {
+    expect(trainCentre(100, 300, 0, 960, 60)).toBe(200);
+  });
+
+  it("does not budge for a gap merely clipped at one end", () => {
+    // Half the gap is off to the left, but its middle is still on screen, so
+    // the train stays exactly where an unzoomed chart would have put it.
+    expect(trainCentre(-500, 900, 0, 960, 60)).toBe(200);
+  });
+
+  it("slides along its gap far enough to come back into view", () => {
+    // A crossing whose middle is off to the left: the train follows the gap
+    // into the window rather than staying at a midpoint nobody can see.
+    const centre = trainCentre(-5000, 400, 0, 960, 60);
+    expect(centre).toBe(30);
+    // And it never leaves the stretch it stands for.
+    expect(centre!).toBeLessThan(400);
+  });
+
+  it("slides the other way just the same", () => {
+    expect(trainCentre(600, 9000, 0, 960, 60)).toBe(930);
+  });
+
+  it("centres on what can be seen when the sliver is narrower than the train", () => {
+    expect(trainCentre(940, 9000, 0, 960, 600)).toBe(950);
+  });
+
+  it("has nowhere to stand when the gap is off screen entirely", () => {
+    expect(trainCentre(-500, -20, 0, 960, 60)).toBeNull();
+    expect(trainCentre(1200, 3000, 0, 960, 60)).toBeNull();
+    expect(trainCentre(400, 400, 0, 960, 60)).toBeNull();
   });
 });

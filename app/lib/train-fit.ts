@@ -57,6 +57,51 @@ export function trainWidth(carriages: number): number {
 }
 
 /**
+ * Where the train stands when the gap runs off the edge of the chart.
+ *
+ * The middle of the gap is where it belongs, and that is where it stays for as
+ * long as the whole gap is on screen. Zoom in past the point where the middle
+ * scrolls out of the window, though, and a train centred on it is a train
+ * nobody can see — which is exactly what the chart used to do: cross a country
+ * by train, zoom into either end of that crossing, and the train vanished
+ * along with every clue as to why the line was dashed there.
+ *
+ * So the train slides along its own gap far enough to come back into view, and
+ * no further. It never leaves the stretch it stands for, and it never moves at
+ * all while the gap's middle is comfortably visible.
+ *
+ * `null` means the gap is off screen entirely and there is nothing to place.
+ * A window too narrow to hold the whole train gets it centred on what can be
+ * seen, with the ends running past the edges — better half a locomotive than
+ * none.
+ */
+export function trainCentre(
+  from: number,
+  to: number,
+  viewFrom: number,
+  viewTo: number,
+  width: number,
+): number | null {
+  const visibleFrom = Math.max(from, viewFrom);
+  const visibleTo = Math.min(to, viewTo);
+  if (!(visibleTo > visibleFrom)) return null;
+
+  const half = width / 2;
+  const lo = visibleFrom + half;
+  const hi = visibleTo - half;
+  if (hi < lo) return (visibleFrom + visibleTo) / 2;
+  return Math.min(hi, Math.max(lo, (from + to) / 2));
+}
+
+/**
+ * How much of a gap is on screen — the room a train actually has, which is the
+ * whole gap only while the whole gap is visible.
+ */
+export function visibleGap(from: number, to: number, viewFrom: number, viewTo: number): number {
+  return Math.max(0, Math.min(to, viewTo) - Math.max(from, viewFrom));
+}
+
+/**
  * The stretches of a gap the train does not stand on, as `[from, to]` pairs.
  *
  * A train never fills its gap exactly — there is whatever was left over after
@@ -64,19 +109,23 @@ export function trainWidth(carriages: number): number {
  * simply stopping; dashed, it reads as the journey carrying on past what the
  * train had room to say.
  *
- * `occupied` is what the train takes up in the middle, clearance included, in
- * the same units as `from` and `to`; zero for a gap with no train in it at
- * all. Runs shorter than `minRun` are dropped — two dashes wedged against a
- * locomotive are dirt, not information.
+ * `occupied` is what the train takes up, clearance included, in the same units
+ * as `from` and `to`; zero for a gap with no train in it at all. `centre` is
+ * where it stands, which is the middle of the gap until `trainCentre` slides
+ * it to stay on screen — the dashes have to follow it, or a train shunted
+ * towards one end would stand on top of the dashes at that end and leave a
+ * bare stretch at the other. Runs shorter than `minRun` are dropped — two
+ * dashes wedged against a locomotive are dirt, not information.
  */
 export function dashRuns(
   from: number,
   to: number,
   occupied: number,
+  centre = (from + to) / 2,
   minRun = 3,
 ): [number, number][] {
   if (occupied <= 0) return to - from >= minRun ? [[from, to]] : [];
-  const middle = (from + to) / 2;
+  const middle = centre;
   const half = occupied / 2;
   return ([
     [from, middle - half],
