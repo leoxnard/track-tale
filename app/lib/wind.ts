@@ -13,13 +13,25 @@
  * points a stationary rider produced carries almost no distance, so it fades
  * out of the average on its own without any stopped-time rule to tune.
  *
+ * Everything is summed **in the rider's frame**, not the compass's. The rose
+ * was drawn compass-first at the start, and it was wrong in the case that
+ * matters most: ride a loop and the mean heading collapses to nothing, so a
+ * picture built around "which way was I going" quietly starts answering with
+ * noise, while the wind's own direction — the one thing a compass rose shows
+ * beautifully — says nothing at all about whether the day was work. Round a
+ * lake in a westerly you have a headwind for a quarter of it and a tailwind for
+ * a quarter of it, and no arrangement of compass petals will tell you so.
+ * Measured from the nose instead, that ride reads exactly as it was ridden. The
+ * geographic direction survives as a line of text, where it never needed a
+ * picture.
+ *
  * Two conventions, both easy to get backwards and both checked by the tests:
  *
  * - Wind direction is meteorological — the direction the wind blows *from*.
  *   A westerly (270°) pushes you east.
- * - The relative angle δ is measured between the wind's source and the
- *   direction of travel. δ = 0 means the wind comes from exactly where you are
- *   heading: a pure headwind. δ = 180 is a pure tailwind.
+ * - The relative angle is measured from the direction of travel round to the
+ *   wind's source, clockwise. 0 means the wind comes from exactly where you are
+ *   heading: a pure headwind. 90 is from the rider's right, 180 a pure tailwind.
  *
  * Everything here is pure so the family page, the tests and the preview can all
  * run it; the fetching lives in `weather.ts`.
@@ -119,8 +131,11 @@ export interface Ride {
 }
 
 export interface WindSector {
-  /** Middle of the sector, degrees the wind came from. */
-  fromDeg: number;
+  /**
+   * Middle of the sector, in degrees **from the rider's nose**, clockwise: 0 is
+   * wind straight in the face, 90 from the right, 180 up the back.
+   */
+  relativeDeg: number;
   /** Metres ridden while the wind came from this sector. */
   distanceM: number;
   /** Those metres split by speed class — the segments the petal stacks. */
@@ -140,10 +155,33 @@ export interface WindAnalysis {
   windKmh: number;
   /** Strongest gust blowing while the wheels were turning, km/h. */
   gustKmh: number;
-  /** Where the wind came from on balance, degrees. */
+  /** Where the wind came from on balance, degrees on the compass. */
   windFromDeg: number;
-  /** Where the riding went on balance, degrees. */
+  /** Where the riding went on balance, degrees on the compass. */
   travelDeg: number;
+  /**
+   * How much `travelDeg` is worth saying out loud: the length of the mean
+   * travel vector over the distance ridden, 0–1.
+   *
+   * A straight day out is near 1. **A loop is near 0**, and its mean heading is
+   * then not a slow answer but a meaningless one — the small asymmetries decide
+   * it. Anything that would tell a reader "you rode south-east" has to check
+   * this first, or it will confidently make something up about every ride that
+   * ended where it started.
+   */
+  directness: number;
+  /** Where the wind sat relative to the nose on balance, 0 ahead, 180 behind. */
+  relativeDeg: number;
+  /**
+   * How much `relativeDeg` is worth drawing, 0–1 — the same guard as
+   * `directness`, one level further in.
+   *
+   * A ride that turned through every heading meets the wind from every angle,
+   * and those angles then cancel into a mean that points nowhere in particular.
+   * Having just moved the rose into the rider's frame to stop it inventing a
+   * direction for a loop, it would be a poor joke to leave an arrow doing it.
+   */
+  relativeConcentration: number;
   /**
    * Distance-weighted mean of the wind's along-track component: positive is
    * wind in the face, negative is wind at the back. This is the single number
@@ -156,7 +194,7 @@ export interface WindAnalysis {
   headM: number;
   crossM: number;
   tailM: number;
-  /** 16 petals, north first, going clockwise. */
+  /** 16 petals, straight-ahead first, going clockwise round the rider. */
   sectors: WindSector[];
 }
 
@@ -278,6 +316,8 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
   let travelV = 0;
   let windU = 0;
   let windV = 0;
+  let noseU = 0;
+  let noseV = 0;
   const sectorM = new Array<number>(SECTOR_COUNT).fill(0);
   const sectorSpeed = new Array<number>(SECTOR_COUNT).fill(0);
   const sectorBins = Array.from({ length: SECTOR_COUNT }, () =>
@@ -298,8 +338,11 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
       if (!wind) continue;
 
       const travel = bearingDeg(a, b);
-      // The angle between where the wind came from and where the bike pointed:
-      // 0 is straight in the face, 180 is straight up the back.
+      // The angle from the bike's nose round to where the wind came from, and
+      // the same angle folded onto 0–180 for the parts that cannot tell left
+      // from right. Everything the rose draws is this angle: it is the only
+      // frame in which a lap of a lake still says whether the wind was work.
+      const bearingToNose = norm360(wind.fromDeg - travel);
       const relative = angleDiffDeg(wind.fromDeg, travel);
       const rad = (relative * Math.PI) / 180;
 
@@ -319,8 +362,11 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
       const wr = (wind.fromDeg * Math.PI) / 180;
       windU += d * wind.speedKmh * Math.sin(wr);
       windV += d * wind.speedKmh * Math.cos(wr);
+      const nr = (bearingToNose * Math.PI) / 180;
+      noseU += d * wind.speedKmh * Math.sin(nr);
+      noseV += d * wind.speedKmh * Math.cos(nr);
 
-      const s = sectorOf(wind.fromDeg);
+      const s = sectorOf(bearingToNose);
       sectorM[s] += d;
       sectorSpeed[s] += d * wind.speedKmh;
       sectorBins[s][binOf(wind.speedKmh)] += d;
@@ -337,13 +383,16 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
     gustKmh,
     windFromDeg: norm360((Math.atan2(windU, windV) * 180) / Math.PI),
     travelDeg: norm360((Math.atan2(travelU, travelV) * 180) / Math.PI),
+    directness: Math.hypot(travelU, travelV) / sampledM,
+    relativeDeg: norm360((Math.atan2(noseU, noseV) * 180) / Math.PI),
+    relativeConcentration: sumSpeed > 0 ? Math.hypot(noseU, noseV) / sumSpeed : 0,
     headwindKmh: sumHead / sampledM,
     crosswindKmh: sumCross / sampledM,
     headM,
     crossM,
     tailM,
     sectors: sectorM.map((m, i) => ({
-      fromDeg: i * SECTOR_DEG,
+      relativeDeg: i * SECTOR_DEG,
       distanceM: m,
       bins: sectorBins[i],
       meanKmh: m > 0 ? sectorSpeed[i] / m : 0,

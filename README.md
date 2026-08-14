@@ -45,21 +45,26 @@ notes, stats and weather.
   dense one. The axis is distance along the plan, so a day spans the plan it covered rather
   than its own odometer — a day that rides 95 km to advance 86 km of route sits in those
   86 km instead of overhanging its neighbours. What was ridden is in the day's own stats.
-- Every day carries the **wind it was ridden into**, as an ordinary **wind rose** — the same
-  figure a weather station has drawn for a century, so it reads on sight — with a little
-  bicycle in the middle. North is up; each petal is a compass direction the wind blew *from*;
-  how far it reaches is how many kilometres were ridden under that wind, with the rings
-  labelled so a petal is a number and not just a shape; and each petal is banded by speed
-  class from the hub outwards, on Beaufort's boundaries, with the key printed once, on the
-  trip's own rose at the top of the page. The only thing changed from the convention is what
-  the rings count: kilometres ridden rather than hours observed. The bicycle is ours, and it
-  is the point — it holds the day's average heading, so petals crowding its nose *are* a day
-  of headwind and petals behind the saddle *are* a day of being pushed along, no number
-  needed. Underneath, the numbers anyway: the mean wind and where it came from, gusts, and
-  the day split into kilometres ridden against the wind, across it and with it — that last
-  bar in dark-to-pale rather than in colour, because the rose already spends colour on
-  strength, and a second meaning for the same red an arm's length away is how a figure stops
-  being readable.
+- Every day carries the **wind it was ridden into**, as a **wind rose** — the figure a weather
+  station has drawn for a century, so it reads on sight — with a little bicycle in the middle.
+  Each petal is a direction the wind blew *from*; how far it reaches is how many kilometres
+  were ridden under it, with the rings labelled so a petal is a number and not just a shape;
+  and each petal is banded by speed class from the hub outwards, on Beaufort's boundaries,
+  with the key printed once, on the trip's own rose at the top of the page.
+- Two things are changed from the convention, both on purpose. The rings count **kilometres
+  ridden** rather than hours observed. And the rose is turned into the **rider's frame**: up
+  is the direction of travel, not north, so a petal's angle is where the wind sat relative to
+  the nose — ahead, behind, over one shoulder. That second one is the whole point. Drawn
+  around the compass, a lap of a lake is unreadable: a loop has no net heading for the
+  bicycle in the middle to point, so "petals in front of the nose" stops meaning anything on
+  exactly the rides where the wind is most obviously half a gift and half a tax. Around the
+  rider, that lap draws itself honestly — petals ahead for the quarter ridden into the wind,
+  petals behind for the quarter that pushed — and any two days can be compared at a glance.
+  Where the wind came from on the map is a fact about the map: it is in the line of text
+  under the rose ("19 km/h out of the WSW"), which never needed a picture. Underneath that,
+  the day split into kilometres ridden against the wind, across it and with it — that bar in
+  dark-to-pale rather than in colour, because the rose already spends colour on strength, and
+  a second meaning for the same red an arm's length away is how a figure stops being readable.
 - The wind is **measured, not guessed**: Open-Meteo's hourly reanalysis, asked **every 10 km
   along the day's route** rather than only at its middle, so each stretch of riding is
   answered by the reading nearest to it — a hundred-kilometre stage does not have one wind.

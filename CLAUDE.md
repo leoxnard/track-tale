@@ -101,12 +101,13 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `wind.ts` — the wind rose behind the family page: hourly wind from `weather.ts`, sampled at
   one site per 10 km of route (`sampleSites`, one Open-Meteo request for all of them) and
   matched to a track's timestamps by nearest site, then summed **by distance** into headwind,
-  crosswind and the petals,
-  each petal split across the Beaufort speed classes the legend names. Wind directions are
-  meteorological (where it blows *from*) throughout; the tests exist mostly to keep that from
-  being flipped by accident. `WindRose.tsx` draws the standard figure on purpose — north up,
-  sixteen sectors, stacked bands, labelled radial axis — and the deviations from convention
-  are listed at the top of the file with why.
+  crosswind and the petals, each petal split across the Beaufort speed classes the legend
+  names. Wind directions from the API are meteorological (where it blows *from*); the rose's
+  own sectors are **relative to the direction of travel**, which is what keeps a loop
+  readable — a ride that ends where it started has no mean heading to draw a compass rose
+  around. `directness` and `relativeConcentration` guard anything that would otherwise state
+  a direction for such a ride. The tests exist mostly to keep those frames from being flipped
+  by accident. `WindRose.tsx` lists its deviations from the standard figure at the top.
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
   same shot, pinning a photo to the route by time, and ordering by capture time.
 - `og.server.ts`, `basemap.server.ts`, `archive.server.ts` — server-rendered SVG for the

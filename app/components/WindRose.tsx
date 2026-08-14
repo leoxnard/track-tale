@@ -11,35 +11,37 @@ import {
 } from "../lib/wind";
 
 /**
- * The wind of a day — or of a whole trip — as a wind rose with a bicycle in it.
+ * The wind of a day — or of a whole trip — as a wind rose drawn around a bicycle.
  *
- * Deliberately the standard meteorological figure rather than an invention:
- * north up, sixteen sectors, each petal reaching out from the centre by how much
- * happened with the wind out of that direction and banded into speed classes
- * from the hub outwards, with a legend naming the classes and the outer ring
- * labelled with its value. Anyone who has met a wind rose reads this one without
- * being told, and anyone who hasn't can learn it from the legend. The one thing
- * changed from the convention is the radial measure: a weather station counts
- * hours, this counts *kilometres ridden*, which is the same idea told in the
- * units the trip is in.
+ * The figure is the standard meteorological one: sixteen sectors, each petal
+ * reaching out from the centre by how much riding happened with the wind out of
+ * that direction, banded into speed classes from the hub outwards, a key naming
+ * the classes and the outer ring labelled with its value. Two things are changed
+ * from the convention, both on purpose.
  *
- * The bicycle in the hub is the part that is ours, and it is what makes the
- * picture worth drawing rather than tabulating: it points the average heading,
- * so petals crowding its nose *are* a day of headwind and petals behind the
- * saddle *are* a day of being pushed along. Nobody has to read a number to see
- * which day they had — the numbers are underneath for when they do.
+ * The radial measure counts **kilometres ridden** where a weather station counts
+ * hours — the same idea in the units the trip is in.
  *
- * The rose stays in compass space, not the rider's. Turning it into the rider's
- * frame was tried first: it read beautifully for one day and became meaningless
- * the moment two days sat above each other, because every rose was then in its
- * own private coordinate system, and it threw away the convention that makes the
- * figure legible on sight.
+ * And the rose is turned into the **rider's frame**: up is the direction of
+ * travel, not north, so a petal's angle is where the wind sat relative to the
+ * nose. This one is not decoration, it is the whole point. Drawn compass-first —
+ * as this was at first — a lap of a lake is unreadable: the mean heading of a
+ * loop is nothing at all, so the bicycle in the middle points somewhere
+ * arbitrary and "petals in front of the nose" stops meaning anything, on exactly
+ * the rides where the wind was most obviously half a gift and half a tax. In the
+ * rider's frame that lap draws itself honestly: petals ahead for the quarter
+ * ridden into it, petals behind for the quarter that pushed. It also makes two
+ * days comparable at a glance, which the compass version only appeared to do.
+ *
+ * So the bicycle sits still and the wind moves around it. Where the wind came
+ * from geographically is a fact about the map, not about the riding, and it is
+ * one line of text under the picture.
  */
 
 const CENTER = 80;
-/** How far the longest petal reaches; the compass letters and the mean-wind
- *  arrow live in the margin outside it, which is why it stops well short of the
- *  160-unit box. */
+/** How far the longest petal reaches; the ahead/right/behind/left labels and the
+ *  mean-wind arrow live in the margin outside it, which is why it stops well
+ *  short of the 160-unit box. */
 const OUTER = 56;
 /** The hub the bicycle sits in; petals start just outside it. */
 const HUB = 25;
@@ -59,7 +61,8 @@ interface Props {
   showScale?: boolean;
 }
 
-/** Point on the ring at a compass bearing — SVG y grows downwards, north is up. */
+/** Point on the ring at a bearing from the rider's nose, which is straight up.
+ *  SVG y grows downwards, hence the quarter turn. */
 function pointAt(deg: number, r: number): [number, number] {
   const rad = ((deg - 90) * Math.PI) / 180;
   return [CENTER + r * Math.cos(rad), CENTER + r * Math.sin(rad)];
@@ -92,28 +95,30 @@ function petalPath(midDeg: number, r0: number, r1: number, widthDeg: number): st
 }
 
 /**
- * The bicycle, side on, facing right, drawn about the origin so the transform
- * that aims it is a plain rotate. Strokes rather than a filled silhouette: at
- * this size a filled bike is a blob, and the frame's triangle is the part that
- * says "bicycle" at a glance.
+ * The rider in the hub: a bicycle, side on, under an arrow pointing up the page.
+ *
+ * The two marks divide the work, because one mark could not do both. A bicycle
+ * is only recognisable from the side — from above it is two wheels in line, and
+ * every attempt at that read as a dagger — but a side view cannot point up the
+ * page without doing a wheelie. So the bicycle says *who* the middle of the rose
+ * is, and the arrow says *which way is ahead*, which is the thing every angle
+ * around it is measured from. The four words around the ring say it a third
+ * time, in case the picture is read by someone who has never seen this one.
  */
 function Bicycle({ color }: { color: string }) {
   return (
-    <g
-      fill="none"
-      stroke={color}
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx={-10} cy={4} r={6} />
-      <circle cx={10} cy={4} r={6} />
-      {/* Frame: chainstay, seat tube, top tube, down tube, then fork. */}
-      <path d="M -10 4 L 0 4 L -4 -5 L 6 -5 L 0 4 M 6 -5 L 9 -1 L 10 4" />
-      {/* Saddle and bars, the two bits that make it read as ridden. */}
-      <path d="M -6.5 -6 L -1.5 -6" />
-      <path d="M 4 -7.5 L 9 -7.5" />
-      <path d="M 6.5 -7.5 L 6 -5" />
+    <g stroke={color} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M 0 -11 V -17 M -3.4 -13.6 L 0 -17 L 3.4 -13.6" fill="none" strokeWidth={1.8} />
+      <g fill="none" strokeWidth={1.5} transform="translate(0 4)">
+        <circle cx={-10} cy={4} r={6} />
+        <circle cx={10} cy={4} r={6} />
+        {/* Frame: chainstay, seat tube, top tube, down tube, then fork. */}
+        <path d="M -10 4 L 0 4 L -4 -5 L 6 -5 L 0 4 M 6 -5 L 9 -1 L 10 4" />
+        {/* Saddle and bars, the two bits that make it read as ridden. */}
+        <path d="M -6.5 -6 L -1.5 -6" />
+        <path d="M 4 -7.5 L 9 -7.5" />
+        <path d="M 6.5 -7.5 L 6 -5" />
+      </g>
     </g>
   );
 }
@@ -122,15 +127,10 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
   const m = useMessages();
   const titleId = useId();
 
-  const compass = (deg: number) =>
-    m.wind.points[Math.round(norm360(deg) / 22.5) % 16];
+  const compass = (deg: number) => m.wind.points[Math.round(norm360(deg) / 22.5) % 16];
+  /** A petal's angle in words: "from the right", "ahead on the left". */
+  const relative = (deg: number) => m.wind.relative[Math.round(norm360(deg) / 45) % 8];
   const km = (metres: number) => (metres / 1000).toFixed(metres < 10000 ? 1 : 0);
-
-  // A bicycle rotated past the vertical would ride on its head. Flipping it
-  // about its own long axis keeps the wheels down while the nose still points
-  // where the riding went — the trick a map label uses to stay upright.
-  const spin = wind.travelDeg - 90;
-  const upsideDown = norm360(spin) > 90 && norm360(spin) < 270;
 
   const busiestM = Math.max(...wind.sectors.map((s) => s.distanceM));
   const verdict = verdictOf(wind);
@@ -161,7 +161,6 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
             m.wind.verdicts[verdict],
             Math.round(wind.windKmh),
             compass(wind.windFromDeg),
-            compass(wind.travelDeg),
           )}
         </title>
 
@@ -184,8 +183,9 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
         <g>
           <title>{m.wind.axis}</title>
           {[0.5, 1].map((fraction) => {
-            // Along the north-east spoke, where petals are least likely to be:
-            // the prevailing wind of a European trip is rarely from there.
+            // On the ahead-right diagonal, away from the four labels. A petal
+            // can still reach them, which is what the paper-coloured halo
+            // underneath the digits is for.
             const [x, y] = pointAt(45, HUB + 2 + fraction * PETAL_MAX);
             return (
               <text
@@ -197,7 +197,7 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
                 fontSize={7.5}
                 fill="#6b7a72"
                 stroke="#fbfaf7"
-                strokeWidth={2.5}
+                strokeWidth={3}
                 paintOrder="stroke"
               >
                 {/* The outer ring carries the unit for both. */}
@@ -213,11 +213,11 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
           // is still the distance and the bands within it are the speeds.
           let stacked = 0;
           return (
-            <g key={sector.fromDeg}>
+            <g key={sector.relativeDeg}>
               <title>
                 {m.wind.petal(
                   km(sector.distanceM),
-                  compass(sector.fromDeg),
+                  relative(sector.relativeDeg),
                   Math.round(sector.meanKmh),
                 )}
               </title>
@@ -231,7 +231,7 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
                   <path
                     key={bin}
                     d={petalPath(
-                      sector.fromDeg,
+                      sector.relativeDeg,
                       r0,
                       // A hairline of paper between the bands, so where one
                       // speed class ends is a boundary and not a hue judgement.
@@ -249,31 +249,36 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
         })}
 
         {/* Where the wind sat on balance: an arrow outside the ring, blowing
-            inwards, because that is the direction the rider felt it come from. */}
-        <g
-          transform={`rotate(${wind.windFromDeg} ${CENTER} ${CENTER})`}
-          fill={windColor(wind.windKmh)}
-          stroke={windColor(wind.windKmh)}
-        >
-          <path
-            d={`M ${CENTER} ${CENTER - OUTER - 10} L ${CENTER - 5} ${CENTER - OUTER - 17} L ${
-              CENTER + 5
-            } ${CENTER - OUTER - 17} Z`}
-          />
-          <path
-            d={`M ${CENTER} ${CENTER - OUTER - 17} V ${CENTER - OUTER - 23}`}
-            strokeWidth={2.5}
-            strokeLinecap="round"
-          />
-        </g>
+            inwards, because that is the direction the rider felt it come from.
+            Left off a ride that met the wind from all sides, where the mean
+            angle is an average of opposites and points nowhere real. */}
+        {wind.relativeConcentration > 0.2 && (
+          <g
+            transform={`rotate(${wind.relativeDeg} ${CENTER} ${CENTER})`}
+            fill={windColor(wind.windKmh)}
+            stroke={windColor(wind.windKmh)}
+          >
+            <path
+              d={`M ${CENTER} ${CENTER - OUTER - 10} L ${CENTER - 5} ${CENTER - OUTER - 17} L ${
+                CENTER + 5
+              } ${CENTER - OUTER - 17} Z`}
+            />
+            <path
+              d={`M ${CENTER} ${CENTER - OUTER - 17} V ${CENTER - OUTER - 23}`}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+            />
+          </g>
+        )}
 
-        {/* Only the four cardinals are labelled: sixteen would be a dial, and
-            the rose is meant to be glanced at, not navigated by. */}
-        {[0, 4, 8, 12].map((point) => {
-          const [x, y] = pointAt(point * 22.5, OUTER + 6);
+        {/* Four labels, not sixteen: ahead, right, behind, left. They say what
+            the angles mean here, which no reader can be assumed to guess from a
+            figure that usually has north at the top. */}
+        {m.wind.around.map((label, i) => {
+          const [x, y] = pointAt(i * 90, OUTER + 6);
           return (
             <text
-              key={point}
+              key={label}
               x={x}
               y={y}
               textAnchor="middle"
@@ -281,16 +286,14 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
               fontSize={9}
               fill="#6b7a72"
             >
-              {m.wind.points[point]}
+              {label}
             </text>
           );
         })}
 
-        <g
-          transform={`translate(${CENTER} ${CENTER}) rotate(${spin})${
-            upsideDown ? " scale(1 -1)" : ""
-          }`}
-        >
+        {/* Facing up, always: the rose turns with the rider, so the bicycle
+            never has to. It is the fixed point the angles are measured from. */}
+        <g transform={`translate(${CENTER} ${CENTER})`}>
           <Bicycle color={color} />
         </g>
       </svg>

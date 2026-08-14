@@ -232,12 +232,26 @@ const en = {
       with: (km: string) => `${km} km with`,
     },
     scale: "km/h:",
-    axis: "Kilometres ridden with the wind out of that direction",
+    axis: "Kilometres ridden with the wind at that angle to the rider",
     coverage: (percent: number) => `From the ${percent}% of the riding that carried a clock`,
-    petal: (km: string, from: string, kmh: number) =>
-      `${km} km with the wind out of the ${from} at ${kmh} km/h`,
-    aria: (verdict: string, kmh: number, from: string, heading: string) =>
-      `${verdict}: ${kmh} km/h on average out of the ${from}, riding ${heading}`,
+    /** The four quarters of the rose, which is drawn around the rider: up is
+     *  wherever they were heading at the time, not north. */
+    around: ["ahead", "right", "behind", "left"],
+    /** Eight-point naming for one petal, clockwise from straight ahead. */
+    relative: [
+      "head on",
+      "ahead on the right",
+      "from the right",
+      "behind on the right",
+      "from behind",
+      "behind on the left",
+      "from the left",
+      "ahead on the left",
+    ],
+    petal: (km: string, angle: string, kmh: number) =>
+      `${km} km with the wind ${angle} at ${kmh} km/h`,
+    aria: (verdict: string, kmh: number, from: string) =>
+      `${verdict}: ${kmh} km/h on average, out of the ${from}. The rose is drawn around the rider — up is the direction of travel, so petals at the top are wind in the face.`,
   },
   weather: {
     clear: "Clear",
@@ -388,12 +402,23 @@ const de: Messages = {
       with: (km: string) => `${km} km damit`,
     },
     scale: "km/h:",
-    axis: "Gefahrene Kilometer mit Wind aus dieser Richtung",
+    axis: "Gefahrene Kilometer mit Wind aus diesem Winkel zur Fahrtrichtung",
     coverage: (percent: number) => `Aus den ${percent}% der Fahrt mit Zeitstempel`,
-    petal: (km: string, from: string, kmh: number) =>
-      `${km} km mit Wind aus ${from} mit ${kmh} km/h`,
-    aria: (verdict: string, kmh: number, from: string, heading: string) =>
-      `${verdict}: ${kmh} km/h im Schnitt aus ${from}, gefahren Richtung ${heading}`,
+    around: ["vorn", "rechts", "hinten", "links"],
+    relative: [
+      "direkt von vorn",
+      "von schräg vorn rechts",
+      "von rechts",
+      "von schräg hinten rechts",
+      "von hinten",
+      "von schräg hinten links",
+      "von links",
+      "von schräg vorn links",
+    ],
+    petal: (km: string, angle: string, kmh: number) =>
+      `${km} km mit Wind ${angle} mit ${kmh} km/h`,
+    aria: (verdict: string, kmh: number, from: string) =>
+      `${verdict}: ${kmh} km/h im Schnitt aus ${from}. Die Rose ist um die Fahrerin gezeichnet — oben ist die Fahrtrichtung, Blüten oben sind also Wind ins Gesicht.`,
   },
   weather: {
     clear: "Klar",

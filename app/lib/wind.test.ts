@@ -151,14 +151,62 @@ describe("analyseWind", () => {
     expect(a.headM).toBeGreaterThan(a.tailM * 5);
   });
 
-  it("puts the wind in the petal it came from and colours it by strength", () => {
+  it("puts the wind in the petal at its angle to the rider, not to north", () => {
+    // Riding north with the wind out of the south-west: that is wind over the
+    // rider's left shoulder, so the petal belongs at 225° round from the nose —
+    // and would sit there just the same on a rider heading east in a
+    // north-westerly.
     const a = analyseWind([{ points: NORTHWARD, sites: sitesOf(steady(20, 225)) }])!;
     const busiest = a.sectors.reduce((x, y) => (y.distanceM > x.distanceM ? y : x));
-    expect(busiest.fromDeg).toBe(225);
+    expect(busiest.relativeDeg).toBe(225);
     expect(busiest.share).toBe(1);
     expect(busiest.meanKmh).toBeCloseTo(20, 0);
     expect(a.sectors).toHaveLength(16);
     expect(a.sectors.reduce((s, x) => s + x.distanceM, 0)).toBeCloseTo(a.distanceM, 5);
+
+    const eastward = analyseWind([{ points: EASTWARD, sites: sitesOf(steady(20, 315)) }])!;
+    expect(eastward.sectors.reduce((x, y) => (y.distanceM > x.distanceM ? y : x)).relativeDeg).toBe(
+      225,
+    );
+  });
+
+  it("still shows the headwind on a loop, where a compass rose cannot", () => {
+    // A square: north, east, south, west, back to the start, in a steady wind
+    // out of the north. A quarter of it is straight into the wind and a quarter
+    // is pushed along — the fact the whole feature exists to show, and the one
+    // a rose drawn around the compass loses entirely, because the ride has no
+    // net direction for the bicycle in the middle to point.
+    const leg = (from: { lat: number; lng: number }, dLat: number, dLng: number, at: number) =>
+      Array.from({ length: 30 }, (_, i) => ({
+        lat: from.lat + dLat * i,
+        lng: from.lng + dLng * i,
+        time: START + at * HOUR + i * 60000,
+      }));
+    const loop = [
+      ...leg({ lat: 50, lng: 8 }, 0.01, 0, 1),
+      ...leg({ lat: 50.29, lng: 8 }, 0, 0.0155, 2),
+      ...leg({ lat: 50.29, lng: 8.45 }, -0.01, 0, 3),
+      ...leg({ lat: 50, lng: 8.45 }, 0, -0.0155, 4),
+    ];
+    const a = analyseWind([{ points: loop, sites: sitesOf(steady(25, 0, 12)) }])!;
+
+    // The loop comes back to where it started, so its mean heading is noise.
+    expect(a.directness).toBeLessThan(0.1);
+    // But the four quarters land in four opposite petals all the same.
+    expect(a.sectors[0].distanceM).toBeGreaterThan(0); // into the wind
+    expect(a.sectors[8].distanceM).toBeGreaterThan(0); // pushed along
+    expect(a.headM).toBeGreaterThan(0);
+    expect(a.tailM).toBeGreaterThan(0);
+    expect(a.headM / a.tailM).toBeCloseTo(1, 0);
+    // Head and tail cancel over a lap, which is the honest answer for one.
+    expect(Math.abs(a.headwindKmh)).toBeLessThan(2);
+  });
+
+  it("knows a straight day had a direction and a steady wind an angle", () => {
+    const straight = analyseWind([{ points: NORTHWARD, sites: sitesOf(steady(20, 0)) }])!;
+    expect(straight.directness).toBeCloseTo(1, 1);
+    expect(straight.relativeConcentration).toBeCloseTo(1, 1);
+    expect(straight.relativeDeg).toBeCloseTo(0, 0);
   });
 
   it("reports the mean direction of travel and of the wind", () => {
