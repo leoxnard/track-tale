@@ -45,6 +45,20 @@ notes, stats and weather.
   dense one. The axis is distance along the plan, so a day spans the plan it covered rather
   than its own odometer — a day that rides 95 km to advance 86 km of route sits in those
   86 km instead of overhanging its neighbours. What was ridden is in the day's own stats.
+- Every day carries the **wind it was ridden into**, as a ring with a little bicycle in the
+  middle. Each petal is a compass direction the wind blew *from*: how far it reaches is how
+  many kilometres were ridden under that wind, and its colour is how hard it blew, stepped by
+  the Beaufort scale. The bicycle points the day's average heading, so petals crowding its
+  nose *are* a day of headwind and petals behind the saddle *are* a day of being pushed
+  along — no number needed to see which one it was. Underneath, the numbers anyway: the mean
+  wind and where it came from, gusts, and the day split into kilometres ridden against the
+  wind, across it and with it. The whole trip gets the same ring at the top of the page.
+  The wind is measured, not guessed: Open-Meteo's hourly reanalysis at the middle of each
+  day's route, matched to the track's own timestamps and interpolated between the hours, then
+  weighted by distance rather than time — so an hour in a café with the flags snapping is not
+  an hour of headwind. Only pedalled kilometres count; a train has no headwind. Days without
+  a clock on the track, or cached before this existed, simply show no ring — `/refreshweather`
+  fills them in from the archive.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the
@@ -128,6 +142,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/archive` | download the trip as a self-contained bundle |
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
+| `/refreshweather` | fill in weather and wind for older days, from the historical archive |
 | `/compressphotos` | shrink photos stored at full camera resolution |
 | `/regeneratelink` | new family link for this trip |
 | `/invite` | one-time invite code for a friend, valid 7 days |

@@ -98,6 +98,10 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the
   *plan* it covered, matched by coordinates rather than stacked in sequence. Both files
   carry long comments explaining why the obvious approach is wrong; read them first.
+- `wind.ts` — the wind rose behind the family page: hourly wind from `weather.ts` matched to
+  a track's timestamps, then summed **by distance** into headwind, crosswind and the petals.
+  Wind directions are meteorological (where it blows *from*) throughout; the tests exist
+  mostly to keep that from being flipped by accident.
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
   same shot, pinning a photo to the route by time, and ordering by capture time.
 - `og.server.ts`, `basemap.server.ts`, `archive.server.ts` — server-rendered SVG for the

@@ -212,6 +212,32 @@ const en = {
     rangeStart: "Range start",
     rangeEnd: "Range end",
   },
+  wind: {
+    title: "Wind on the road",
+    /** 16-point compass, north first, clockwise — the order `sectorOf` counts in. */
+    points: ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"],
+    verdicts: {
+      headwind: "Into the wind",
+      tailwind: "Wind at your back",
+      crosswind: "Wind from the side",
+      calm: "Barely a breath",
+    },
+    average: (kmh: number, from: string) => `${kmh} km/h on average, out of the ${from}`,
+    gusts: (kmh: number) => `gusting ${kmh} km/h`,
+    costHead: (kmh: number) => `${kmh} km/h of it straight in the face`,
+    costTail: (kmh: number) => `${kmh} km/h of it pushing from behind`,
+    evens: "Head and tail cancelled each other out",
+    legs: {
+      against: (km: string) => `${km} km against`,
+      across: (km: string) => `${km} km across`,
+      with: (km: string) => `${km} km with`,
+    },
+    coverage: (percent: number) => `From the ${percent}% of the riding that carried a clock`,
+    petal: (km: string, from: string, kmh: number) =>
+      `${km} km with the wind out of the ${from} at ${kmh} km/h`,
+    aria: (verdict: string, kmh: number, from: string, heading: string) =>
+      `${verdict}: ${kmh} km/h on average out of the ${from}, riding ${heading}`,
+  },
   weather: {
     clear: "Clear",
     mostlyClear: "Mostly clear",
@@ -342,6 +368,31 @@ const de: Messages = {
     zoomRange: "Zoombereich",
     rangeStart: "Bereichsanfang",
     rangeEnd: "Bereichsende",
+  },
+  wind: {
+    title: "Wind unterwegs",
+    points: ["N", "NNO", "NO", "ONO", "O", "OSO", "SO", "SSO", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"],
+    verdicts: {
+      headwind: "Gegenwind",
+      tailwind: "Rückenwind",
+      crosswind: "Seitenwind",
+      calm: "Kaum ein Lüftchen",
+    },
+    average: (kmh: number, from: string) => `${kmh} km/h im Schnitt, aus ${from}`,
+    gusts: (kmh: number) => `Böen bis ${kmh} km/h`,
+    costHead: (kmh: number) => `davon ${kmh} km/h direkt von vorn`,
+    costTail: (kmh: number) => `davon ${kmh} km/h von hinten geschoben`,
+    evens: "Von vorn und von hinten hat sich aufgehoben",
+    legs: {
+      against: (km: string) => `${km} km dagegen`,
+      across: (km: string) => `${km} km quer`,
+      with: (km: string) => `${km} km damit`,
+    },
+    coverage: (percent: number) => `Aus den ${percent}% der Fahrt mit Zeitstempel`,
+    petal: (km: string, from: string, kmh: number) =>
+      `${km} km mit Wind aus ${from} mit ${kmh} km/h`,
+    aria: (verdict: string, kmh: number, from: string, heading: string) =>
+      `${verdict}: ${kmh} km/h im Schnitt aus ${from}, gefahren Richtung ${heading}`,
   },
   weather: {
     clear: "Klar",

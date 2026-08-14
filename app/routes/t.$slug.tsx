@@ -25,6 +25,7 @@ import { riddenStretches, toPieces, type StoredSegment } from "../lib/day-stretc
 import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather } from "../lib/weather";
+import { analyseWind, type Ride, type WindAnalysis } from "../lib/wind";
 import { byPhotoTime } from "../lib/photo-order";
 import { env } from "../lib/env.server";
 import { fetchLiveSession } from "../lib/livetrack.server";
@@ -32,6 +33,7 @@ import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
+import { WindRose } from "../components/WindRose";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
 import {
@@ -939,6 +941,37 @@ export function TripView({
     return Math.max(20, ...ranges);
   }, [trip.days]);
 
+  /**
+   * The wind each day was ridden into, and the same sum over the whole trip.
+   *
+   * Worked out here rather than in the loader on purpose: everything it needs —
+   * the timestamps along each track, the day's hourly wind — is already in the
+   * payload for the map and the weather line, so computing it on the server
+   * would have meant shipping the same numbers twice. It also means `/preview`
+   * draws real roses from the fixture without a database anywhere in sight.
+   *
+   * Only the ridden segments count. An hour on a train has a heading and a wind
+   * and no bearing whatsoever on how hard the day was.
+   */
+  const { dayWind, tripWind } = useMemo(() => {
+    const perDay = new Map<number, WindAnalysis>();
+    const all: Ride[] = [];
+    for (const day of trip.days) {
+      const hourly = day.weather?.hourlyWind ?? null;
+      const rides: Ride[] = day.tracks
+        .filter((t) => t.mode === null)
+        .map((t) => ({ points: fromGeoJson(t.geojson), hourly }));
+      // A day with no cached wind still goes into the trip's total, carrying no
+      // wind of its own: that is what makes the trip's "covers x% of the riding"
+      // tell the truth instead of quietly answering for the days it can.
+      all.push(...rides);
+      if (!hourly) continue;
+      const analysis = analyseWind(rides);
+      if (analysis) perDay.set(day.dayNumber, analysis);
+    }
+    return { dayWind: perDay, tripWind: analyseWind(all) };
+  }, [trip.days]);
+
   const scrollToDay = (dayNumber: number) => {
     mapHandle.current?.flyToDay(dayNumber);
     document.getElementById(`day-${dayNumber}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1125,10 +1158,18 @@ export function TripView({
           </div>
         )}
 
+        {tripWind && (
+          <section className="mb-10">
+            <h2 className="font-display text-lg font-semibold text-pine">{m.wind.title}</h2>
+            <WindRose wind={tripWind} size={168} />
+          </section>
+        )}
+
         <div className="space-y-10">
           {trip.days.map((day) => {
             const w = day.weather;
             const wi = weatherIcon(w?.weatherCode ?? null, locale);
+            const wind = dayWind.get(day.dayNumber);
             return (
               <article
                 key={day.dayNumber}
@@ -1178,6 +1219,8 @@ export function TripView({
                     </span>
                   </p>
                 )}
+
+                {wind && <WindRose wind={wind} color={day.color} />}
 
                 {day.pieces.some((piece) => piece.profile.length > 1) && (
                   <ElevationProfile
