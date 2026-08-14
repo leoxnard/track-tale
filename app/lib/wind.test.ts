@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { haversineM, type TrackPoint } from "./track";
-import type { HourlyWind } from "./weather";
+import type { HourlyWeather } from "./weather";
 import {
   BIN_COLORS,
   analyseWind,
@@ -20,12 +20,14 @@ const HOUR = 3600000;
 const START = Date.parse("2026-07-14T06:00:00Z");
 
 /** An hourly series that holds one wind steady all day. */
-function steady(speedKmh: number, fromDeg: number, hours = 12): HourlyWind {
+function steady(speedKmh: number, fromDeg: number, hours = 12): HourlyWeather {
   return {
     time: Array.from({ length: hours }, (_, i) => START + i * HOUR),
     speedKmh: Array(hours).fill(speedKmh),
     fromDeg: Array(hours).fill(fromDeg),
     gustKmh: Array(hours).fill(speedKmh * 1.5),
+    tempC: Array(hours).fill(14),
+    precipMm: Array(hours).fill(0),
   };
 }
 
@@ -44,7 +46,7 @@ function line(
 }
 
 /** A ride reads its wind from a list of sites; most tests only need the one. */
-function sitesOf(hourly: HourlyWind | null) {
+function sitesOf(hourly: HourlyWeather | null) {
   return hourly ? [{ lat: 50, lng: 8, hourly }] : [];
 }
 
@@ -78,11 +80,13 @@ describe("windAt", () => {
   it("interpolates the wind vector rather than the two numbers", () => {
     // 350° and 10° must meet at north, not at south — the whole reason the
     // interpolation is done on components.
-    const swinging: HourlyWind = {
+    const swinging: HourlyWeather = {
       time: [START, START + HOUR],
       speedKmh: [20, 20],
       fromDeg: [350, 10],
       gustKmh: [30, 30],
+      tempC: [14, 14],
+      precipMm: [0, 0],
     };
     const mid = windAt(swinging, START + HOUR / 2)!;
     expect(mid.fromDeg).toBeCloseTo(0, 1);
@@ -96,18 +100,30 @@ describe("windAt", () => {
   });
 
   it("falls back to the neighbouring hour when one end is missing", () => {
-    const gappy: HourlyWind = {
+    const gappy: HourlyWeather = {
       time: [START, START + HOUR],
       speedKmh: [null, 20],
       fromDeg: [null, 90],
       gustKmh: [null, 25],
+      tempC: [null, 14],
+      precipMm: [null, 0],
     };
     expect(windAt(gappy, START + HOUR / 2)?.fromDeg).toBeCloseTo(90, 5);
   });
 
   it("gives up when neither end has a reading", () => {
     expect(
-      windAt({ time: [START], speedKmh: [null], fromDeg: [null], gustKmh: [null] }, START),
+      windAt(
+        {
+          time: [START],
+          speedKmh: [null],
+          fromDeg: [null],
+          gustKmh: [null],
+          tempC: [null],
+          precipMm: [null],
+        },
+        START,
+      ),
     ).toBeNull();
   });
 });
@@ -347,11 +363,13 @@ describe("the speed classes", () => {
 
   it("splits a petal's distance across the classes it was ridden in", () => {
     // Half the day in a fresh breeze, half in a gentle one, all from the north.
-    const gusty: HourlyWind = {
+    const gusty: HourlyWeather = {
       time: Array.from({ length: 12 }, (_, i) => START + i * HOUR),
       speedKmh: Array.from({ length: 12 }, (_, i) => (i < 6 ? 25 : 8)),
       fromDeg: Array(12).fill(0),
       gustKmh: Array(12).fill(40),
+      tempC: Array(12).fill(9),
+      precipMm: Array(12).fill(0),
     };
     const long = line({ lat: 50, lng: 8 }, 0.01, 0, 40);
     const north = analyseWind([{ points: long, sites: sitesOf(gusty) }])!.sectors[0];

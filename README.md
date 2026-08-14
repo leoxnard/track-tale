@@ -55,8 +55,8 @@ notes, stats and weather.
   ridden** rather than hours observed. And the rose is turned into the **rider's frame**: up
   is the direction of travel, not north, so a petal's angle is where the wind sat relative to
   the nose — ahead, behind, over one shoulder. That second one is the whole point. Drawn
-  around the compass, a lap of a lake is unreadable: a loop has no net heading for the
-  bicycle in the middle to point, so "petals in front of the nose" stops meaning anything on
+  around the compass, a lap of a lake is unreadable: a loop has no net heading for the marker
+  in the middle to point, so "petals in front of the nose" stops meaning anything on
   exactly the rides where the wind is most obviously half a gift and half a tax. Around the
   rider, that lap draws itself honestly — petals ahead for the quarter ridden into the wind,
   petals behind for the quarter that pushed — and any two days can be compared at a glance.
@@ -82,6 +82,17 @@ notes, stats and weather.
   and the headwind/tailwind verdict are the solid part, the exact km/h is a model value. A
   day with no clock on its track, or cached before any of this existed, simply shows no rose;
   `/refreshweather` fills those in from the archive.
+- **Temperature and rain come from the same request, over the riding hours only.** The day
+  line used to read the calendar day's rainfall total and its min/max temperature at one
+  point near the route — both answers to a question nobody asked. Eight millimetres that fell
+  between two and five in the morning is a dry day on a bicycle; a minimum of 4°C reached at
+  dawn is not the temperature of a ride that started at ten. So the hourly series already
+  fetched every 10 km is walked along the track, and only the hours the wheels were turning
+  count. The two are handled differently on purpose: a temperature is an instant and may be
+  interpolated between hours, while rain is an accumulation over the hour *before* its stamp,
+  so a moment falls inside one bucket and gets the share of it the rider spent there. A whole
+  day's rain becomes one number — how much fell on them — with the wet kilometres in the
+  tooltip. The little weather icon is still the day's sky, not the ride's.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the

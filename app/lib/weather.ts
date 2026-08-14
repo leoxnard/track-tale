@@ -1,7 +1,7 @@
 import { DEFAULT_LOCALE, messages, type Locale, type Messages } from "./i18n";
 
 /**
- * The day's wind, hour by hour, as it was where the route ran.
+ * The day's weather, hour by hour, as it was where the route ran.
  *
  * Kept as three parallel arrays rather than 24 little objects because it is
  * stored as JSON in `weather_cache.data` and read back on every page render —
@@ -13,7 +13,7 @@ import { DEFAULT_LOCALE, messages, type Locale, type Messages } from "./i18n";
  * exactly the kind of mistake nobody notices until a rider disagrees with the
  * page.
  */
-export interface HourlyWind {
+export interface HourlyWeather {
   /** Epoch milliseconds, one per hour, ascending. */
   time: number[];
   /** Wind speed at 10 m, km/h. */
@@ -22,6 +22,16 @@ export interface HourlyWind {
   fromDeg: (number | null)[];
   /** Gusts at 10 m, km/h. */
   gustKmh: (number | null)[];
+  /** Air temperature at 2 m, °C — an instant, so it may be interpolated. */
+  tempC: (number | null)[];
+  /**
+   * Rain in that hour, mm. An **accumulation over the preceding hour**, not a
+   * reading at the stamp: the entry at 14:00 is what fell between 13:00 and
+   * 14:00. It must never be interpolated the way temperature and wind are —
+   * halfway between two hours is not halfway between two totals, it is simply
+   * inside the later bucket.
+   */
+  precipMm: (number | null)[];
 }
 
 export interface LatLng {
@@ -29,9 +39,9 @@ export interface LatLng {
   lng: number;
 }
 
-/** One place the wind was asked about, and what it said there all day. */
-export interface WindSite extends LatLng {
-  hourly: HourlyWind;
+/** One place the weather was asked about, and what it did there all day. */
+export interface WeatherSite extends LatLng {
+  hourly: HourlyWeather;
 }
 
 export interface DayWeather {
@@ -47,7 +57,7 @@ export interface DayWeather {
    * was sampled in several places — and as the fallback when a day only ever
    * had the one site. `/refreshweather` upgrades an old row to `windSites`.
    */
-  hourlyWind?: HourlyWind | null;
+  hourlyWind?: HourlyWeather | null;
   /**
    * The wind along the route, one entry per place it was asked about.
    *
@@ -56,7 +66,7 @@ export interface DayWeather {
    * a range or a coast sits between morning and evening — it answered for
    * ground the rider had left hours earlier.
    */
-  windSites?: WindSite[];
+  windSites?: WeatherSite[];
 }
 
 interface DailyResponse {
@@ -73,6 +83,8 @@ interface DailyResponse {
     wind_speed_10m?: (number | null)[];
     wind_direction_10m?: (number | null)[];
     wind_gusts_10m?: (number | null)[];
+    temperature_2m?: (number | null)[];
+    precipitation?: (number | null)[];
   };
 }
 
@@ -93,7 +105,15 @@ async function fetchDaily(
     "daily",
     "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,weather_code",
   );
-  url.searchParams.set("hourly", "wind_speed_10m,wind_direction_10m,wind_gusts_10m");
+  // Temperature and rain ride along with the wind at no extra cost: same
+  // request, same sites every 10 km. What they buy is the difference between
+  // "8 mm fell that calendar day somewhere near the route" and "8 mm fell on
+  // the rider" — a night of rain that stopped before breakfast is the single
+  // most misleading thing a daily total can say.
+  url.searchParams.set(
+    "hourly",
+    "wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,precipitation",
+  );
   url.searchParams.set("timezone", "auto");
   // `auto` keeps the daily figures bounded by the *local* day, which is what a
   // max temperature should mean — but it would also hand back hourly stamps as
@@ -114,7 +134,7 @@ async function fetchDaily(
 }
 
 /** Only worth storing if at least one hour actually has a wind in it. */
-function toHourlyWind(hourly: DailyResponse["hourly"]): HourlyWind | null {
+function toHourlyWind(hourly: DailyResponse["hourly"]): HourlyWeather | null {
   const time = hourly?.time;
   if (!time || time.length === 0) return null;
   const speedKmh = hourly.wind_speed_10m ?? [];
@@ -126,6 +146,8 @@ function toHourlyWind(hourly: DailyResponse["hourly"]): HourlyWind | null {
     speedKmh: time.map((_, i) => speedKmh[i] ?? null),
     fromDeg: time.map((_, i) => fromDeg[i] ?? null),
     gustKmh: time.map((_, i) => gustKmh[i] ?? null),
+    tempC: time.map((_, i) => hourly.temperature_2m?.[i] ?? null),
+    precipMm: time.map((_, i) => hourly.precipitation?.[i] ?? null),
   };
 }
 
@@ -194,7 +216,7 @@ export async function fetchDayWeather(
         lng: sites[i].lng,
         hourly: toHourlyWind(site.hourly),
       }))
-      .filter((site): site is WindSite => site.hourly !== null),
+      .filter((site): site is WeatherSite => site.hourly !== null),
   };
 }
 

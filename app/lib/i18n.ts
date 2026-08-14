@@ -253,6 +253,11 @@ const en = {
     aria: (verdict: string, kmh: number, from: string) =>
       `${verdict}: ${kmh} km/h on average, out of the ${from}. The rose is drawn around the rider — up is the direction of travel, so petals at the top are wind in the face.`,
   },
+  riding: {
+    /** Wraps the weather word so the line says these are the hours ridden. */
+    whileRiding: (weather: string) => `${weather} — while riding`,
+    wet: (km: string) => `${km} km of it in the rain`,
+  },
   weather: {
     clear: "Clear",
     mostlyClear: "Mostly clear",
@@ -419,6 +424,10 @@ const de: Messages = {
       `${km} km mit Wind ${angle} mit ${kmh} km/h`,
     aria: (verdict: string, kmh: number, from: string) =>
       `${verdict}: ${kmh} km/h im Schnitt aus ${from}. Die Rose ist um die Fahrerin gezeichnet — oben ist die Fahrtrichtung, Blüten oben sind also Wind ins Gesicht.`,
+  },
+  riding: {
+    whileRiding: (weather: string) => `${weather} — während der Fahrt`,
+    wet: (km: string) => `davon ${km} km im Regen`,
   },
   weather: {
     clear: "Klar",

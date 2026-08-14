@@ -24,8 +24,13 @@ import { fromGeoJson, haversineM, type TrackGeoJson, type TrackPoint } from "../
 import { riddenStretches, toPieces, type StoredSegment } from "../lib/day-stretches";
 import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
-import { weatherIcon, type DayWeather, type WindSite } from "../lib/weather";
+import { weatherIcon, type DayWeather, type WeatherSite } from "../lib/weather";
 import { analyseWind, type Ride, type WindAnalysis } from "../lib/wind";
+import {
+  analyseRidingWeather,
+  hasTemperature,
+  type RidingWeather,
+} from "../lib/riding-weather";
 import { byPhotoTime } from "../lib/photo-order";
 import { env } from "../lib/env.server";
 import { fetchLiveSession } from "../lib/livetrack.server";
@@ -885,6 +890,7 @@ export function TripView({
   const m = useMessages();
   const formatDate = (iso: string) => formatDayDate(iso, locale);
   const formatHours = (seconds: number) => formatDuration(seconds, locale);
+  const km = (metres: number) => (metres / 1000).toFixed(metres < 10000 ? 1 : 0);
 
   const mapHandle = useRef<MapHandle | null>(null);
   // Off to begin with: the overlay is a third-party tile request, and it stays
@@ -953,15 +959,16 @@ export function TripView({
    * Only the ridden segments count. An hour on a train has a heading and a wind
    * and no bearing whatsoever on how hard the day was.
    */
-  const { dayWind, tripWind } = useMemo(() => {
+  const { dayWind, dayRiding, tripWind } = useMemo(() => {
     const perDay = new Map<number, WindAnalysis>();
+    const perDayRiding = new Map<number, RidingWeather>();
     const all: Ride[] = [];
     for (const day of trip.days) {
       // Days cached before the route was sampled in several places have the one
       // midpoint reading instead; it stands in for a site list of one, and the
       // nearest-site lookup then has nothing to choose between.
       const hourly = day.weather?.hourlyWind ?? null;
-      const sites: WindSite[] =
+      const sites: WeatherSite[] =
         day.weather?.windSites?.length
           ? day.weather.windSites
           : hourly
@@ -977,8 +984,12 @@ export function TripView({
       if (sites.length === 0) continue;
       const analysis = analyseWind(rides);
       if (analysis) perDay.set(day.dayNumber, analysis);
+      // Same rides, same sites, different question: what fell on the rider and
+      // how cold it was while they were out in it.
+      const riding = analyseRidingWeather(rides);
+      if (riding) perDayRiding.set(day.dayNumber, riding);
     }
-    return { dayWind: perDay, tripWind: analyseWind(all) };
+    return { dayWind: perDay, dayRiding: perDayRiding, tripWind: analyseWind(all) };
   }, [trip.days]);
 
   const scrollToDay = (dayNumber: number) => {
@@ -1181,6 +1192,7 @@ export function TripView({
             const w = day.weather;
             const wi = weatherIcon(w?.weatherCode ?? null, locale);
             const wind = dayWind.get(day.dayNumber);
+            const riding = dayRiding.get(day.dayNumber);
             return (
               <article
                 key={day.dayNumber}
@@ -1198,13 +1210,33 @@ export function TripView({
                     {m.trip.day(day.dayNumber)}
                   </button>
                   <p className="text-sm text-faint">{formatDate(day.date)}</p>
-                  {w && (
-                    <p className="text-sm text-faint" title={wi.label}>
-                      {wi.icon} {w.tempMinC !== null && `${Math.round(w.tempMinC)}–`}
-                      {w.tempMaxC !== null && `${Math.round(w.tempMaxC)}°C`}
-                      {w.precipitationMm !== null && w.precipitationMm > 0.5 && (
-                        <> · 💧 {w.precipitationMm.toFixed(0)} mm</>
-                      )}
+                  {/* Temperature and rain as the ride met them, where the hourly
+                      series reaches — the daily figures stand in only for a day
+                      whose track has no clock, or one cached before this. A
+                      night of rain that stopped at dawn belongs to neither the
+                      day's story nor its numbers. */}
+                  {(w || riding) && (
+                    <p
+                      className="text-sm text-faint"
+                      title={riding ? m.riding.whileRiding(wi.label) : wi.label}
+                    >
+                      {wi.icon}{" "}
+                      {riding && hasTemperature(riding)
+                        ? `${Math.round(riding.tempMinC)}–${Math.round(riding.tempMaxC)}°C`
+                        : `${w?.tempMinC !== null && w?.tempMinC !== undefined ? `${Math.round(w.tempMinC)}–` : ""}${
+                            w?.tempMaxC !== null && w?.tempMaxC !== undefined
+                              ? `${Math.round(w.tempMaxC)}°C`
+                              : ""
+                          }`}
+                      {riding
+                        ? riding.rainMm >= 0.2 && (
+                            <span title={m.riding.wet(km(riding.wetM))}>
+                              {" · 💧 "}
+                              {riding.rainMm.toFixed(1)} mm
+                            </span>
+                          )
+                        : w?.precipitationMm != null &&
+                          w.precipitationMm > 0.5 && <> · 💧 {w.precipitationMm.toFixed(0)} mm</>}
                     </p>
                   )}
                 </div>

@@ -38,7 +38,7 @@
  */
 
 import { haversineM, type TrackPoint } from "./track";
-import type { HourlyWind, WindSite } from "./weather";
+import type { HourlyWeather, WeatherSite } from "./weather";
 
 /** A 16-point rose: the compass names people actually use, and fine enough that
  *  a day of riding lands in several petals rather than all in one. */
@@ -127,7 +127,7 @@ export interface Ride {
    * of riding is answered by whichever site is nearest to it — which is the
    * whole point of asking in more than one place.
    */
-  sites: WindSite[];
+  sites: WeatherSite[];
 }
 
 export interface WindSector {
@@ -229,7 +229,7 @@ export function angleDiffDeg(a: number, b: number): number {
  * timescales, invisible.
  */
 export function windAt(
-  hourly: HourlyWind,
+  hourly: HourlyWeather,
   timeMs: number,
 ): { speedKmh: number; fromDeg: number; gustKmh: number | null } | null {
   const t = hourly.time;
@@ -264,7 +264,7 @@ export function windAt(
 }
 
 function vectorAt(
-  hourly: HourlyWind,
+  hourly: HourlyWeather,
   i: number,
 ): { u: number; v: number; fromDeg: number } | null {
   const s = hourly.speedKmh[i];
@@ -275,7 +275,7 @@ function vectorAt(
 }
 
 /** The site that answers for a stretch of riding: the closest one to it. */
-export function nearestSite(sites: WindSite[], at: TrackPoint): WindSite {
+export function nearestSite(sites: WeatherSite[], at: TrackPoint): WeatherSite {
   let best = sites[0];
   let bestM = Infinity;
   for (const site of sites) {

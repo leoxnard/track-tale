@@ -11,7 +11,7 @@ import {
 } from "../lib/wind";
 
 /**
- * The wind of a day — or of a whole trip — as a wind rose drawn around a bicycle.
+ * The wind of a day — or of a whole trip — as a wind rose drawn around the rider.
  *
  * The figure is the standard meteorological one: sixteen sectors, each petal
  * reaching out from the centre by how much riding happened with the wind out of
@@ -26,16 +26,16 @@ import {
  * travel, not north, so a petal's angle is where the wind sat relative to the
  * nose. This one is not decoration, it is the whole point. Drawn compass-first —
  * as this was at first — a lap of a lake is unreadable: the mean heading of a
- * loop is nothing at all, so the bicycle in the middle points somewhere
- * arbitrary and "petals in front of the nose" stops meaning anything, on exactly
- * the rides where the wind was most obviously half a gift and half a tax. In the
+ * loop is nothing at all, so the marker in the middle points somewhere arbitrary
+ * and "petals in front of the nose" stops meaning anything, on exactly the rides
+ * where the wind was most obviously half a gift and half a tax. In the
  * rider's frame that lap draws itself honestly: petals ahead for the quarter
  * ridden into it, petals behind for the quarter that pushed. It also makes two
  * days comparable at a glance, which the compass version only appeared to do.
  *
- * So the bicycle sits still and the wind moves around it. Where the wind came
- * from geographically is a fact about the map, not about the riding, and it is
- * one line of text under the picture.
+ * So the arrow sits still and the wind moves around it. Where the wind came from
+ * geographically is a fact about the map, not about the riding, and it is one
+ * line of text under the picture.
  */
 
 const CENTER = 80;
@@ -43,7 +43,7 @@ const CENTER = 80;
  *  mean-wind arrow live in the margin outside it, which is why it stops well
  *  short of the 160-unit box. */
 const OUTER = 56;
-/** The hub the bicycle sits in; petals start just outside it. */
+/** The hub the heading arrow sits in; petals start just outside it. */
 const HUB = 25;
 const PETAL_MAX = OUTER - HUB - 2;
 
@@ -51,7 +51,7 @@ interface Props {
   wind: WindAnalysis;
   /** Rendered width in CSS pixels; the drawing scales to it. */
   size?: number;
-  /** The day's colour, used for the bicycle so it belongs to the day it is in. */
+  /** The day's colour, used for the heading arrow so it belongs to its day. */
   color?: string;
   /**
    * Whether to print the speed-class key. On once, at the top of the page: the
@@ -95,30 +95,21 @@ function petalPath(midDeg: number, r0: number, r1: number, widthDeg: number): st
 }
 
 /**
- * The rider in the hub: a bicycle, side on, under an arrow pointing up the page.
+ * The direction of travel, as an arrow up the page — the fixed thing every angle
+ * on the rose is measured from.
  *
- * The two marks divide the work, because one mark could not do both. A bicycle
- * is only recognisable from the side — from above it is two wheels in line, and
- * every attempt at that read as a dagger — but a side view cannot point up the
- * page without doing a wheelie. So the bicycle says *who* the middle of the rose
- * is, and the arrow says *which way is ahead*, which is the thing every angle
- * around it is measured from. The four words around the ring say it a third
- * time, in case the picture is read by someone who has never seen this one.
+ * There was a bicycle here, and it had to go. A bicycle is only recognisable
+ * from the side, a side view cannot point up the page without standing on its
+ * rear wheel, and a plan view of one reads as a dagger. Whichever way it was
+ * drawn it said something about direction that it did not mean, in the middle of
+ * a figure whose entire subject is direction. An arrow has one meaning and
+ * cannot be misread by ninety degrees.
  */
-function Bicycle({ color }: { color: string }) {
+function Heading({ color }: { color: string }) {
   return (
-    <g stroke={color} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M 0 -11 V -17 M -3.4 -13.6 L 0 -17 L 3.4 -13.6" fill="none" strokeWidth={1.8} />
-      <g fill="none" strokeWidth={1.5} transform="translate(0 4)">
-        <circle cx={-10} cy={4} r={6} />
-        <circle cx={10} cy={4} r={6} />
-        {/* Frame: chainstay, seat tube, top tube, down tube, then fork. */}
-        <path d="M -10 4 L 0 4 L -4 -5 L 6 -5 L 0 4 M 6 -5 L 9 -1 L 10 4" />
-        {/* Saddle and bars, the two bits that make it read as ridden. */}
-        <path d="M -6.5 -6 L -1.5 -6" />
-        <path d="M 4 -7.5 L 9 -7.5" />
-        <path d="M 6.5 -7.5 L 6 -5" />
-      </g>
+    <g fill={color}>
+      <rect x={-1.6} y={-4} width={3.2} height={17} rx={1.6} />
+      <path d="M 0 -15.5 L 7.5 -3.5 L 0 -6.5 L -7.5 -3.5 Z" />
     </g>
   );
 }
@@ -291,10 +282,10 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
           );
         })}
 
-        {/* Facing up, always: the rose turns with the rider, so the bicycle
-            never has to. It is the fixed point the angles are measured from. */}
+        {/* Up the page, always: the rose turns with the rider, so this never
+            has to. It is the fixed point the angles are measured from. */}
         <g transform={`translate(${CENTER} ${CENTER})`}>
-          <Bicycle color={color} />
+          <Heading color={color} />
         </g>
       </svg>
 

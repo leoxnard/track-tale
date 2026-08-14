@@ -108,6 +108,10 @@ Messages are **edited in place** rather than re-sent — that is the established
   around. `directness` and `relativeConcentration` guard anything that would otherwise state
   a direction for such a ride. The tests exist mostly to keep those frames from being flipped
   by accident. `WindRose.tsx` lists its deviations from the standard figure at the top.
+- `riding-weather.ts` — rain and temperature over the *riding hours*, off the same hourly
+  series and sample sites as the wind rose. Rain is an hourly accumulation stamped at the end
+  of its hour and must never be interpolated; temperature is an instant and must be. Both
+  cope with rows cached before those fields were fetched, where the arrays are simply absent.
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
   same shot, pinning a photo to the route by time, and ordering by capture time.
 - `og.server.ts`, `basemap.server.ts`, `archive.server.ts` — server-rendered SVG for the
