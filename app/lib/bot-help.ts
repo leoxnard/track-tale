@@ -58,7 +58,7 @@ Reply /delete to one of my messages — removes that one
 /manage — browse the trip and delete anything on it, however old: notes,
 photos, tracks, and guestbook messages the family left
 /livephoto — place a Live Photo's video by hand when I couldn't work out which
-  photo it belongs to: pick the day, then the photo
+  photo it belongs to, or take one off a photo it doesn't belong to
 /replace — swap the picture behind a photo: pick it, send the new one. Caption,
 map pin and place in the day all stay — handy after running a filter over them
 /clearday — pick a day and empty it: every note, photo and track on it

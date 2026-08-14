@@ -7,6 +7,7 @@ import {
   motionFormat,
   parkedMotionIsFresh,
   pickStillForMotion,
+  LIVE_PAIR_WINDOW_MS,
   type IncomingMotion,
   type MotionCandidate,
 } from "./live-photo";
@@ -315,6 +316,53 @@ export function motionUrl(storagePath: string): string {
  * the only way to correct a wrong pick is to pick again, and a correction that
  * left the mistake in the bucket would leak a file per attempt.
  */
+/**
+ * Take a video back off the photo it was put on, and stand it back in the
+ * queue so it can be placed on the right one. Returns the waiting video's code.
+ *
+ * It is parked as though it had arrived five minutes ago, which is the age at
+ * which the automatic rule stops considering it. That is not a trick to get a
+ * flag for free: this video has already been placed once by that rule and the
+ * rule got it wrong, so it having no claim on the next photo to arrive is
+ * exactly right.
+ */
+export async function unpairMotion(
+  chatId: number,
+  tripId: string,
+  mediaId: string,
+): Promise<string | null> {
+  const { data: photo } = await supabase()
+    .from("media")
+    .select("motion_path, motion_ms")
+    .eq("id", mediaId)
+    .maybeSingle();
+  if (!photo?.motion_path) return null;
+
+  const { data, error } = await supabase()
+    .from("pending_motions")
+    .insert({
+      chat_id: chatId,
+      trip_id: tripId,
+      storage_path: photo.motion_path,
+      duration_ms: photo.motion_ms,
+      cover_phash: null,
+      created_at: new Date(Date.now() - LIVE_PAIR_WINDOW_MS).toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    throw new Error(`could not take that video off: ${error?.message ?? "no row came back"}`);
+  }
+
+  // Only once the video has somewhere else to be. The other order would drop it
+  // off the photo and lose it if this failed.
+  await supabase()
+    .from("media")
+    .update({ motion_path: null, motion_ms: null })
+    .eq("id", mediaId);
+  return data.id as string;
+}
+
 export async function attachMotionByHand(
   chatId: number,
   tripId: string,
@@ -386,7 +434,15 @@ export async function saveMotion(
   const coverHash = await coverHashOf(bot, incoming.thumbFileId);
 
   const seen = coverHash ? await pickStillByLook(coverHash, pool) : null;
-  const still = seen ?? pickStillForMotion(sentAtMs, pool);
+
+  // Order is a fallback for having *nothing to look at*, not a second opinion.
+  // Letting it answer after a cover frame had failed to match anything put a
+  // video from one day onto the newest photo of another — the two pictures 27
+  // bits apart, which is to say nothing whatsoever in common. A cover frame
+  // that matches nothing is not an absent answer, it is the answer "none of
+  // these", and the video goes to the picker instead of to whichever photo
+  // happened to be uploaded last.
+  const still = coverHash ? seen : pickStillForMotion(sentAtMs, pool);
 
   const bytes = await downloadTelegramFile(bot, incoming.fileId);
   const store = supabase().storage.from("photos");
@@ -468,8 +524,12 @@ export async function saveMotion(
     return;
   }
 
-  // Worth distinguishing: "recognised" means the pairing survives sending the
-  // video days later, and someone who knows that will use it.
-  const how = seen ? "🔍 Recognised the photo it belongs to" : "🎬 Live Photo";
+  // Worth distinguishing: "recognised" means the bot saw the photograph in the
+  // video's own cover frame, which is the answer that can be trusted. The other
+  // is a guess from the order things arrived in, and saying so lets a wrong one
+  // be spotted rather than discovered weeks later on the page.
+  const how = seen
+    ? "🔍 Recognised the photo it belongs to"
+    : "🎬 Live Photo — going by the order it arrived in, not by the picture";
   await ctx.reply(`${how} — that's now the motion behind the photo on day ${still.dayNumber}.${caveat}`);
 }

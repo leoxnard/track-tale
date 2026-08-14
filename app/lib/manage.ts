@@ -120,6 +120,17 @@ export type ManageAction =
 /** How much of a waiting video's id travels in a button. See `motionHome`. */
 export const MOTION_CODE_LENGTH = 8;
 
+/**
+ * The same two screens, browsing with no video in hand: every photo that
+ * already moves, so one placed on the wrong picture can be taken back off. A
+ * sentinel rather than a fourth screen, because the day list and the photo list
+ * are the same lists either way — only what a tap means differs, and that
+ * difference is one branch.
+ *
+ * Not a valid code: an id's first eight characters are always hex.
+ */
+export const MOTION_ANY = "-";
+
 export function motionCode(id: string): string {
   return id.replace(/-/g, "").slice(0, MOTION_CODE_LENGTH);
 }

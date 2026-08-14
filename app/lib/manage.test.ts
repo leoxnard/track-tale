@@ -3,6 +3,7 @@ import {
   countSummary,
   encodeAction,
   motionCode,
+  MOTION_ANY,
   paginate,
   parseAction,
   shortLabel,
@@ -53,6 +54,9 @@ describe("manage callback payloads", () => {
     { type: "motionHome", code: "a1b2c3d4" },
     { type: "motionDay", code: "a1b2c3d4", dayNumber: 12, page: 3 },
     { type: "motionPick", code: "a1b2c3d4", id: uuid },
+    { type: "motionHome", code: MOTION_ANY },
+    { type: "motionDay", code: MOTION_ANY, dayNumber: 6, page: 0 },
+    { type: "motionPick", code: MOTION_ANY, id: uuid },
   ];
 
   it("round-trips every screen", () => {
@@ -156,6 +160,13 @@ describe("motionCode", () => {
     const code = motionCode("f47ac10b-58cc-4372-a567-0e02b2c3d479");
     expect(code).toBe("f47ac10b");
     expect(code).toHaveLength(MOTION_CODE_LENGTH);
+  });
+
+  it("can never collide with the browse-anything sentinel", () => {
+    // The sentinel means "no video in hand". A real code that happened to equal
+    // it would turn a pick into an unpair.
+    expect(motionCode("f47ac10b-58cc-4372-a567-0e02b2c3d479")).not.toBe(MOTION_ANY);
+    expect(motionCode("--------------------------------")).not.toBe(MOTION_ANY);
   });
 
   it("gives two videos different codes", () => {

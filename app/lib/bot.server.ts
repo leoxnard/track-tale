@@ -26,13 +26,19 @@ import { fromGeoJson, type TrackGeoJson } from "./track";
 import { transitMode } from "./transport";
 import { imageDocument } from "./photo-file";
 import { motionFormat } from "./live-photo";
-import { attachMotionByHand, motionUrl, saveMotion, waitingMotions } from "./bot-motion.server";
+import {
+  attachMotionByHand,
+  motionUrl,
+  saveMotion,
+  unpairMotion,
+  waitingMotions,
+} from "./bot-motion.server";
 import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
 import { escapeMd, slugId } from "./telegram-md";
 import { deleteEntity, ENTITY_LABEL, type EntityType } from "./entities.server";
-import { encodeAction, motionCode, parseAction } from "./manage";
+import { encodeAction, motionCode, parseAction, MOTION_ANY } from "./manage";
 import {
   applyDelete,
   confirmView,
@@ -378,9 +384,18 @@ export function createBot(): Bot {
 
     const waiting = await waitingMotions(ctx.chat!.id, trip.id);
     if (waiting.length === 0) {
+      // Not a dead end: the other half of this command is fixing a video that
+      // did get placed, on the wrong photo.
       await ctx.reply(
-        "No Live Photo videos are waiting. Send a photo and the video that came with it, " +
-          "and I'll pair them — this is only for the ones I couldn't place.",
+        "No Live Photo videos are waiting.\n\n" +
+          "Send a photo and the video that came with it and I'll pair them. If one ended up " +
+          "on the wrong photo, take it off below and put it where it belongs.",
+        {
+          reply_markup: new InlineKeyboard().text(
+            "🔀 Move one off the wrong photo",
+            encodeAction({ type: "motionHome", code: MOTION_ANY }),
+          ),
+        },
       );
       return;
     }
@@ -394,6 +409,7 @@ export function createBot(): Bot {
         )
         .row();
     }
+    keyboard.text("🔀 Move one off the wrong photo", encodeAction({ type: "motionHome", code: MOTION_ANY }));
     await ctx.reply(
       `🎬 ${waiting.length} video(s) waiting for a photo:\n` +
         // The files themselves, so it is possible to tell which is which before
@@ -701,6 +717,25 @@ export function createBot(): Bot {
           break;
         case "motionPick": {
           const dayNumber = await dayNumberOfPhoto(trip, action.id);
+          // No video in hand: this tap is taking one *off* a photo, and what
+          // comes back is the picker for it, now looking for the right one.
+          if (action.code === MOTION_ANY) {
+            const freed =
+              dayNumber !== null && (await unpairMotion(ctx.chat!.id, trip.id, action.id));
+            if (!freed) {
+              view = await motionOverview(trip, MOTION_ANY);
+              view = { ...view, text: `That photo has no video on it.\n\n${view.text}` };
+              break;
+            }
+            view = await motionOverview(trip, motionCode(freed));
+            view = {
+              ...view,
+              text:
+                `🔀 Taken off day ${dayNumber}. Now pick the photo it does belong to.\n\n` +
+                view.text,
+            };
+            break;
+          }
           const attached =
             dayNumber !== null &&
             (await attachMotionByHand(ctx.chat!.id, trip.id, action.code, action.id));

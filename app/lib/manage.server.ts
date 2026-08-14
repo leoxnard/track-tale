@@ -7,6 +7,7 @@ import { byPhotoTime, photoTimeMs } from "./photo-order";
 import {
   countSummary,
   encodeAction,
+  MOTION_ANY,
   KIND_ICON,
   KIND_NOUN,
   paginate,
@@ -40,7 +41,7 @@ export interface DayRow {
   day_number: number;
   date: string;
   notes: { id: string }[];
-  media: { id: string }[];
+  media: { id: string; motion_path?: string | null }[];
   track_segments: { id: string }[];
   comments: { id: string }[];
 }
@@ -49,7 +50,9 @@ export interface DayRow {
 export async function loadDays(tripId: string): Promise<DayRow[]> {
   const { data, error } = await supabase()
     .from("days")
-    .select("id, day_number, date, notes(id), media(id), track_segments(id), comments(id)")
+    .select(
+      "id, day_number, date, notes(id), media(id, motion_path), track_segments(id), comments(id)",
+    )
     .eq("trip_id", tripId)
     .order("day_number");
   if (error) throw new Error(`could not load the trip's days: ${error.message}`);
@@ -199,24 +202,29 @@ export async function replaceDayView(
  * us nowhere else to keep the connection.
  */
 export async function motionOverview(trip: DbTrip, code: string): Promise<View> {
-  const days = (await loadDays(trip.id)).filter((d) => d.media.length > 0);
+  const moving = code === MOTION_ANY;
+  const days = (await loadDays(trip.id)).filter((d) =>
+    moving ? d.media.some((m) => m.motion_path) : d.media.length > 0,
+  );
   const keyboard = new InlineKeyboard();
 
   if (days.length === 0) {
     keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
     return {
-      text:
-        `*${escapeMd(trip.name)}* has no photos on it yet.\n\n` +
-        `Send the photo this video belongs to and I'll pair them straight away.`,
+      text: moving
+        ? `No photo on *${escapeMd(trip.name)}* has a video on it yet.`
+        : `*${escapeMd(trip.name)}* has no photos on it yet.\n\n` +
+          `Send the photo this video belongs to and I'll pair them straight away.`,
       keyboard,
       markdown: true,
     };
   }
 
   for (const day of days) {
+    const count = moving ? day.media.filter((m) => m.motion_path).length : day.media.length;
     keyboard
       .text(
-        `Day ${day.day_number} · ${KIND_ICON.media} ${day.media.length}`,
+        `Day ${day.day_number} · ${moving ? "🎬" : KIND_ICON.media} ${count}`,
         encodeAction({ type: "motionDay", code, dayNumber: day.day_number, page: 0 }),
       )
       .row();
@@ -224,10 +232,12 @@ export async function motionOverview(trip: DbTrip, code: string): Promise<View> 
   keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
 
   return {
-    text:
-      `🎬 *${escapeMd(trip.name)}* — which photo is this video the motion of?\n\n` +
-      `_Pick the day, then the photo. They are listed in the order the family page ` +
-      `shows them, so “photo 3” is the third one on that day._`,
+    text: moving
+      ? `🔀 *${escapeMd(trip.name)}* — which photo has a video that doesn't belong to it?\n\n` +
+        `_Taking it off doesn't delete it: you pick the right photo next._`
+      : `🎬 *${escapeMd(trip.name)}* — which photo is this video the motion of?\n\n` +
+        `_Pick the day, then the photo. They are listed in the order the family page ` +
+        `shows them, so “photo 3” is the third one on that day._`,
     keyboard,
     markdown: true,
   };
@@ -244,13 +254,25 @@ export async function motionDayView(
   dayNumber: number,
   page: number,
 ): Promise<View> {
+  const moving = code === MOTION_ANY;
   const contents = await loadDayContents(trip, dayNumber);
-  const photos = (contents?.items ?? []).filter((i) => i.kind === "media");
+  const photos = (contents?.items ?? [])
+    .filter((i) => i.kind === "media")
+    // Browsing with no video in hand, only the photos that have one can answer.
+    // They keep the numbering of the full day, though: "photo 3" has to mean
+    // the same thing here as it does on the page.
+    .filter((i) => !moving || i.hasMotion);
   const keyboard = new InlineKeyboard();
 
   if (photos.length === 0) {
     keyboard.text("◀︎ Days", encodeAction({ type: "motionHome", code }));
-    return { text: `Day ${dayNumber} has no photos on it.`, keyboard, markdown: true };
+    return {
+      text: moving
+        ? `No photo on day ${dayNumber} has a video on it.`
+        : `Day ${dayNumber} has no photos on it.`,
+      keyboard,
+      markdown: true,
+    };
   }
 
   const { items, page: current, pageCount } = paginate(photos, page);
@@ -278,9 +300,11 @@ export async function motionDayView(
 
   const paging = pageCount > 1 ? ` — page ${current + 1}/${pageCount}` : "";
   return {
-    text:
-      `🎬 *Day ${dayNumber}* (${contents!.date}) — ${photos.length} photo(s)${paging}\n\n` +
-      `Tap the one this video is the motion of. 🎬 marks a photo that already has some.`,
+    text: moving
+      ? `🔀 *Day ${dayNumber}* (${contents!.date}) — ${photos.length} photo(s) with a video${paging}\n\n` +
+        `Tap the one whose video is on the wrong picture.`
+      : `🎬 *Day ${dayNumber}* (${contents!.date}) — ${photos.length} photo(s)${paging}\n\n` +
+        `Tap the one this video is the motion of. 🎬 marks a photo that already has some.`,
     keyboard,
     markdown: true,
   };

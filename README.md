@@ -26,8 +26,9 @@ notes, stats and weather.
   the video belongs to **by looking at it**: Telegram attaches a cover frame to every video,
   and for a Live Photo that frame *is* the photograph, so the same fingerprint that
   recognises an edited re-upload recognises the pair, across the whole trip. Where there is
-  no cover frame to go on, it falls back to the last photo sent that hasn't got motion yet,
-  so an ordinary photo sent earlier is never quietly turned into a Live Photo. A video that
+  no cover frame **at all** to go on, it falls back to the last photo sent that hasn't got
+  motion yet. A cover frame that matches nothing is not the same as having none: it is the
+  answer "none of these", and the order is not allowed to overrule it. A video that
   arrives before its still waits five minutes for one, and will not accept a photo that
   doesn't look like it; several can wait at once.
 - When neither the picture nor the order can say which photo a video belongs to — a crop in
@@ -36,7 +37,8 @@ notes, stats and weather.
   "photo 3" is the third one on that day. A photo that already moves is marked, and picking
   it replaces what it had. `/livephoto` finds the waiting videos again later, since a button
   in the scrollback is not somewhere a file should live; anything still unclaimed after a
-  week is swept by the nightly cron. Anything longer than six seconds is treated as a clip and declined,
+  week is swept by the nightly cron. The same command **takes a video back off** a photo it
+  should never have landed on and hands it straight to the picker. Anything longer than six seconds is treated as a clip and declined,
   because the page has nowhere to show one. Send the video the normal compressed way rather
   than as a file — Telegram re-encodes it to MP4, which every browser plays, whereas the
   untouched `.MOV` off an iPhone is HEVC and plays only on Apple devices.
