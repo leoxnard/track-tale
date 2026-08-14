@@ -170,9 +170,25 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
       hops: hops.map((hop) => {
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
+
+        // Zoom into one end of a long train ride and the gap runs off both
+        // sides of the chart: its middle — where the train used to be sized
+        // and placed — is nowhere near the screen, so the train vanished
+        // exactly when the ride filled the view. What matters is the part of
+        // the gap that can be seen, so the train is measured and centred in
+        // that instead, and only disappears when the gap itself has scrolled
+        // out of the window.
+        const seenFrom = Math.max(fromX, 0);
+        const seenTo = Math.min(toX, W);
+        const onScreen = seenTo > seenFrom;
+
         const perPx = chartPx > 0 ? W / chartPx : 0;
-        const gapPx = perPx > 0 ? (toX - fromX) / perPx : 0;
-        const carriages = hop.mode === "train" ? carriagesFor(gapPx) : singleFits(gapPx);
+        const gapPx = perPx > 0 && onScreen ? (seenTo - seenFrom) / perPx : 0;
+        const carriages = !onScreen
+          ? null
+          : hop.mode === "train"
+            ? carriagesFor(gapPx)
+            : singleFits(gapPx);
 
         // What the train stands on, back in the chart's own units, with a
         // little clearance so the dashes stop short of the buffers.
@@ -180,19 +196,22 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           carriages === null ? 0 : hop.mode === "train" ? trainWidth(carriages) : VEHICLE_PX;
         const occupied = vehiclePx === 0 ? 0 : (vehiclePx + 2 * DASH_CLEARANCE_PX) * perPx;
 
-        // The hop hangs between the heights either side of it, so a dash run
-        // takes its ends from the line between them.
+        // The hop hangs between the heights either side of it, so both the
+        // dash runs and the train take their height from the line between them.
         const heightAt = (px: number) => {
           const along = toX === fromX ? 0 : (px - fromX) / (toX - fromX);
           return y(hop.fromE + (hop.toE - hop.fromE) * along);
         };
 
+        const midX = (seenFrom + seenTo) / 2;
+
         return {
           ...hop,
-          midX: (fromX + toX) / 2,
-          midY: y((hop.fromE + hop.toE) / 2),
+          onScreen,
+          midX,
+          midY: heightAt(midX),
           carriages,
-          lines: dashRuns(fromX, toX, occupied).map(
+          lines: dashRuns(fromX, toX, occupied, midX).map(
             ([a, b]) =>
               `M${a.toFixed(1)},${heightAt(a).toFixed(1)}L${b.toFixed(1)},${heightAt(b).toFixed(1)}`,
           ),
@@ -419,7 +438,7 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
           {/* The train standing in the hole it left, as long as the hole is
               wide: a locomotive and as many carriages as fit. */}
           {hops
-            .filter((hop) => hop.carriages !== null && hop.midX >= 0 && hop.midX <= W)
+            .filter((hop) => hop.onScreen && hop.carriages !== null)
             .map((hop) => (
               <span
                 key={`train-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}

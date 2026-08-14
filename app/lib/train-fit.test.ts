@@ -83,6 +83,15 @@ describe("dashRuns", () => {
     expect(dashRuns(50, 50, 20)).toEqual([]);
   });
 
+  it("puts the train where it is asked to stand", () => {
+    // Zoomed in far enough, the visible part of a gap is off to one side of
+    // it, and the dash runs either side of the train are lopsided.
+    expect(dashRuns(-500, 100, 40, 20)).toEqual([
+      [-500, 0],
+      [40, 100],
+    ]);
+  });
+
   it("keeps both runs the same length, wherever the gap sits", () => {
     const [before, after] = dashRuns(220, 480, 60);
     expect(before[1] - before[0]).toBeCloseTo(after[1] - after[0], 10);

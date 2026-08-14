@@ -64,22 +64,25 @@ export function trainWidth(carriages: number): number {
  * simply stopping; dashed, it reads as the journey carrying on past what the
  * train had room to say.
  *
- * `occupied` is what the train takes up in the middle, clearance included, in
- * the same units as `from` and `to`; zero for a gap with no train in it at
- * all. Runs shorter than `minRun` are dropped — two dashes wedged against a
- * locomotive are dirt, not information.
+ * `occupied` is what the train takes up, clearance included, in the same units
+ * as `from` and `to`; zero for a gap with no train in it at all. `centre` is
+ * where it stands, which is the middle of the gap until the chart is zoomed
+ * far enough in that one end of the gap is off screen — then the train stands
+ * in the middle of what can be seen, and the dash runs either side of it are
+ * lopsided. Runs shorter than `minRun` are dropped — two dashes wedged against
+ * a locomotive are dirt, not information.
  */
 export function dashRuns(
   from: number,
   to: number,
   occupied: number,
+  centre = (from + to) / 2,
   minRun = 3,
 ): [number, number][] {
   if (occupied <= 0) return to - from >= minRun ? [[from, to]] : [];
-  const middle = (from + to) / 2;
   const half = occupied / 2;
   return ([
-    [from, middle - half],
-    [middle + half, to],
+    [from, centre - half],
+    [centre + half, to],
   ] as [number, number][]).filter(([a, b]) => b - a >= minRun);
 }
