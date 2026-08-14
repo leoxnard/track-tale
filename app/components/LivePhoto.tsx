@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useLiveMotion } from "./live-motion";
 
 /**
  * A photo in the day's grid, which plays if it has three seconds behind it.
  *
- * An iPhone plays a Live Photo when you press and hold it. There is no press
- * and hold on a web page, and inventing one would mean fighting the browser's
- * own long-press menu, so the motion is triggered by the two things people
- * already do to a photo grid: point at a picture, or scroll it into the middle
- * of the screen. Pointing is the desktop half; scrolling is the phone half,
- * where there is no pointer at all and a picture that never played would leave
- * the whole feature invisible to most of the family.
+ * An iPhone plays a Live Photo when you press and hold it, and that gesture is
+ * what this offers back: hold a finger on the tile and it plays, without the
+ * photo opening full screen when the finger lifts and without iOS's own
+ * press-and-hold menu appearing over the top. A mouse gets the same thing by
+ * pointing, which is the desktop's version of dwelling on something.
+ *
+ * Scrolling one into the middle of the screen also plays it, once. That is the
+ * part that makes the feature findable at all — nobody long-presses a photo to
+ * see whether it might move — and the hold is then how you watch it again.
  *
  * The still stays underneath the whole time rather than being swapped out. A
  * video takes a moment to decode its first frame, and cross-fading over a
@@ -38,30 +41,10 @@ interface Props {
 const PLAY_VISIBILITY = 0.75;
 
 export function LivePhoto({ stillUrl, motionUrl, alt, liveLabel, className }: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  // Not with the mouse: the tile is a link, and a slow click still has to open
+  // the photo rather than being eaten as a hold. Pointing plays it instead.
+  const { videoRef, playing, start, stop, press } = useLiveMotion({ holdWithMouse: false });
   const frameRef = useRef<HTMLDivElement>(null);
-  const [playing, setPlaying] = useState(false);
-
-  const start = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = 0;
-    // Autoplay is refused often enough — a muted inline video is normally
-    // allowed, but not always — and a rejected promise here is not an error
-    // worth anyone's console: the still is a perfectly good photograph.
-    void video.play().then(
-      () => setPlaying(true),
-      () => setPlaying(false),
-    );
-  }, []);
-
-  const stop = useCallback(() => {
-    const video = videoRef.current;
-    setPlaying(false);
-    if (!video) return;
-    video.pause();
-    video.currentTime = 0;
-  }, []);
 
   // The phone half. Only where there is no pointer: on a desktop this would
   // fight the hover and play everything the moment the page settled.
@@ -79,19 +62,28 @@ export function LivePhoto({ stillUrl, motionUrl, alt, liveLabel, className }: Pr
     return () => observer.disconnect();
   }, [motionUrl, start, stop]);
 
+  if (!motionUrl) {
+    return (
+      <div className={`relative overflow-hidden ${className ?? ""}`}>
+        <img src={stillUrl} alt={alt} loading="lazy" className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={frameRef}
-      className={`relative overflow-hidden ${className ?? ""}`}
+      // `touch-callout` and `select-none` are what stop iOS putting its own
+      // "open link" sheet over the video the gesture is trying to play. Only on
+      // a tile with motion — a plain photo keeps its ordinary long-press menu.
+      className={`relative select-none overflow-hidden [-webkit-touch-callout:none] ${className ?? ""}`}
       // The pointer is read off the frame, not the video: the video sits behind
       // `pointer-events: none` so it never swallows the click that opens the
       // photo full size.
       onPointerEnter={(e) => {
-        if (motionUrl && e.pointerType === "mouse") start();
+        if (e.pointerType === "mouse") start();
       }}
-      onPointerLeave={(e) => {
-        if (motionUrl && e.pointerType === "mouse") stop();
-      }}
+      {...press}
     >
       <img
         src={stillUrl}
@@ -103,29 +95,25 @@ export function LivePhoto({ stillUrl, motionUrl, alt, liveLabel, className }: Pr
         // the pixel, which happens whenever a re-encode changed the crop.
         style={playing ? { opacity: 0 } : undefined}
       />
-      {motionUrl && (
-        <>
-          <video
-            ref={videoRef}
-            src={motionUrl}
-            muted
-            playsInline
-            preload="none"
-            onEnded={stop}
-            aria-hidden="true"
-            className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
-              playing ? "opacity-100" : "opacity-0"
-            }`}
-          />
-          <span
-            className={`pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/45 px-1.5 py-px text-[0.6rem] font-medium uppercase tracking-wider text-white transition-opacity ${
-              playing ? "opacity-0" : "opacity-90"
-            }`}
-          >
-            {liveLabel}
-          </span>
-        </>
-      )}
+      <video
+        ref={videoRef}
+        src={motionUrl}
+        muted
+        playsInline
+        preload="none"
+        onEnded={stop}
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+          playing ? "opacity-100" : "opacity-0"
+        }`}
+      />
+      <span
+        className={`pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/45 px-1.5 py-px text-[0.6rem] font-medium uppercase tracking-wider text-white transition-opacity ${
+          playing ? "opacity-0" : "opacity-90"
+        }`}
+      >
+        {liveLabel}
+      </span>
     </div>
   );
 }

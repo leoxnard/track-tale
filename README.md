@@ -141,10 +141,14 @@ notes, stats and weather.
   a half-transparent arrow under a 5 px coloured line is simply not there.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
-- A **Live Photo** moves. In the day's grid it plays when the mouse points at it, and on a
-  phone — where there is no pointer at all — when it scrolls into the middle of the screen.
-  Opening one full screen plays it once, and after that press and hold, as on the phone it
-  came from, or tap the **Live** badge. The still stays underneath the whole time, so a photo
+- A **Live Photo** moves. In the day's grid, **hold a finger on it** and it plays — without
+  the photo opening full screen when you let go, and without iOS's own press-and-hold menu
+  appearing over the top. A mouse plays it by pointing at it. Scrolling one into the middle
+  of the screen plays it once too, which is what makes the whole thing findable: nobody holds
+  a finger on a photo to see whether it might move. Full screen, it plays once as it opens
+  and then on **a single tap**, on a hold, or from the **Live** badge. A hold starts the clip
+  rather than gating it — letting go a moment later would show almost nothing, and three
+  seconds is short enough to simply run. The still stays underneath throughout, so a photo
   whose motion is still loading is a photograph rather than an empty tile, and a reader whose
   system asks for reduced motion gets the still and the badge and nothing that moves on its
   own.

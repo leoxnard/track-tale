@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useMessages } from "../lib/locale";
+import { useLiveMotion } from "./live-motion";
 
 /**
  * Full-screen viewer for the trip's photos.
@@ -34,18 +35,15 @@ interface Props {
   showAuthors: boolean;
 }
 
-/** A tap short enough to be a tap rather than the start of a hold. */
-const TAP_MS = 300;
-
 /**
  * The picture itself, and the motion behind it when there is any.
  *
  * A Live Photo plays once as it opens, which is the closest the web gets to the
  * moment on an iPhone where the picture you just tapped moves before it
- * settles. After that it is press-and-hold, the gesture anyone with an iPhone
- * already has in their fingers — and a tap, which plays it through, because on
- * a desktop "hold the mouse button down" is not a gesture anyone has ever been
- * taught.
+ * settles. After that a single tap plays it through, and pressing and holding
+ * plays it for as long as you hold — the gesture anyone with an iPhone already
+ * has in their fingers. There is no link to protect here, so unlike the grid
+ * tile a mouse gets the hold too.
  *
  * Its own component so that opening the next photo mounts a fresh one: keyed by
  * URL, the effect below runs again and the new photo plays itself, which a
@@ -53,24 +51,10 @@ const TAP_MS = 300;
  */
 function LightboxFrame({ photo, alt }: { photo: LightboxPhoto; alt: string }) {
   const m = useMessages();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const pressedAt = useRef(0);
-  const [playing, setPlaying] = useState(false);
-
-  const start = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = 0;
-    void video.play().then(
-      () => setPlaying(true),
-      () => setPlaying(false),
-    );
-  }, []);
-
-  const stop = useCallback(() => {
-    setPlaying(false);
-    videoRef.current?.pause();
-  }, []);
+  const { videoRef, playing, start, stop, press } = useLiveMotion({
+    holdWithMouse: true,
+    playOnTap: true,
+  });
 
   // Play once on opening, unless the reader has asked the system for less of
   // exactly this.
@@ -80,19 +64,14 @@ function LightboxFrame({ photo, alt }: { photo: LightboxPhoto; alt: string }) {
     start();
   }, [photo.motionUrl, start]);
 
+  if (!photo.motionUrl) {
+    return <img src={photo.url} alt={alt} className="max-h-full max-w-full object-contain" />;
+  }
+
   return (
     <div
-      className="relative flex max-h-full max-w-full items-center justify-center"
-      onPointerDown={() => {
-        if (!photo.motionUrl) return;
-        pressedAt.current = Date.now();
-        start();
-      }}
-      onPointerUp={() => {
-        // A hold ends when the finger lifts; a tap lets it run to the end.
-        if (photo.motionUrl && Date.now() - pressedAt.current > TAP_MS) stop();
-      }}
-      onPointerLeave={stop}
+      className="relative flex max-h-full max-w-full select-none items-center justify-center [-webkit-touch-callout:none]"
+      {...press}
     >
       <img
         src={photo.url}
@@ -100,33 +79,29 @@ function LightboxFrame({ photo, alt }: { photo: LightboxPhoto; alt: string }) {
         className="max-h-full max-w-full object-contain transition-opacity duration-200"
         style={playing ? { opacity: 0 } : undefined}
       />
-      {photo.motionUrl && (
-        <>
-          <video
-            ref={videoRef}
-            src={photo.motionUrl}
-            muted
-            playsInline
-            preload="auto"
-            onEnded={stop}
-            aria-hidden="true"
-            className={`pointer-events-none absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${
-              playing ? "opacity-100" : "opacity-0"
-            }`}
-          />
-          <button
-            type="button"
-            onClick={start}
-            aria-label={m.lightbox.livePlay}
-            title={m.lightbox.liveHint}
-            className={`absolute left-2 top-2 rounded bg-black/50 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wider text-white transition-opacity hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-white ${
-              playing ? "opacity-0" : "opacity-90"
-            }`}
-          >
-            {m.lightbox.live}
-          </button>
-        </>
-      )}
+      <video
+        ref={videoRef}
+        src={photo.motionUrl}
+        muted
+        playsInline
+        preload="auto"
+        onEnded={stop}
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${
+          playing ? "opacity-100" : "opacity-0"
+        }`}
+      />
+      <button
+        type="button"
+        onClick={start}
+        aria-label={m.lightbox.livePlay}
+        title={m.lightbox.liveHint}
+        className={`absolute left-2 top-2 rounded bg-black/50 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wider text-white transition-opacity hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-white ${
+          playing ? "opacity-0" : "opacity-90"
+        }`}
+      >
+        {m.lightbox.live}
+      </button>
     </div>
   );
 }

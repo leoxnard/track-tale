@@ -135,6 +135,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   order**, in the pure half: the *newest* still inside a five-minute window that hasn't got
   motion. The comment there says why newest rather than oldest; it is the difference between
   the motion landing on the Live Photo and landing on a plain shot sent four minutes earlier.
+- `components/live-motion.ts` — the finger gestures behind a Live Photo, shared by the grid
+  tile and the lightbox because both got the same two things wrong on their own: `pointerleave`
+  fires on the way out of an ordinary tap on iOS (so it is only a stop for a mouse), and the
+  click after a long press has to be swallowed or the tile's link opens on top of the video
+  it just played. Read the header before touching either component.
 - `photo-index.server.ts` — fingerprints for a set of stored photos, filled in lazily and
   written back. Exists so the twin finder and the motion matcher don't import each other.
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
