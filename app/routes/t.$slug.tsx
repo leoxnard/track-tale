@@ -26,7 +26,7 @@ import { reachedAlongPlan, type TourPiece } from "../lib/tour-layout";
 import { transitMode, type TransitMode } from "../lib/transport";
 import { weatherIcon, type DayWeather, type WeatherSite } from "../lib/weather";
 import { analyseWind, BIN_COLORS, type Ride, type WindAnalysis } from "../lib/wind";
-import { driftAt, lodForZoom, windField, type WindArrow } from "../lib/wind-field";
+import { channelFor, driftAt, windField, type WindArrow } from "../lib/wind-field";
 import {
   analyseRidingWeather,
   hasTemperature,
@@ -626,7 +626,10 @@ function TripMap({
             "icon-rotation-alignment": "map",
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 14, 0.85],
+            // Slightly *larger* when zoomed out, not smaller. Shrinking them
+            // there was backwards: that is the view where an arrow has the
+            // least to sit against and the most work to do.
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 8, 0.95, 15, 0.8],
             visibility: windRef.current ? "visible" : "none",
           },
           paint: { "icon-opacity": ["get", "o"] },
@@ -788,7 +791,11 @@ function TripMap({
         windFrame = 0;
         if (!map || !windRef.current || !map.getSource(WIND_LAYER)) return;
         const now = performance.now();
-        const maxLod = lodForZoom(map.getZoom());
+        // Thinned by real scale, not by zoom number: a zoom level covers a very
+        // different distance in Scotland than at the equator, and the channel
+        // should read the same in both.
+        const { stride, lanes } = channelFor(metersPerCm(map) / CSS_PX_PER_CM);
+        const drawnLanes = new Set(lanes);
         const b = map.getBounds();
         // A margin, so arrows drift in from off screen instead of appearing at
         // the edge.
@@ -799,25 +806,28 @@ function TripMap({
         const north = b.getNorth() + pad;
 
         const onScreen = (arrow: WindArrow) =>
-          arrow.lod <= maxLod &&
+          arrow.step % stride === 0 &&
+          drawnLanes.has(arrow.lane) &&
           arrow.lng >= west &&
           arrow.lng <= east &&
           arrow.lat >= south &&
           arrow.lat <= north;
 
-        // Counted first, then taken every nth, rather than filled up and cut
+        // A floor under the screen spacing, for a route that doubles back
+        // through one valley and stacks a week of channels into one view.
+        // Counted first and then taken every nth, rather than filled up and cut
         // off: stopping at the cap would draw the whole channel across the
         // first days of a trip and leave the last ones bare, which reads as
         // "no wind there" and is the one thing the overlay must not say.
         let candidates = 0;
         for (const arrow of windArrows) if (onScreen(arrow)) candidates++;
-        const stride = Math.max(1, Math.ceil(candidates / WIND_MAX_ARROWS));
+        const extra = Math.max(1, Math.ceil(candidates / WIND_MAX_ARROWS));
 
         const features: GeoJSON.Feature[] = [];
         let seen = 0;
         for (const arrow of windArrows) {
           if (!onScreen(arrow)) continue;
-          if (seen++ % stride !== 0) continue;
+          if (seen++ % extra !== 0) continue;
           const { lat, lng, opacity } = driftAt(arrow, now);
           features.push({
             type: "Feature",

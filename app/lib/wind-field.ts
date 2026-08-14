@@ -31,12 +31,15 @@ export interface WindArrow {
   /** Which speed class, for the colour it shares with the rose's petals. */
   bin: number;
   /**
-   * Detail level, 0 first. Zoom out and the higher levels drop away, which
-   * thins the channel evenly instead of leaving one dense stretch and one bare
-   * one. Cheaper than rebuilding the field on every zoom, and it keeps the
-   * arrows that survive in the same places rather than reshuffling them.
+   * Which step along the route this arrow belongs to, counting from the start
+   * of the trip. Thinning takes every nth step, so what survives is spread
+   * evenly down the whole route rather than dense at the start and bare at the
+   * end, and the arrows that survive stay where they were rather than
+   * reshuffling as the map moves.
    */
-  lod: number;
+  step: number;
+  /** Which lane, -2..2 without 0. Outer lanes go first when the channel closes. */
+  lane: number;
   /** 0–1, so a hundred arrows do not drift and fade in lockstep. */
   phase: number;
 }
@@ -46,8 +49,27 @@ const STEP_M = 450;
 /** Lanes either side of the line, and the gap between them. */
 const LANES = 2;
 const LANE_GAP_M = 600;
-/** How many detail levels the thinning has to work with. */
-export const LOD_LEVELS = 8;
+/**
+ * How far apart the arrows should sit **on screen**, in CSS pixels.
+ *
+ * Screen distance rather than ground distance is the whole trick. Thinning by
+ * zoom level was the first attempt and it emptied the map exactly when the map
+ * was most worth looking at: zoomed out to the whole tour, the arrows were
+ * fewer, smaller and no more visible than the paper they sat on. Ground spacing
+ * is what should change with the zoom; how the channel *reads* should not.
+ */
+const TARGET_SPACING_PX = 52;
+
+/**
+ * How far apart two lanes must be on screen to be worth drawing as two.
+ *
+ * Below the first threshold the outer pair sits on top of the inner one; below
+ * the second, even the inner pair does, and the channel has become a single
+ * file of arrows along the route. Drawing both anyway would stack two arrows on
+ * one spot — twice the work for a smudge.
+ */
+const LANE_LEGIBLE_PX = 7;
+const LANE_DISTINCT_PX = 3.5;
 
 /** Metres to degrees, near enough at the scale of a lane's width. */
 function offsetPoint(p: TrackPoint, bearing: number, metres: number): { lat: number; lng: number } {
@@ -88,11 +110,11 @@ export function windField(rides: Ride[]): WindArrow[] {
       const travel = bearingDeg(a, b);
       const towardDeg = norm360(wind.fromDeg + 180);
       const bin = binOf(wind.speedKmh);
-      const lod = index % LOD_LEVELS;
       // A phase that walks around the cycle with the arrows rather than jumping
       // about: neighbours differ a little, so the channel reads as something
       // moving through it instead of everything blinking at once.
       const phase = (index * 0.137) % 1;
+      const step = index;
       index++;
 
       for (let lane = -LANES; lane <= LANES; lane++) {
@@ -104,9 +126,8 @@ export function windField(rides: Ride[]): WindArrow[] {
           towardDeg,
           speedKmh: wind.speedKmh,
           bin,
-          // The outer lanes go first when the channel thins, so what is left
-          // hugs the route.
-          lod: Math.max(lod, (Math.abs(lane) - 1) * 4),
+          step,
+          lane,
           phase: (phase + Math.abs(lane) * 0.31) % 1,
         });
       }
@@ -115,13 +136,23 @@ export function windField(rides: Ride[]): WindArrow[] {
   return arrows;
 }
 
-/** How much of the field to draw at a zoom level: everything at street level,
- *  a thinned skeleton when the whole tour is on screen. */
-export function lodForZoom(zoom: number): number {
-  if (zoom >= 13) return LOD_LEVELS - 1;
-  if (zoom >= 11.5) return 3;
-  if (zoom >= 10) return 1;
-  return 0;
+/**
+ * How the channel is thinned at a given scale: take every `stride`th step along
+ * the route, and only lanes out to `lanes` either side.
+ *
+ * Both fall out of one number — how many metres a pixel is worth — so the
+ * channel keeps the same look on screen whether it covers a village or a
+ * country, and the arrows only ever get further apart on the ground.
+ */
+export function channelFor(metresPerPixel: number): { stride: number; lanes: number[] } {
+  const wanted = (TARGET_SPACING_PX * metresPerPixel) / STEP_M;
+  const gapPx = LANE_GAP_M / metresPerPixel;
+  return {
+    stride: Math.min(400, Math.max(1, Math.round(wanted))),
+    // The channel closes as the map pulls back: four lanes, then two, then one
+    // file of arrows following the route. It never closes to none.
+    lanes: gapPx >= LANE_LEGIBLE_PX ? [-2, -1, 1, 2] : gapPx >= LANE_DISTINCT_PX ? [-1, 1] : [1],
+  };
 }
 
 /**
@@ -140,5 +171,7 @@ export function driftAt(
 ): { lat: number; lng: number; opacity: number } {
   const t = ((nowMs / cycleMs + arrow.phase) % 1 + 1) % 1;
   const { lat, lng } = offsetPoint(arrow, arrow.towardDeg, t * driftM);
-  return { lat, lng, opacity: Math.sin(Math.PI * t) * 0.75 };
+  // Peaks well clear of the basemap: at 0.75 the calm classes were a rumour
+  // over anything but plain paper.
+  return { lat, lng, opacity: Math.sin(Math.PI * t) * 0.9 };
 }

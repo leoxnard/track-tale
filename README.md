@@ -102,7 +102,10 @@ notes, stats and weather.
   with one exposed valley in it, and only the map can show that. Like the route network it is
   **off until asked for**, and the animation stops itself when the tab is hidden. The lanes
   are a buffer in metres, so the channel is real ground either side of the line rather than a
-  fixed ribbon, and it thins out as you zoom away instead of curdling into a mat of arrows.
+  fixed ribbon. How dense it looks, though, is fixed **on screen**, not on the ground: pull
+  back and the arrows spread out over more kilometres and the channel closes lane by lane
+  down to a single file following the route, so the whole tour reads the same as one valley
+  does — thinned, never emptied.
 - Tapping a photo opens it full screen over the page, with arrow keys, on-screen arrows or a
   swipe to run through every photo on the trip.
 - A **Cycle routes** button lays the signposted route network over the map — EuroVelo and the

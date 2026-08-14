@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { haversineM, type TrackPoint } from "./track";
 import type { HourlyWeather } from "./weather";
-import { driftAt, lodForZoom, windField, LOD_LEVELS } from "./wind-field";
+import { channelFor, driftAt, windField } from "./wind-field";
 
 const HOUR = 3600000;
 const START = Date.parse("2026-07-14T08:00:00Z");
@@ -58,14 +58,12 @@ describe("windField", () => {
     expect(arrows.length).toBeLessThan(250);
   });
 
-  it("spreads the detail levels so thinning does not bare one stretch", () => {
+  it("numbers the steps along the route so thinning cannot bare one end", () => {
     const arrows = windField([{ points: northward(), sites: sitesOf(steady(20, 0)) }]);
-    const kept = arrows.filter((a) => a.lod <= 1);
-    const north = kept.filter((a) => a.lat > 50.1).length;
-    const south = kept.filter((a) => a.lat <= 50.1).length;
-    expect(kept.length).toBeGreaterThan(0);
-    expect(north).toBeGreaterThan(0);
-    expect(south).toBeGreaterThan(0);
+    // Take every fourth step, the way a zoomed-out map does.
+    const kept = arrows.filter((a) => a.step % 4 === 0);
+    expect(kept.filter((a) => a.lat > 50.1).length).toBeGreaterThan(0);
+    expect(kept.filter((a) => a.lat <= 50.1).length).toBeGreaterThan(0);
   });
 
   it("colours arrows by the same speed classes the rose uses", () => {
@@ -95,7 +93,8 @@ describe("driftAt", () => {
     towardDeg: 90,
     speedKmh: 20,
     bin: 3,
-    lod: 0,
+    step: 0,
+    lane: 1,
     phase: 0,
   };
 
@@ -109,7 +108,7 @@ describe("driftAt", () => {
   it("fades to nothing at the moment it snaps back, so the loop is unseen", () => {
     expect(driftAt(arrow, 0).opacity).toBeCloseTo(0, 5);
     expect(driftAt(arrow, 3200).opacity).toBeCloseTo(0, 5);
-    expect(driftAt(arrow, 1600).opacity).toBeGreaterThan(0.7);
+    expect(driftAt(arrow, 1600).opacity).toBeGreaterThan(0.85);
   });
 
   it("keeps arrows out of step with each other", () => {
@@ -118,11 +117,33 @@ describe("driftAt", () => {
   });
 });
 
-describe("lodForZoom", () => {
-  it("gives the whole field at street level and a skeleton from far off", () => {
-    expect(lodForZoom(15)).toBe(LOD_LEVELS - 1);
-    expect(lodForZoom(8)).toBe(0);
-    expect(lodForZoom(12)).toBeLessThan(LOD_LEVELS - 1);
-    expect(lodForZoom(12)).toBeGreaterThan(lodForZoom(8));
+describe("channelFor", () => {
+  it("keeps the same look on screen by spreading the arrows on the ground", () => {
+    // Close in, every step is drawn and the channel is its full width.
+    const near = channelFor(2);
+    expect(near.stride).toBe(1);
+    expect(near.lanes).toEqual([-2, -1, 1, 2]);
+    // A whole tour on screen: the same arrows, kilometres apart instead of
+    // hundreds of metres — thinned, never emptied.
+    const far = channelFor(300);
+    expect(far.stride).toBeGreaterThan(20);
+    expect(far.lanes).toEqual([1]);
+  });
+
+  it("never thins to nothing, however far out the map goes", () => {
+    for (const mpp of [1, 10, 100, 1000, 20000]) {
+      const { stride, lanes } = channelFor(mpp);
+      expect(stride).toBeGreaterThanOrEqual(1);
+      expect(Number.isFinite(stride)).toBe(true);
+      expect(lanes.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("closes the channel a lane at a time instead of stacking arrows", () => {
+    expect(channelFor(50).lanes).toHaveLength(4);
+    expect(channelFor(120).lanes).toEqual([-1, 1]);
+    // Far enough out that even the inner pair would overlap: one file, not two
+    // arrows on the same pixel.
+    expect(channelFor(300).lanes).toEqual([1]);
   });
 });
