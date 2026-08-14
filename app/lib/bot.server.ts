@@ -1228,6 +1228,7 @@ export function createBot(): Bot {
         if (!trip) return;
         await saveMotion(ctx, bot, trip, {
           fileId: doc.file_id,
+          thumbFileId: doc.thumbnail?.file_id ?? null,
           // A document carries no duration; `looksLikeMotion` falls back to size.
           durationS: null,
           fileName: doc.file_name ?? null,
@@ -1357,6 +1358,9 @@ export function createBot(): Bot {
     if (!trip) return;
     await saveMotion(ctx, bot, trip, {
       fileId: clip.file_id,
+      // The cover frame is what the look-alike match runs on: for a Live Photo
+      // it is the photograph itself.
+      thumbFileId: clip.thumbnail?.file_id ?? null,
       durationS: clip.duration ?? null,
       fileName: clip.file_name ?? null,
       mimeType: clip.mime_type ?? "video/mp4",

@@ -7,6 +7,7 @@ import { readExif, type ExifData } from "./exif";
 import type { ImageDocument } from "./photo-file";
 import { compressForWeb, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { findTwin, perceptualHash, type HashedPhoto } from "./phash";
+import { hashPhotos } from "./photo-index.server";
 import { fromGeoJson, type TrackGeoJson } from "./track";
 import { renderOgCard } from "./og.server";
 import {
@@ -95,11 +96,7 @@ export async function backfillPhotoLocations(dayId: string): Promise<number> {
 /** Beyond this a first auto-match would spend longer indexing than anyone will wait. */
 const TWIN_INDEX_LIMIT = 200;
 
-/**
- * Every photo on the trip with a fingerprint, computing the missing ones as it
- * goes. Hashes are read off the stored thumbnail — 20 kB rather than a whole
- * picture, and a difference hash gives the same answer either way.
- */
+/** Every photo on the trip with a fingerprint. See `photo-index.server.ts`. */
 export async function hashedTripPhotos(tripId: string): Promise<HashedPhoto[]> {
   const { data: days } = await supabase().from("days").select("id").eq("trip_id", tripId);
   const dayIds = (days ?? []).map((d) => d.id);
@@ -110,27 +107,7 @@ export async function hashedTripPhotos(tripId: string): Promise<HashedPhoto[]> {
     .select("id, phash, thumb_path, storage_path")
     .in("day_id", dayIds)
     .limit(TWIN_INDEX_LIMIT);
-  if (!photos) return [];
-
-  const store = supabase().storage.from("photos");
-  const hashed: HashedPhoto[] = [];
-  for (const photo of photos) {
-    if (photo.phash) {
-      hashed.push({ id: photo.id, hash: photo.phash });
-      continue;
-    }
-    try {
-      const { data: blob } = await store.download(photo.thumb_path ?? photo.storage_path);
-      if (!blob) continue;
-      const hash = await perceptualHash(await blob.arrayBuffer());
-      // Keep it, so the trip only pays this once per photo.
-      await supabase().from("media").update({ phash: hash }).eq("id", photo.id);
-      hashed.push({ id: photo.id, hash });
-    } catch {
-      // A photo we cannot read simply isn't a candidate.
-    }
-  }
-  return hashed;
+  return photos ? hashPhotos(photos) : [];
 }
 
 interface TwinPhoto {
@@ -263,7 +240,9 @@ export async function savePhoto(
   // The motion half of a Live Photo can arrive first — Telegram delivers an
   // album in the order its items were picked. If one is waiting, this is the
   // still it was waiting for.
-  const live = await attachParkedMotion(ctx.chat!.id, trip.id, inserted.id).catch(() => false);
+  const live = await attachParkedMotion(ctx.chat!.id, trip.id, inserted.id, phash).catch(
+    () => false,
+  );
 
   const where =
     located?.source === "exif"

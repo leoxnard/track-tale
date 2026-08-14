@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { findTwin, hammingDistance, perceptualHash, TWIN_MAX_DISTANCE } from "./phash";
+import {
+  findTwin,
+  hammingDistance,
+  perceptualHash,
+  MOTION_MAX_DISTANCE,
+  MOTION_MIN_MARGIN,
+  TWIN_MAX_DISTANCE,
+} from "./phash";
 
 /**
  * A stand-in for a photograph: a horizon, a sun, some ground texture. Enough
@@ -117,6 +124,49 @@ describe("findTwin", () => {
 
   it("matches against a lone candidate with nothing to compare it to", () => {
     expect(findTwin(near, [{ id: "only", hash: "0000000000000001" }])?.id).toBe("only");
+  });
+
+  it("chooses at the motion tolerance where the strict one refuses", () => {
+    // A cover frame is up to a second and a half off the shutter, so the same
+    // view lands further from its still than an edit of it would. Matching one
+    // can afford the wider net: nothing is overwritten, and the loser keeps its
+    // own picture.
+    const match = findTwin(
+      near,
+      [
+        { id: "its-still", hash: "000000000000000f" }, // 4 bits off
+        { id: "elsewhere", hash: "ffffffff00000000" },
+      ],
+      { maxDistance: MOTION_MAX_DISTANCE, minMargin: MOTION_MIN_MARGIN },
+    );
+    expect(match?.id).toBe("its-still");
+    // The strict tolerance would take this one too — it is the margin, not the
+    // distance, that the two disagree about.
+    expect(findTwin(near, [{ id: "its-still", hash: "000000000000000f" }])?.id).toBe("its-still");
+  });
+
+  it("hands two indistinguishable shots back to the order rule", () => {
+    // Two frames of the same view a bit apart. Guessing between them by sight
+    // is not better than the caller's fallback, so decline and let it decide.
+    expect(
+      findTwin(
+        near,
+        [
+          { id: "frame-1", hash: "0000000000000003" },
+          { id: "frame-2", hash: "0000000000000007" },
+        ],
+        { maxDistance: MOTION_MAX_DISTANCE, minMargin: MOTION_MIN_MARGIN },
+      ),
+    ).toBeNull();
+  });
+
+  it("declines a video of somewhere else however loose the tolerance", () => {
+    expect(
+      findTwin(near, [{ id: "elsewhere", hash: "ffffffff00000000" }], {
+        maxDistance: MOTION_MAX_DISTANCE,
+        minMargin: MOTION_MIN_MARGIN,
+      }),
+    ).toBeNull();
   });
 
   it("has nothing to say about an empty trip", () => {

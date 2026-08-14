@@ -21,15 +21,18 @@ notes, stats and weather.
   was taken even if you upload the whole day from the hotel. The metadata is read off the
   original; what gets stored is a 2048 px copy, so a 9 MB export doesn't become a 9 MB
   download for everyone opening the page.
-- **Live Photos** from an iPhone keep their motion. Send the photo, then send the video that
-  came with it, one after the other, and the three seconds are stored behind that still — the
-  bot pairs a short video with the last photo sent that hasn't got one yet, so an ordinary
-  photo sent earlier is never quietly turned into a Live Photo. It works in either order:
-  a video that arrives before its still waits five minutes for one. Anything longer than six
-  seconds is treated as a clip and declined, because the page has nowhere to show one. Send
-  the video the normal compressed way rather than as a file — Telegram re-encodes it to MP4,
-  which every browser plays, whereas the untouched `.MOV` off an iPhone is HEVC and plays only
-  on Apple devices.
+- **Live Photos** from an iPhone keep their motion. Send the photo and send the video that
+  came with it — in either order, minutes or days apart — and the bot works out which photo
+  the video belongs to **by looking at it**: Telegram attaches a cover frame to every video,
+  and for a Live Photo that frame *is* the photograph, so the same fingerprint that
+  recognises an edited re-upload recognises the pair, across the whole trip. Where there is
+  no cover frame to go on, it falls back to the last photo sent that hasn't got motion yet,
+  so an ordinary photo sent earlier is never quietly turned into a Live Photo. A video that
+  arrives before its still waits five minutes for one, and will not accept a photo that
+  doesn't look like it. Anything longer than six seconds is treated as a clip and declined,
+  because the page has nowhere to show one. Send the video the normal compressed way rather
+  than as a file — Telegram re-encodes it to MP4, which every browser plays, whereas the
+  untouched `.MOV` off an iPhone is HEVC and plays only on Apple devices.
 - Send an **edited version** of a photo as a file and it is recognised as the same shot — by
   what the picture looks like, not its name — and swapped in on the day it already lives on,
   keeping its caption and its place. Photos are ordered by capture time everywhere they are

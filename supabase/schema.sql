@@ -186,6 +186,9 @@ create table if not exists pending_motions (
   trip_id uuid not null references trips(id) on delete cascade,
   storage_path text not null,
   duration_ms integer,
+  -- Fingerprint of the video's cover frame, so the photo that claims it has to
+  -- look like the photo it is a recording of.
+  cover_phash text,
   created_at timestamptz not null default now()
 );
 
@@ -252,6 +255,7 @@ alter table media add column if not exists phash text;
 -- stay stills, so there is nothing to backfill.
 alter table media add column if not exists motion_path text;
 alter table media add column if not exists motion_ms integer;
+alter table pending_motions add column if not exists cover_phash text;
 -- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
 alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;

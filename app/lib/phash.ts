@@ -79,6 +79,24 @@ export interface HashedPhoto {
   hash: string;
 }
 
+/**
+ * Matching the cover frame of a Live Photo's video against the stills is the
+ * same question asked more loosely, and both halves of the tolerance move.
+ *
+ * Further apart, because the frame Telegram picks as a video's cover is up to a
+ * second and a half either side of the shutter: the camera has drifted, someone
+ * has moved, and the two are the same view rather than the same picture. Less
+ * margin, because a wrong answer here is cheap — the still keeps its own
+ * picture and merely gains three seconds belonging to the shot beside it, where
+ * a wrong answer for a `/replace` overwrites a photograph.
+ *
+ * Not *no* margin, though: two shots of the same view a bit apart are a genuine
+ * tie, and the caller has a second rule — which photo was sent last — that is a
+ * better tie-break than picking whichever happens to be nearer by one bit.
+ */
+export const MOTION_MAX_DISTANCE = 16;
+export const MOTION_MIN_MARGIN = 2;
+
 export interface TwinMatch {
   id: string;
   distance: number;
@@ -86,11 +104,20 @@ export interface TwinMatch {
   runnerUp: number;
 }
 
+export interface TwinTolerance {
+  maxDistance?: number;
+  minMargin?: number;
+}
+
 /**
  * The one photo that is confidently the same picture, or null when nothing is
  * close enough or two candidates are too alike to choose between.
  */
-export function findTwin(hash: string, candidates: HashedPhoto[]): TwinMatch | null {
+export function findTwin(
+  hash: string,
+  candidates: HashedPhoto[],
+  { maxDistance = TWIN_MAX_DISTANCE, minMargin = TWIN_MIN_MARGIN }: TwinTolerance = {},
+): TwinMatch | null {
   let best: HashedPhoto | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   let runnerUp = Number.POSITIVE_INFINITY;
@@ -106,7 +133,7 @@ export function findTwin(hash: string, candidates: HashedPhoto[]): TwinMatch | n
     }
   }
 
-  if (!best || bestDistance > TWIN_MAX_DISTANCE) return null;
-  if (runnerUp - bestDistance < TWIN_MIN_MARGIN) return null;
+  if (!best || bestDistance > maxDistance) return null;
+  if (runnerUp - bestDistance < minMargin) return null;
   return { id: best.id, distance: bestDistance, runnerUp };
 }

@@ -10,23 +10,45 @@ import {
   type IncomingMotion,
   type MotionCandidate,
 } from "./live-photo";
+import {
+  findTwin,
+  hammingDistance,
+  perceptualHash,
+  MOTION_MAX_DISTANCE,
+  MOTION_MIN_MARGIN,
+} from "./phash";
+import { hashPhotos } from "./photo-index.server";
 import { downloadTelegramFile, TELEGRAM_DOWNLOAD_LIMIT } from "./bot-chrome.server";
 
 /**
- * The motion half of a Live Photo, between Telegram and the photo it belongs
- * to.
+ * The motion half of a Live Photo, and which photograph it belongs to.
  *
- * Which still a video belongs to is decided in `live-photo.ts`, which knows
- * nothing about anything; this module does the fetching, the storing and the
- * two ways round the pair can arrive. Videos exist on this trip only as the
- * three seconds behind a photograph — there is deliberately no such thing as a
- * standalone clip, because a page built around a map and a photo grid has
- * nowhere honest to put one, and adding half a video feature would be worse
- * than adding none.
+ * Telegram carries the two halves across as two unrelated updates, so the
+ * pairing has to be worked out at this end. It is worked out twice, in order of
+ * how much it can be trusted:
+ *
+ * 1. **By what the video looks like.** Telegram attaches a cover frame to every
+ *    video it forwards, and the cover frame of a Live Photo's three seconds is
+ *    the photograph itself, give or take the second and a half either side of
+ *    the shutter. Fingerprinting that frame with the same difference hash that
+ *    already recognises an edited re-upload (`phash.ts`) answers the question
+ *    outright — and answers it for the whole trip, so the video can be sent an
+ *    hour later, or tomorrow, and still find its still.
+ * 2. **By order and closeness**, in `live-photo.ts`, when there is no cover
+ *    frame to go on or nothing on the trip looks like it.
+ *
+ * Videos exist here only as the three seconds behind a photograph. There is
+ * deliberately no such thing as a standalone clip: a page built around a map
+ * and a photo grid has nowhere honest to put one, and half a video feature
+ * would be worse than none.
  */
 
-/** How many recent photos are considered as the still a video belongs to. */
-const CANDIDATE_LIMIT = 25;
+/**
+ * How far back the look-alike search reaches. The same ceiling as the twin
+ * index, and for the same reason: beyond this, a first match spends longer
+ * fingerprinting the trip than anyone will wait on a webhook.
+ */
+const CANDIDATE_LIMIT = 200;
 
 /** Where a video is filed: beside the still it belongs to, sharing its folder. */
 function motionPathBeside(stillPath: string, extension: string): string {
@@ -35,18 +57,20 @@ function motionPathBeside(stillPath: string, extension: string): string {
   return dir ? `${dir}/${name}` : name;
 }
 
-/** The trip's recent photos, in the shape the pairing rules want them. */
-async function motionCandidates(tripId: string): Promise<MotionCandidate[]> {
-  const { data: days } = await supabase()
-    .from("days")
-    .select("id, day_number")
-    .eq("trip_id", tripId);
+interface Candidate extends MotionCandidate {
+  phash: string | null;
+  thumbPath: string | null;
+}
+
+/** The trip's photos, in the shape both pairing rules want them. */
+async function candidates(tripId: string): Promise<Candidate[]> {
+  const { data: days } = await supabase().from("days").select("id, day_number").eq("trip_id", tripId);
   if (!days || days.length === 0) return [];
   const dayNumber = new Map(days.map((d) => [d.id, d.day_number]));
 
   const { data: photos } = await supabase()
     .from("media")
-    .select("id, day_id, storage_path, telegram_date, motion_path")
+    .select("id, day_id, storage_path, thumb_path, phash, telegram_date, motion_path")
     .in("day_id", [...dayNumber.keys()])
     .order("telegram_date", { ascending: false })
     .limit(CANDIDATE_LIMIT);
@@ -55,22 +79,99 @@ async function motionCandidates(tripId: string): Promise<MotionCandidate[]> {
     id: p.id,
     dayNumber: dayNumber.get(p.day_id) ?? 0,
     storagePath: p.storage_path,
+    thumbPath: p.thumb_path,
+    phash: p.phash,
     sentAtMs: Date.parse(p.telegram_date),
     hasMotion: Boolean(p.motion_path),
   }));
+}
+
+/**
+ * The photo this video is a recording of, by sight. Only photos still without
+ * motion are considered — a still that already has its three seconds is not
+ * looking for more, and leaving it in would let a second Live Photo of the same
+ * view take the answer away from the one that needs it.
+ */
+async function pickStillByLook(
+  coverHash: string,
+  pool: Candidate[],
+): Promise<Candidate | null> {
+  const open = pool.filter((c) => !c.hasMotion);
+  if (open.length === 0) return null;
+
+  const hashed = await hashPhotos(
+    open.map((c) => ({
+      id: c.id,
+      phash: c.phash,
+      thumb_path: c.thumbPath,
+      storage_path: c.storagePath,
+    })),
+  );
+  const match = findTwin(coverHash, hashed, {
+    maxDistance: MOTION_MAX_DISTANCE,
+    minMargin: MOTION_MIN_MARGIN,
+  });
+  return match ? (open.find((c) => c.id === match.id) ?? null) : null;
+}
+
+/** The cover frame Telegram attaches to a video, fingerprinted. */
+async function coverHashOf(bot: Bot, thumbFileId: string | null): Promise<string | null> {
+  if (!thumbFileId) return null;
+  try {
+    return await perceptualHash(await downloadTelegramFile(bot, thumbFileId));
+  } catch {
+    // No cover frame is not a failure; it only means falling back to order.
+    return null;
+  }
+}
+
+interface ParkedMotion {
+  storagePath: string;
+  durationMs: number | null;
+  coverHash: string | null;
+}
+
+/** Whatever motion this chat has waiting, or null. Does not clear it. */
+async function peekParkedMotion(chatId: number, tripId: string): Promise<ParkedMotion | null> {
+  const { data } = await supabase()
+    .from("pending_motions")
+    .select("storage_path, duration_ms, cover_phash, trip_id, created_at")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (!data) return null;
+
+  if (data.trip_id !== tripId || !parkedMotionIsFresh(Date.parse(data.created_at), Date.now())) {
+    // Stale, or left over from another trip: not ours to use, but ours to
+    // clean up rather than leave in the bucket with nothing naming it.
+    await discardParkedMotion(chatId, data.storage_path);
+    return null;
+  }
+  return {
+    storagePath: data.storage_path,
+    durationMs: data.duration_ms,
+    coverHash: data.cover_phash,
+  };
+}
+
+async function discardParkedMotion(chatId: number, storagePath: string): Promise<void> {
+  await supabase().from("pending_motions").delete().eq("chat_id", chatId);
+  await supabase().storage.from("photos").remove([storagePath]);
 }
 
 /** Park an already-uploaded video until the photo it belongs to turns up. */
 async function parkMotion(
   chatId: number,
   tripId: string,
-  storagePath: string,
-  durationMs: number | null,
+  motion: ParkedMotion,
 ): Promise<void> {
-  // Whatever was waiting here is now stale — one Live Photo at a time, and the
-  // old file would otherwise sit in the bucket with nothing naming it.
-  const previous = await takeParkedMotion(chatId, tripId, { onlyIfFresh: false });
-  if (previous) await supabase().storage.from("photos").remove([previous.storagePath]);
+  // One at a time: whatever was waiting here has been superseded, and its file
+  // would otherwise sit in the bucket unreferenced.
+  const { data: previous } = await supabase()
+    .from("pending_motions")
+    .select("storage_path")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (previous) await supabase().storage.from("photos").remove([previous.storage_path]);
 
   await supabase()
     .from("pending_motions")
@@ -78,8 +179,9 @@ async function parkMotion(
       {
         chat_id: chatId,
         trip_id: tripId,
-        storage_path: storagePath,
-        duration_ms: durationMs,
+        storage_path: motion.storagePath,
+        duration_ms: motion.durationMs,
+        cover_phash: motion.coverHash,
         // Explicit, because an upsert over an existing row keeps the old
         // default and this one has to restart the clock.
         created_at: new Date().toISOString(),
@@ -88,43 +190,15 @@ async function parkMotion(
     );
 }
 
-interface ParkedMotion {
-  storagePath: string;
-  durationMs: number | null;
-}
-
 /**
- * Take whatever motion this chat has waiting, clearing it either way. Stale
- * entries are dropped rather than honoured, so a video from before lunch does
- * not attach itself to the afternoon's first photo.
- */
-async function takeParkedMotion(
-  chatId: number,
-  tripId: string,
-  { onlyIfFresh = true }: { onlyIfFresh?: boolean } = {},
-): Promise<ParkedMotion | null> {
-  const { data } = await supabase()
-    .from("pending_motions")
-    .select("storage_path, duration_ms, trip_id, created_at")
-    .eq("chat_id", chatId)
-    .maybeSingle();
-  if (!data) return null;
-
-  await supabase().from("pending_motions").delete().eq("chat_id", chatId);
-
-  const usable =
-    !onlyIfFresh || (data.trip_id === tripId && parkedMotionIsFresh(Date.parse(data.created_at), Date.now()));
-  if (!usable) {
-    // Not ours to use, but ours to clean up.
-    await supabase().storage.from("photos").remove([data.storage_path]);
-    return null;
-  }
-  return { storagePath: data.storage_path, durationMs: data.duration_ms };
-}
-
-/**
- * Give a freshly stored photo the motion that arrived ahead of it, if any.
- * Returns whether it did, so the confirmation can say so.
+ * Give a freshly stored photo the motion that arrived ahead of it, if that
+ * motion is a recording of *this* photo. Returns whether it did.
+ *
+ * Where both fingerprints exist they decide it, which is what lets a Live Photo
+ * and an ordinary photo be sent in either order without the ordinary one
+ * collecting three seconds of somewhere else. Where the video came without a
+ * cover frame there is nothing to compare, and the next photo through the door
+ * is the best guess available — the same guess the order rule makes.
  *
  * The parked file keeps the name it was uploaded under rather than being copied
  * into the day's folder: a second round trip through 2 MB of video to make a
@@ -135,10 +209,18 @@ export async function attachParkedMotion(
   chatId: number,
   tripId: string,
   mediaId: string,
+  photoHash: string | null,
 ): Promise<boolean> {
-  const parked = await takeParkedMotion(chatId, tripId);
+  const parked = await peekParkedMotion(chatId, tripId);
   if (!parked) return false;
 
+  if (parked.coverHash && photoHash && hammingDistance(parked.coverHash, photoHash) > MOTION_MAX_DISTANCE) {
+    // A recording of something else. Leave it parked: the photo it belongs to
+    // may still be uploading behind this one.
+    return false;
+  }
+
+  await supabase().from("pending_motions").delete().eq("chat_id", chatId);
   const { error } = await supabase()
     .from("media")
     .update({ motion_path: parked.storagePath, motion_ms: parked.durationMs })
@@ -152,14 +234,16 @@ export async function attachParkedMotion(
 
 export interface IncomingVideo extends IncomingMotion {
   fileId: string;
+  /** Telegram's cover frame, which is what the look-alike match runs on. */
+  thumbFileId: string | null;
 }
 
 /**
- * A video arriving in the chat. Either it is the motion behind a photo already
- * on the trip, or it is the motion behind one that hasn't arrived yet, or it is
- * a clip — and a clip gets an explanation rather than silence, because from the
- * traveller's side sending a video and having nothing happen is indisting-
- * uishable from the bot being broken.
+ * A video arriving in the chat. Either it is the motion behind a photo on the
+ * trip, or behind one that hasn't arrived yet, or it is a clip — and a clip
+ * gets an explanation rather than silence, because from the traveller's side
+ * sending a video and having nothing happen is indistinguishable from the bot
+ * being broken.
  */
 export async function saveMotion(
   ctx: Context,
@@ -174,7 +258,7 @@ export async function saveMotion(
     await ctx.reply(
       "That's a video rather than the three seconds behind a Live Photo, and the trip page " +
         "has nowhere to show a clip. Send a still instead — or, for a Live Photo, send the " +
-        "photo and then the video it came with, one after the other.",
+        "photo and the video it came with, in either order.",
     );
     return;
   }
@@ -184,7 +268,11 @@ export async function saveMotion(
   }
 
   const sentAtMs = ctx.message!.date * 1000;
-  const still = pickStillForMotion(sentAtMs, await motionCandidates(trip.id));
+  const pool = await candidates(trip.id);
+  const coverHash = await coverHashOf(bot, incoming.thumbFileId);
+
+  const seen = coverHash ? await pickStillByLook(coverHash, pool) : null;
+  const still = seen ?? pickStillForMotion(sentAtMs, pool);
 
   const bytes = await downloadTelegramFile(bot, incoming.fileId);
   const store = supabase().storage.from("photos");
@@ -211,7 +299,7 @@ export async function saveMotion(
     : "";
 
   if (!still) {
-    await parkMotion(ctx.chat!.id, trip.id, path, durationMs);
+    await parkMotion(ctx.chat!.id, trip.id, { storagePath: path, durationMs, coverHash });
     await ctx.reply(
       `🎬 Held onto that motion — send the photo it belongs to and I'll put them together.${caveat}`,
     );
@@ -228,7 +316,8 @@ export async function saveMotion(
     return;
   }
 
-  await ctx.reply(
-    `🎬 Live Photo — that's now the motion behind the photo on day ${still.dayNumber}.${caveat}`,
-  );
+  // Worth distinguishing: "recognised" means the pairing survives sending the
+  // video days later, and someone who knows that will use it.
+  const how = seen ? "🔍 Recognised the photo it belongs to" : "🎬 Live Photo";
+  await ctx.reply(`${how} — that's now the motion behind the photo on day ${still.dayNumber}.${caveat}`);
 }
