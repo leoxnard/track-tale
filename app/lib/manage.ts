@@ -101,7 +101,28 @@ export type ManageAction =
   | { type: "replaceDay"; dayNumber: number; page: number }
   /** Picked. From here the bot is waiting for the next photo in the chat. */
   | { type: "replacePick"; id: string; dayNumber: number }
-  | { type: "replaceCancel"; dayNumber: number };
+  | { type: "replaceCancel"; dayNumber: number }
+  /**
+   * Saying by hand which photo a Live Photo's video belongs to, when neither
+   * looking at it nor the order it arrived in could tell. Same two screens
+   * again, and again no confirmation step: a wrong tap moves three seconds from
+   * one photo to another and is undone by tapping the right one.
+   *
+   * The waiting video is named by the first eight characters of its id rather
+   * than all thirty-six. Both it and the photo have to fit in one payload, and
+   * two full uuids do not — eight characters is still far more than enough to
+   * pick one video out of the handful a single chat can have waiting.
+   */
+  | { type: "motionHome"; code: string }
+  | { type: "motionDay"; code: string; dayNumber: number; page: number }
+  | { type: "motionPick"; code: string; id: string };
+
+/** How much of a waiting video's id travels in a button. See `motionHome`. */
+export const MOTION_CODE_LENGTH = 8;
+
+export function motionCode(id: string): string {
+  return id.replace(/-/g, "").slice(0, MOTION_CODE_LENGTH);
+}
 
 const PREFIX = "mg";
 
@@ -169,6 +190,12 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:rp:${action.dayNumber}:${action.id}`;
     case "replaceCancel":
       return `${PREFIX}:rx:${action.dayNumber}`;
+    case "motionHome":
+      return `${PREFIX}:mh:${action.code}`;
+    case "motionDay":
+      return `${PREFIX}:mdy:${action.code}:${action.dayNumber}:${action.page}`;
+    case "motionPick":
+      return `${PREFIX}:mpk:${action.code}:${action.id}`;
   }
 }
 
@@ -274,6 +301,25 @@ export function parseAction(data: string): ManageAction | null {
       if (!Number.isInteger(dayNumber)) return null;
       return { type: "replaceCancel", dayNumber };
     }
+    case "mh": {
+      const code = parts[2] ?? "";
+      return code.length > 0 ? { type: "motionHome", code } : null;
+    }
+    case "mdy": {
+      const code = parts[2] ?? "";
+      const dayNumber = Number(parts[3]);
+      const page = Number(parts[4]);
+      if (code.length === 0 || !Number.isInteger(dayNumber) || !Number.isInteger(page) || page < 0) {
+        return null;
+      }
+      return { type: "motionDay", code, dayNumber, page };
+    }
+    case "mpk": {
+      const code = parts[2] ?? "";
+      const id = parts.slice(3).join(":");
+      if (code.length === 0 || id.length === 0) return null;
+      return { type: "motionPick", code, id };
+    }
     default:
       return null;
   }
@@ -299,6 +345,8 @@ export interface ManageItem {
   label: string;
   /** Sort key within a day: when the thing happened. */
   at: number;
+  /** Photos only: whether this one already has a Live Photo's motion behind it. */
+  hasMotion?: boolean;
 }
 
 /** One page of a day's items, plus what the paging buttons should offer. */

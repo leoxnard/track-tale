@@ -47,6 +47,8 @@ _Most of these open a keyboard — /trip is the hub, and every screen carries th
   the one already on the trip, on its own day, no /replace needed
 • Live Photo? Send the still, then the video it came with, and the page plays
   the motion behind the picture — hover, scroll past it, or hold it open
+• If I can't tell which photo a video belongs to, I keep it and hand you a
+  button to pick the day and the photo yourself — /livephoto finds it later
 • Any other text → journal entry
 
 *Oops*
@@ -55,6 +57,8 @@ Every confirmation carries a 🗑 button — one tap takes that thing back off
 Reply /delete to one of my messages — removes that one
 /manage — browse the trip and delete anything on it, however old: notes,
 photos, tracks, and guestbook messages the family left
+/livephoto — place a Live Photo's video by hand when I couldn't work out which
+  photo it belongs to: pick the day, then the photo
 /replace — swap the picture behind a photo: pick it, send the new one. Caption,
 map pin and place in the day all stay — handy after running a filter over them
 /clearday — pick a day and empty it: every note, photo and track on it

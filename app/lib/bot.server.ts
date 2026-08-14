@@ -26,17 +26,20 @@ import { fromGeoJson, type TrackGeoJson } from "./track";
 import { transitMode } from "./transport";
 import { imageDocument } from "./photo-file";
 import { motionFormat } from "./live-photo";
-import { saveMotion } from "./bot-motion.server";
+import { attachMotionByHand, motionUrl, saveMotion, waitingMotions } from "./bot-motion.server";
 import { compressForWeb, formatBytes, COMPRESS_ABOVE_BYTES } from "./image.server";
 import { renderOgCard } from "./og.server";
 import { buildArchive } from "./archive.server";
 import { escapeMd, slugId } from "./telegram-md";
 import { deleteEntity, ENTITY_LABEL, type EntityType } from "./entities.server";
-import { encodeAction, parseAction } from "./manage";
+import { encodeAction, motionCode, parseAction } from "./manage";
 import {
   applyDelete,
   confirmView,
+  dayNumberOfPhoto,
   dayView,
+  motionDayView,
+  motionOverview,
   overview,
   replaceDayView,
   replaceOverview,
@@ -363,6 +366,45 @@ export function createBot(): Bot {
    * that throws all of that away and puts the picture back at the end of the
    * day it belonged in the middle of.
    */
+  /**
+   * The videos still waiting for a photo. The button on the bot's own reply is
+   * the usual way into this, but that message is scrollback — and a chat that
+   * has been cleared, or a video parked yesterday, would otherwise leave the
+   * file reachable by nothing at all.
+   */
+  bot.command("livephoto", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const waiting = await waitingMotions(ctx.chat!.id, trip.id);
+    if (waiting.length === 0) {
+      await ctx.reply(
+        "No Live Photo videos are waiting. Send a photo and the video that came with it, " +
+          "and I'll pair them — this is only for the ones I couldn't place.",
+      );
+      return;
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const motion of waiting) {
+      keyboard
+        .text(
+          `🎬 ${new Date(motion.parkedAtMs).toISOString().slice(0, 16).replace("T", " ")}`,
+          encodeAction({ type: "motionHome", code: motionCode(motion.id) }),
+        )
+        .row();
+    }
+    await ctx.reply(
+      `🎬 ${waiting.length} video(s) waiting for a photo:\n` +
+        // The files themselves, so it is possible to tell which is which before
+        // choosing — three seconds of somewhere is not identifiable by its
+        // timestamp alone.
+        waiting.map((m) => motionUrl(m.storagePath)).join("\n") +
+        `\n\nPick one, then the photo it belongs to.`,
+      { reply_markup: keyboard },
+    );
+  });
+
   bot.command("replace", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
@@ -651,6 +693,37 @@ export function createBot(): Bot {
           await clearReplacement(ctx.chat!.id);
           view = await replaceDayView(trip, action.dayNumber, 0);
           break;
+        case "motionHome":
+          view = await motionOverview(trip, action.code);
+          break;
+        case "motionDay":
+          view = await motionDayView(trip, action.code, action.dayNumber, action.page);
+          break;
+        case "motionPick": {
+          const dayNumber = await dayNumberOfPhoto(trip, action.id);
+          const attached =
+            dayNumber !== null &&
+            (await attachMotionByHand(ctx.chat!.id, trip.id, action.code, action.id));
+          if (!attached) {
+            // Either the video has already been placed — a second tap on a
+            // button still sitting in the chat — or the photo has gone. Say so
+            // rather than silently redrawing a screen that looks unchanged.
+            view = await motionOverview(trip, action.code);
+            view = {
+              ...view,
+              text: `That video isn't waiting any more — it may already be on a photo.\n\n${view.text}`,
+            };
+            break;
+          }
+          // Straight back to the day: placing one video by hand usually means
+          // placing the next one too, and the day is where they are.
+          view = await motionDayView(trip, action.code, dayNumber, 0);
+          view = {
+            ...view,
+            text: `🎬 Done — that photo on day ${dayNumber} moves now.\n\n${view.text}`,
+          };
+          break;
+        }
       }
 
       // Both item screens return null for something that has already gone — a

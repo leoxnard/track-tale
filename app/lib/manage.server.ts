@@ -191,6 +191,114 @@ export async function replaceDayView(
 }
 
 /**
+ * The day picker for saying by hand which photo a waiting video belongs to.
+ *
+ * Only days with photos, same as `/replace` — but unlike `/replace` this one
+ * carries the video's short code through every button, because the browse and
+ * the video it is about are otherwise two unrelated things and Telegram gives
+ * us nowhere else to keep the connection.
+ */
+export async function motionOverview(trip: DbTrip, code: string): Promise<View> {
+  const days = (await loadDays(trip.id)).filter((d) => d.media.length > 0);
+  const keyboard = new InlineKeyboard();
+
+  if (days.length === 0) {
+    keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
+    return {
+      text:
+        `*${escapeMd(trip.name)}* has no photos on it yet.\n\n` +
+        `Send the photo this video belongs to and I'll pair them straight away.`,
+      keyboard,
+      markdown: true,
+    };
+  }
+
+  for (const day of days) {
+    keyboard
+      .text(
+        `Day ${day.day_number} · ${KIND_ICON.media} ${day.media.length}`,
+        encodeAction({ type: "motionDay", code, dayNumber: day.day_number, page: 0 }),
+      )
+      .row();
+  }
+  keyboard.text("🎒 Trip", encodeAction({ type: "status" }));
+
+  return {
+    text:
+      `🎬 *${escapeMd(trip.name)}* — which photo is this video the motion of?\n\n` +
+      `_Pick the day, then the photo. They are listed in the order the family page ` +
+      `shows them, so “photo 3” is the third one on that day._`,
+    keyboard,
+    markdown: true,
+  };
+}
+
+/**
+ * One day's photos, in the family page's order, each a button that hands the
+ * waiting video to that photo. No confirmation step: a wrong tap moves three
+ * seconds from one picture to another and is undone by tapping the right one.
+ */
+export async function motionDayView(
+  trip: DbTrip,
+  code: string,
+  dayNumber: number,
+  page: number,
+): Promise<View> {
+  const contents = await loadDayContents(trip, dayNumber);
+  const photos = (contents?.items ?? []).filter((i) => i.kind === "media");
+  const keyboard = new InlineKeyboard();
+
+  if (photos.length === 0) {
+    keyboard.text("◀︎ Days", encodeAction({ type: "motionHome", code }));
+    return { text: `Day ${dayNumber} has no photos on it.`, keyboard, markdown: true };
+  }
+
+  const { items, page: current, pageCount } = paginate(photos, page);
+  for (const item of items) {
+    keyboard
+      .text(
+        // A photo that already moves is worth marking: picking it is allowed,
+        // and means replacing the motion it has rather than adding to it.
+        `${item.hasMotion ? "🎬" : KIND_ICON.media} ${item.label}`,
+        encodeAction({ type: "motionPick", code, id: item.id }),
+      )
+      .row();
+  }
+
+  if (pageCount > 1) {
+    if (current > 0) {
+      keyboard.text("‹ Previous", encodeAction({ type: "motionDay", code, dayNumber, page: current - 1 }));
+    }
+    if (current < pageCount - 1) {
+      keyboard.text("Next ›", encodeAction({ type: "motionDay", code, dayNumber, page: current + 1 }));
+    }
+    keyboard.row();
+  }
+  keyboard.text("◀︎ Days", encodeAction({ type: "motionHome", code }));
+
+  const paging = pageCount > 1 ? ` — page ${current + 1}/${pageCount}` : "";
+  return {
+    text:
+      `🎬 *Day ${dayNumber}* (${contents!.date}) — ${photos.length} photo(s)${paging}\n\n` +
+      `Tap the one this video is the motion of. 🎬 marks a photo that already has some.`,
+    keyboard,
+    markdown: true,
+  };
+}
+
+/** Which day a photo is on, for a pick that only carries the photo's id. */
+export async function dayNumberOfPhoto(trip: DbTrip, mediaId: string): Promise<number | null> {
+  const { data } = await supabase()
+    .from("media")
+    .select("days(day_number, trip_id)")
+    .eq("id", mediaId)
+    .maybeSingle();
+  const day = (data as unknown as { days: { day_number: number; trip_id: string } | null } | null)
+    ?.days;
+  return day && day.trip_id === trip.id ? day.day_number : null;
+}
+
+/**
  * Picked, now waiting. The old picture is in the message on purpose: from here
  * the next photo sent into the chat replaces it, and that is worth being sure
  * about before reaching for the camera roll.
@@ -239,7 +347,7 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
   const { data: day, error } = await supabase()
     .from("days")
     .select(
-      "id, date, notes(id, text, created_at), media(id, caption, telegram_date, taken_at, created_at), track_segments(id, name, distance_m, sport, started_at, created_at), comments(id, author_name, text, created_at)",
+      "id, date, notes(id, text, created_at), media(id, caption, telegram_date, taken_at, created_at, motion_path), track_segments(id, name, distance_m, sport, started_at, created_at), comments(id, author_name, text, created_at)",
     )
     .eq("trip_id", trip.id)
     .eq("day_number", dayNumber)
@@ -260,6 +368,7 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
       telegram_date: string;
       taken_at: string | null;
       created_at: string;
+      motion_path: string | null;
     }[];
     track_segments: {
       id: string;
@@ -288,6 +397,7 @@ async function loadDayContents(trip: DbTrip, dayNumber: number): Promise<DayCont
       id: m.id,
       label: shortLabel(m.caption) || `photo ${i + 1}`,
       at: photoTimeMs(m),
+      hasMotion: Boolean(m.motion_path),
     })),
     ...d.notes.map((n) => ({
       kind: "note" as ItemKind,

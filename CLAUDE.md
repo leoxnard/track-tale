@@ -80,7 +80,7 @@ does I/O and generally does not.
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |
-| `manage.ts` / `manage.server.ts` | the `/manage` browser; `manage.ts` is pure because callback payloads have a hard 64-byte limit |
+| `manage.ts` / `manage.server.ts` | the `/manage`, `/replace` and Live-Photo pickers; `manage.ts` is pure because callback payloads have a hard 64-byte limit |
 | `entities.server.ts` | deleting one thing, shared by `/undo`, `/delete` and `/manage` |
 | `media-replace.server.ts` | `/replace` — swap the file, keep the row |
 | `bot-help.ts` | help text |

@@ -29,8 +29,14 @@ notes, stats and weather.
   no cover frame to go on, it falls back to the last photo sent that hasn't got motion yet,
   so an ordinary photo sent earlier is never quietly turned into a Live Photo. A video that
   arrives before its still waits five minutes for one, and will not accept a photo that
-  doesn't look like it; several can wait at once, and the nightly cron clears out whatever
-  was never claimed. Anything longer than six seconds is treated as a clip and declined,
+  doesn't look like it; several can wait at once.
+- When neither the picture nor the order can say which photo a video belongs to — a crop in
+  an editor is the usual reason — the video is kept and the bot hands you a **button to pick
+  it by hand**: the day, then the photo, listed in the order the family page shows them, so
+  "photo 3" is the third one on that day. A photo that already moves is marked, and picking
+  it replaces what it had. `/livephoto` finds the waiting videos again later, since a button
+  in the scrollback is not somewhere a file should live; anything still unclaimed after a
+  week is swept by the nightly cron. Anything longer than six seconds is treated as a clip and declined,
   because the page has nowhere to show one. Send the video the normal compressed way rather
   than as a file — Telegram re-encodes it to MP4, which every browser plays, whereas the
   untouched `.MOV` off an iPhone is HEVC and plays only on Apple devices.
@@ -226,6 +232,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/note …` | journal entry (plain text works too) |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
+| `/livephoto` | place a Live Photo's video by hand: pick the day, then the photo |
 | `/replace` | swap the picture behind a photo, keeping its caption, map pin and place in the day |
 | `/clearday` | pick a day and empty it: every note, photo and track on it |
 | `/live` | what the live banner is showing, and why; `/live off` takes it down |
@@ -262,6 +269,13 @@ through a trip is one tap per picture. The new files are written under fresh nam
 than over the old ones, because the page, Telegram's previews and any CDN in between cache by
 URL; the old files are removed once the row no longer points at them. A pick expires after an
 hour, so a forgotten `/replace` cannot swallow the next photo sent into the chat.
+
+`/livephoto` is that browser once more, for the videos the bot could not place. Two windows
+run here rather than one: a video is only paired with the next photo to arrive for five
+minutes, because that guess is about how recently the two were sent, but it is *kept* for a
+week, because that is about how long someone has to come back and place it by hand. The
+buttons carry the video's identity as the first eight characters of its id — a photo's own id
+already costs 36 of Telegram's 64 bytes, and both have to travel in one payload.
 
 ## Friends
 

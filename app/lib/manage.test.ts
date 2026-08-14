@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   countSummary,
   encodeAction,
+  motionCode,
   paginate,
   parseAction,
   shortLabel,
+  MOTION_CODE_LENGTH,
   PAGE_SIZE,
   type ManageAction,
 } from "./manage";
@@ -46,6 +48,11 @@ describe("manage callback payloads", () => {
     { type: "replaceDay", dayNumber: 12, page: 3 },
     { type: "replacePick", id: uuid, dayNumber: 4 },
     { type: "replaceCancel", dayNumber: 4 },
+    // The 64-byte test below is the point of these: a waiting video and a photo
+    // both have to fit in one payload, which two full uuids would not.
+    { type: "motionHome", code: "a1b2c3d4" },
+    { type: "motionDay", code: "a1b2c3d4", dayNumber: 12, page: 3 },
+    { type: "motionPick", code: "a1b2c3d4", id: uuid },
   ];
 
   it("round-trips every screen", () => {
@@ -72,6 +79,11 @@ describe("manage callback payloads", () => {
     // An unknown kind code, and a delete with no id to delete.
     expect(parseAction(`mg:a:q:3:${uuid}`)).toBeNull();
     expect(parseAction("mg:a:p:3:")).toBeNull();
+    // A motion browse with no video to browse for, and a pick with no photo.
+    expect(parseAction("mg:mh:")).toBeNull();
+    expect(parseAction("mg:mdy::3:0")).toBeNull();
+    expect(parseAction(`mg:mpk::${uuid}`)).toBeNull();
+    expect(parseAction("mg:mpk:a1b2c3d4:")).toBeNull();
     // A picker with no mode, a day that is not one, and a two-step action
     // missing the half that says whether it was confirmed.
     expect(parseAction("mg:dp:0")).toBeNull();
@@ -136,5 +148,19 @@ describe("countSummary", () => {
     expect(countSummary({ note: 2, media: 0, track_segment: 1, comment: 0 })).toBe("🛤️ 1 · 📝 2");
     expect(countSummary({ note: 0, media: 0, track_segment: 0, comment: 3 })).toBe("💬 3");
     expect(countSummary({ note: 0, media: 0, track_segment: 0, comment: 0 })).toBe("");
+  });
+});
+
+describe("motionCode", () => {
+  it("names a waiting video short enough to share a payload with a photo", () => {
+    const code = motionCode("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+    expect(code).toBe("f47ac10b");
+    expect(code).toHaveLength(MOTION_CODE_LENGTH);
+  });
+
+  it("gives two videos different codes", () => {
+    expect(motionCode("f47ac10b-58cc-4372-a567-0e02b2c3d479")).not.toBe(
+      motionCode("a1b2c3d4-58cc-4372-a567-0e02b2c3d479"),
+    );
   });
 });

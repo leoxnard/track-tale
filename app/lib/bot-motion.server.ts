@@ -1,4 +1,4 @@
-import type { Bot, Context } from "grammy";
+import { InlineKeyboard, type Bot, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { supabase } from "./supabase.server";
 import type { DbTrip } from "./db.server";
@@ -7,7 +7,6 @@ import {
   motionFormat,
   parkedMotionIsFresh,
   pickStillForMotion,
-  LIVE_PAIR_WINDOW_MS,
   type IncomingMotion,
   type MotionCandidate,
 } from "./live-photo";
@@ -19,6 +18,7 @@ import {
   MOTION_MIN_MARGIN,
 } from "./phash";
 import { hashPhotos } from "./photo-index.server";
+import { encodeAction, motionCode } from "./manage";
 import { downloadTelegramFile, TELEGRAM_DOWNLOAD_LIMIT } from "./bot-chrome.server";
 
 /**
@@ -131,39 +131,24 @@ interface ParkedMotion {
   storagePath: string;
   durationMs: number | null;
   coverHash: string | null;
+  parkedAtMs: number;
 }
 
-/**
- * The motions this chat has waiting, oldest first, with anything stale swept up
- * on the way past. Stale means past the pairing window or left over from
- * another trip: not ours to use, but ours to clear out rather than leave in the
- * bucket with nothing naming it.
- */
+/** Every motion this chat has waiting on this trip, oldest first. */
 async function parkedMotions(chatId: number, tripId: string): Promise<ParkedMotion[]> {
   const { data } = await supabase()
     .from("pending_motions")
-    .select("id, storage_path, duration_ms, cover_phash, trip_id, created_at")
+    .select("id, storage_path, duration_ms, cover_phash, created_at")
     .eq("chat_id", chatId)
+    .eq("trip_id", tripId)
     .order("created_at", { ascending: true });
-  if (!data || data.length === 0) return [];
 
-  const fresh = data.filter(
-    (row) => row.trip_id === tripId && parkedMotionIsFresh(Date.parse(row.created_at), Date.now()),
-  );
-  const stale = data.filter((row) => !fresh.includes(row));
-  if (stale.length > 0) {
-    await supabase()
-      .from("pending_motions")
-      .delete()
-      .in("id", stale.map((row) => row.id));
-    await supabase().storage.from("photos").remove(stale.map((row) => row.storage_path));
-  }
-
-  return fresh.map((row) => ({
+  return (data ?? []).map((row) => ({
     id: row.id,
     storagePath: row.storage_path,
     durationMs: row.duration_ms,
     coverHash: row.cover_phash,
+    parkedAtMs: Date.parse(row.created_at),
   }));
 }
 
@@ -178,15 +163,20 @@ async function parkedMotions(chatId: number, tripId: string): Promise<ParkedMoti
 async function parkMotion(
   chatId: number,
   tripId: string,
-  motion: Omit<ParkedMotion, "id">,
-): Promise<void> {
-  await supabase().from("pending_motions").insert({
-    chat_id: chatId,
-    trip_id: tripId,
-    storage_path: motion.storagePath,
-    duration_ms: motion.durationMs,
-    cover_phash: motion.coverHash,
-  });
+  motion: Omit<ParkedMotion, "id" | "parkedAtMs">,
+): Promise<string | null> {
+  const { data } = await supabase()
+    .from("pending_motions")
+    .insert({
+      chat_id: chatId,
+      trip_id: tripId,
+      storage_path: motion.storagePath,
+      duration_ms: motion.durationMs,
+      cover_phash: motion.coverHash,
+    })
+    .select("id")
+    .single();
+  return data?.id ?? null;
 }
 
 /**
@@ -210,7 +200,11 @@ export async function attachParkedMotion(
   mediaId: string,
   photoHash: string | null,
 ): Promise<boolean> {
-  const waiting = await parkedMotions(chatId, tripId);
+  // Only the recent ones. An older video is still waiting to be placed by hand
+  // and must not be swept up by whatever photo happens to arrive next.
+  const waiting = (await parkedMotions(chatId, tripId)).filter((m) =>
+    parkedMotionIsFresh(m.parkedAtMs, Date.now()),
+  );
   if (waiting.length === 0) return false;
 
   const parked = pickParkedFor(waiting, photoHash);
@@ -254,12 +248,22 @@ function pickParkedFor(waiting: ParkedMotion[], photoHash: string | null): Parke
 }
 
 /**
+ * How long a video with no photo is kept.
+ *
+ * Far longer than the window for pairing it with the next photo automatically,
+ * and for a different reason: that window is about how confident a guess can
+ * be, this one is about how long someone has to come back and say by hand which
+ * photo it belongs to. A week is enough for a trip's worth of evenings.
+ */
+const MOTION_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * Clear out motions nobody ever claimed, files and all. Called from the nightly
- * cron: a video whose photo never arrived is only found by a photo, so without
- * this it would sit in the bucket for the life of the project.
+ * cron: a video whose photo never arrived is only found by a photo or by hand,
+ * so without this it would sit in the bucket for the life of the project.
  */
 export async function sweepParkedMotions(): Promise<number> {
-  const cutoff = new Date(Date.now() - LIVE_PAIR_WINDOW_MS).toISOString();
+  const cutoff = new Date(Date.now() - MOTION_KEEP_MS).toISOString();
   const { data } = await supabase()
     .from("pending_motions")
     .select("id, storage_path")
@@ -272,6 +276,67 @@ export async function sweepParkedMotions(): Promise<number> {
     .in("id", data.map((row) => row.id));
   await supabase().storage.from("photos").remove(data.map((row) => row.storage_path));
   return data.length;
+}
+
+/** A waiting video, found by the short code its buttons carry. */
+export async function parkedMotionByCode(
+  chatId: number,
+  tripId: string,
+  code: string,
+): Promise<ParkedMotion | null> {
+  const waiting = await parkedMotions(chatId, tripId);
+  return waiting.find((m) => motionCode(m.id) === code) ?? null;
+}
+
+/** How many videos are waiting to be placed by hand. */
+export async function waitingMotions(chatId: number, tripId: string): Promise<ParkedMotion[]> {
+  return parkedMotions(chatId, tripId);
+}
+
+/** A waiting video's file, for showing it in a message. */
+export function motionUrl(storagePath: string): string {
+  return supabase().storage.from("photos").getPublicUrl(storagePath).data.publicUrl;
+}
+
+/**
+ * Hand a waiting video to the photo someone picked. Returns false if either has
+ * gone in the meantime — a second tap on the same button, or the photo deleted
+ * from another screen.
+ *
+ * A photo that already had motion loses it: the old file is removed once the
+ * row points at the new one. That is deliberate rather than an error, because
+ * the only way to correct a wrong pick is to pick again, and a correction that
+ * left the mistake in the bucket would leak a file per attempt.
+ */
+export async function attachMotionByHand(
+  chatId: number,
+  tripId: string,
+  code: string,
+  mediaId: string,
+): Promise<boolean> {
+  const parked = await parkedMotionByCode(chatId, tripId, code);
+  if (!parked) return false;
+
+  const { data: photo } = await supabase()
+    .from("media")
+    .select("motion_path")
+    .eq("id", mediaId)
+    .maybeSingle();
+  if (!photo) return false;
+
+  const { data: updated, error } = await supabase()
+    .from("media")
+    .update({ motion_path: parked.storagePath, motion_ms: parked.durationMs })
+    .eq("id", mediaId)
+    .select("id");
+  if (error || (updated ?? []).length === 0) return false;
+
+  await supabase().from("pending_motions").delete().eq("id", parked.id);
+  // Only now, while nothing points at it any more.
+  if (photo.motion_path && photo.motion_path !== parked.storagePath) {
+    await supabase().storage.from("photos").remove([photo.motion_path]);
+  }
+  return true;
 }
 
 export interface IncomingVideo extends IncomingMotion {
@@ -341,18 +406,33 @@ export async function saveMotion(
     : "";
 
   if (!still) {
-    await parkMotion(ctx.chat!.id, trip.id, { storagePath: path, durationMs, coverHash });
+    const parkedId = await parkMotion(ctx.chat!.id, trip.id, {
+      storagePath: path,
+      durationMs,
+      coverHash,
+    });
     // Which of the two situations this is matters to the person reading it:
     // nothing on the trip looking like the video is a dead end they should stop
     // repeating, whereas an empty trip is simply the photo not being here yet.
     const nothingLikeIt = coverHash && pool.some((c) => !c.hasMotion);
+    // The button is the way out of the dead end: recognition has already failed
+    // for this video, so telling someone to send the photo again is telling
+    // them to repeat what did not work. Picking it is the answer.
+    const keyboard =
+      parkedId && pool.length > 0
+        ? new InlineKeyboard().text(
+            "🎬 Pick the photo",
+            encodeAction({ type: "motionHome", code: motionCode(parkedId) }),
+          )
+        : undefined;
     await ctx.reply(
       nothingLikeIt
         ? `🎬 Held onto that motion, but nothing on the trip looks like it — a crop or a ` +
-            `straighten in an editor will do that. Send the photo it belongs to and I'll pair ` +
-            `them.${caveat}`
+            `straighten in an editor will do that. Pick the photo below, or send it again ` +
+            `and I'll pair them.${caveat}`
         : `🎬 Held onto that motion — send the photo it belongs to and I'll put them ` +
             `together.${caveat}`,
+      keyboard ? { reply_markup: keyboard } : undefined,
     );
     return;
   }
