@@ -136,12 +136,16 @@ interface ParkedMotion {
 
 /** Every motion this chat has waiting on this trip, oldest first. */
 async function parkedMotions(chatId: number, tripId: string): Promise<ParkedMotion[]> {
-  const { data } = await supabase()
+  const { data, error } = await supabase()
     .from("pending_motions")
     .select("id, storage_path, duration_ms, cover_phash, created_at")
     .eq("chat_id", chatId)
     .eq("trip_id", tripId)
     .order("created_at", { ascending: true });
+  // Not the same as nothing waiting. Swallowed, a missing table reads as "no
+  // videos are waiting" everywhere at once — which is exactly how this shipped
+  // and how it stayed invisible.
+  if (error) throw new Error(`could not read the waiting Live Photo videos: ${error.message}`);
 
   return (data ?? []).map((row) => ({
     id: row.id,
@@ -164,8 +168,8 @@ async function parkMotion(
   chatId: number,
   tripId: string,
   motion: Omit<ParkedMotion, "id" | "parkedAtMs">,
-): Promise<string | null> {
-  const { data } = await supabase()
+): Promise<string> {
+  const { data, error } = await supabase()
     .from("pending_motions")
     .insert({
       chat_id: chatId,
@@ -176,7 +180,10 @@ async function parkMotion(
     })
     .select("id")
     .single();
-  return data?.id ?? null;
+  if (error || !data) {
+    throw new Error(`could not hold onto that video: ${error?.message ?? "no row came back"}`);
+  }
+  return data.id as string;
 }
 
 /**
@@ -406,11 +413,25 @@ export async function saveMotion(
     : "";
 
   if (!still) {
-    const parkedId = await parkMotion(ctx.chat!.id, trip.id, {
-      storagePath: path,
-      durationMs,
-      coverHash,
-    });
+    let parkedId: string;
+    try {
+      parkedId = await parkMotion(ctx.chat!.id, trip.id, {
+        storagePath: path,
+        durationMs,
+        coverHash,
+      });
+    } catch (err) {
+      // The file is already in the bucket and nothing now points at it. Take it
+      // back out and say so: a cheerful "held onto that motion" over a video
+      // that was not held onto is the worst of the available answers.
+      await store.remove([path]);
+      await ctx.reply(
+        `⚠️ I couldn't keep that video: ${err instanceof Error ? err.message : "unknown error"}\n\n` +
+          `Nothing was stored. If this says the table is missing, supabase/schema.sql needs ` +
+          `running again.`,
+      );
+      return;
+    }
     // Which of the two situations this is matters to the person reading it:
     // nothing on the trip looking like the video is a dead end they should stop
     // repeating, whereas an empty trip is simply the photo not being here yet.
@@ -419,7 +440,7 @@ export async function saveMotion(
     // for this video, so telling someone to send the photo again is telling
     // them to repeat what did not work. Picking it is the answer.
     const keyboard =
-      parkedId && pool.length > 0
+      pool.length > 0
         ? new InlineKeyboard().text(
             "🎬 Pick the photo",
             encodeAction({ type: "motionHome", code: motionCode(parkedId) }),
