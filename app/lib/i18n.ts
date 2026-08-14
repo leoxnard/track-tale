@@ -232,6 +232,8 @@ const en = {
       across: (km: string) => `${km} km across`,
       with: (km: string) => `${km} km with`,
     },
+    scale: "Wind speed while riding, km/h",
+    axis: "Kilometres ridden with the wind out of that direction",
     coverage: (percent: number) => `From the ${percent}% of the riding that carried a clock`,
     petal: (km: string, from: string, kmh: number) =>
       `${km} km with the wind out of the ${from} at ${kmh} km/h`,
@@ -388,6 +390,8 @@ const de: Messages = {
       across: (km: string) => `${km} km quer`,
       with: (km: string) => `${km} km damit`,
     },
+    scale: "Windstärke unterwegs, km/h",
+    axis: "Gefahrene Kilometer mit Wind aus dieser Richtung",
     coverage: (percent: number) => `Aus den ${percent}% der Fahrt mit Zeitstempel`,
     petal: (km: string, from: string, kmh: number) =>
       `${km} km mit Wind aus ${from} mit ${kmh} km/h`,

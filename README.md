@@ -45,14 +45,21 @@ notes, stats and weather.
   dense one. The axis is distance along the plan, so a day spans the plan it covered rather
   than its own odometer — a day that rides 95 km to advance 86 km of route sits in those
   86 km instead of overhanging its neighbours. What was ridden is in the day's own stats.
-- Every day carries the **wind it was ridden into**, as a ring with a little bicycle in the
-  middle. Each petal is a compass direction the wind blew *from*: how far it reaches is how
-  many kilometres were ridden under that wind, and its colour is how hard it blew, stepped by
-  the Beaufort scale. The bicycle points the day's average heading, so petals crowding its
-  nose *are* a day of headwind and petals behind the saddle *are* a day of being pushed
-  along — no number needed to see which one it was. Underneath, the numbers anyway: the mean
+- Every day carries the **wind it was ridden into**, as an ordinary **wind rose** — the same
+  figure a weather station has drawn for a century, so it reads on sight — with a little
+  bicycle in the middle. North is up; each petal is a compass direction the wind blew *from*;
+  how far it reaches is how many kilometres were ridden under that wind, with the rings
+  labelled so a petal is a number and not just a shape; and each petal is banded by speed
+  class from the hub outwards, on Beaufort's boundaries, with a legend naming the classes. The
+  only thing changed from the convention is what the rings count: kilometres ridden rather
+  than hours observed. The bicycle is ours, and it is the point — it holds the day's average
+  heading, so petals crowding its nose *are* a day of headwind and petals behind the saddle
+  *are* a day of being pushed along, no number needed. Underneath, the numbers anyway: the mean
   wind and where it came from, gusts, and the day split into kilometres ridden against the
-  wind, across it and with it. The whole trip gets the same ring at the top of the page.
+  wind, across it and with it — that last bar in dark-to-pale rather than in colour, because
+  the rose already spends colour on strength and a second meaning for the same red an arm's
+  length away is how a figure stops being readable. The whole trip gets the same rose at the
+  top of the page.
   The wind is measured, not guessed: Open-Meteo's hourly reanalysis at the middle of each
   day's route, matched to the track's own timestamps and interpolated between the hours, then
   weighted by distance rather than time — so an hour in a café with the flags snapping is not

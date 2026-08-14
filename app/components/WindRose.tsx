@@ -1,7 +1,9 @@
 import { useId } from "react";
 import { useMessages } from "../lib/locale";
 import {
+  BIN_COLORS,
   SECTOR_DEG,
+  binLabel,
   norm360,
   verdictOf,
   windColor,
@@ -9,22 +11,29 @@ import {
 } from "../lib/wind";
 
 /**
- * The wind of a day — or of a whole trip — as one ring with a bicycle in it.
+ * The wind of a day — or of a whole trip — as a wind rose with a bicycle in it.
  *
- * Each petal is a compass sector the wind blew *from*: how far it reaches is
- * how many kilometres were ridden under that wind, and its colour is how hard
- * that wind blew (Beaufort, so the steps are ones a person outdoors notices).
- * The bicycle in the hub points the average direction of travel.
+ * Deliberately the standard meteorological figure rather than an invention:
+ * north up, sixteen sectors, each petal reaching out from the centre by how much
+ * happened with the wind out of that direction and banded into speed classes
+ * from the hub outwards, with a legend naming the classes and the outer ring
+ * labelled with its value. Anyone who has met a wind rose reads this one without
+ * being told, and anyone who hasn't can learn it from the legend. The one thing
+ * changed from the convention is the radial measure: a weather station counts
+ * hours, this counts *kilometres ridden*, which is the same idea told in the
+ * units the trip is in.
  *
- * That last part is what makes the picture worth drawing rather than tabulating.
- * Petals piling up in front of the bike's nose *are* a day of headwind; the same
- * petals behind the saddle are a day of being pushed along. Nobody has to read a
- * number to see which day they had — the number is underneath for when they do.
+ * The bicycle in the hub is the part that is ours, and it is what makes the
+ * picture worth drawing rather than tabulating: it points the average heading,
+ * so petals crowding its nose *are* a day of headwind and petals behind the
+ * saddle *are* a day of being pushed along. Nobody has to read a number to see
+ * which day they had — the numbers are underneath for when they do.
  *
- * The rose is in compass space, not the rider's: north is up, always. Turning it
- * into the rider's frame was the first attempt and it read beautifully for one
- * day and became meaningless the moment two days sat above each other, because
- * every rose was then in its own private coordinate system.
+ * The rose stays in compass space, not the rider's. Turning it into the rider's
+ * frame was tried first: it read beautifully for one day and became meaningless
+ * the moment two days sat above each other, because every rose was then in its
+ * own private coordinate system, and it threw away the convention that makes the
+ * figure legible on sight.
  */
 
 const CENTER = 80;
@@ -48,6 +57,15 @@ interface Props {
 function pointAt(deg: number, r: number): [number, number] {
   const rad = ((deg - 90) * Math.PI) / 180;
   return [CENTER + r * Math.cos(rad), CENTER + r * Math.sin(rad)];
+}
+
+/**
+ * Where a cumulative distance within a petal lands on the radial axis. The axis
+ * runs from the hub to the busiest sector's total, shared by every petal, which
+ * is what makes their lengths comparable.
+ */
+function radiusOf(metres: number, sectorM: number, share: number): number {
+  return HUB + 2 + (metres / (sectorM || 1)) * share * PETAL_MAX;
 }
 
 /** An annular wedge: the petal for one sector, from `r0` out to `r1`. */
@@ -108,13 +126,18 @@ export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
   const spin = wind.travelDeg - 90;
   const upsideDown = norm360(spin) > 90 && norm360(spin) < 270;
 
+  const busiestM = Math.max(...wind.sectors.map((s) => s.distanceM));
   const verdict = verdictOf(wind);
   const head = Math.round(wind.headwindKmh);
   const split = wind.headM + wind.crossM + wind.tailM;
+  // Deliberately no hue: the rose already spends warm colour on wind *strength*,
+  // and this bar answers a different question — the *angle* the wind came at.
+  // Red here would be a second meaning for the same red, an arm's length away.
+  // Dark to pale reads as hard to easy instead, and each band is labelled.
   const bar = [
-    { key: "against", metres: wind.headM, fill: "#c2452f" },
-    { key: "across", metres: wind.crossM, fill: "#c9b98a" },
-    { key: "with", metres: wind.tailM, fill: "#4f9d69" },
+    { key: "against", metres: wind.headM, fill: "#1e3a2f" },
+    { key: "across", metres: wind.crossM, fill: "#7f9187" },
+    { key: "with", metres: wind.tailM, fill: "#cbd6cb" },
   ] as const;
 
   return (
@@ -136,36 +159,55 @@ export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
           )}
         </title>
 
-        {/* The rings the petals are read against: the hub, and the reach of the
-            longest petal, so a stubby rose is visibly stubby. */}
+        {/* The radial axis: the hub, a ring at half the busiest sector and one
+            at all of it, each labelled — without them a petal's length is a
+            shape, and with them it is a number of kilometres. */}
         <circle cx={CENTER} cy={CENTER} r={HUB} fill="none" stroke="#e3e0d8" strokeWidth={1} />
-        <circle
-          cx={CENTER}
-          cy={CENTER}
-          r={HUB + 3 + PETAL_MAX}
-          fill="none"
-          stroke="#e3e0d8"
-          strokeWidth={1}
-          strokeDasharray="2 4"
-        />
+        {[0.5, 1].map((fraction) => (
+          <circle
+            key={fraction}
+            cx={CENTER}
+            cy={CENTER}
+            r={HUB + 2 + fraction * PETAL_MAX}
+            fill="none"
+            stroke="#e3e0d8"
+            strokeWidth={1}
+            strokeDasharray="2 4"
+          />
+        ))}
+        <g>
+          <title>{m.wind.axis}</title>
+          {[0.5, 1].map((fraction) => {
+            // Along the north-east spoke, where petals are least likely to be:
+            // the prevailing wind of a European trip is rarely from there.
+            const [x, y] = pointAt(45, HUB + 2 + fraction * PETAL_MAX);
+            return (
+              <text
+                key={fraction}
+                x={x}
+                y={y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={7.5}
+                fill="#6b7a72"
+                stroke="#fbfaf7"
+                strokeWidth={2.5}
+                paintOrder="stroke"
+              >
+                {/* The outer ring carries the unit for both. */}
+                {fraction === 1 ? `${km(busiestM)} km` : km(busiestM * fraction)}
+              </text>
+            );
+          })}
+        </g>
 
-        {wind.sectors.map((sector) =>
-          sector.distanceM === 0 ? null : (
-            <path
-              key={sector.fromDeg}
-              d={petalPath(
-                sector.fromDeg,
-                HUB + 2,
-                // Every sector that saw any riding at all gets a sliver, so a
-                // single kilometre from the north-east is visible rather than
-                // rounded into nothing.
-                HUB + 3 + sector.share * PETAL_MAX,
-                SECTOR_DEG - 3,
-              )}
-              fill={windColor(sector.meanKmh)}
-              stroke="#fbfaf7"
-              strokeWidth={0.5}
-            >
+        {wind.sectors.map((sector) => {
+          if (sector.distanceM === 0) return null;
+          // Each class stacks on the one below it, so the petal's total length
+          // is still the distance and the bands within it are the speeds.
+          let stacked = 0;
+          return (
+            <g key={sector.fromDeg}>
               <title>
                 {m.wind.petal(
                   km(sector.distanceM),
@@ -173,9 +215,32 @@ export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
                   Math.round(sector.meanKmh),
                 )}
               </title>
-            </path>
-          ),
-        )}
+              {sector.bins.map((metres, bin) => {
+                if (metres === 0) return null;
+                const from = stacked;
+                stacked += metres;
+                const r0 = radiusOf(from, sector.distanceM, sector.share);
+                const r1 = radiusOf(stacked, sector.distanceM, sector.share);
+                return (
+                  <path
+                    key={bin}
+                    d={petalPath(
+                      sector.fromDeg,
+                      r0,
+                      // A hairline of paper between the bands, so where one
+                      // speed class ends is a boundary and not a hue judgement.
+                      // Never thinner than a sliver: a single kilometre out of
+                      // the north-east should be visible, not rounded away.
+                      Math.max(r0 + 0.7, r1 - 0.9),
+                      SECTOR_DEG - 3,
+                    )}
+                    fill={BIN_COLORS[bin]}
+                  />
+                );
+              })}
+            </g>
+          );
+        })}
 
         {/* Where the wind sat on balance: an arrow outside the ring, blowing
             inwards, because that is the direction the rider felt it come from. */}
@@ -271,10 +336,25 @@ export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
           </>
         )}
 
+        {/* The key to the petals' bands. Always present: the ramp is ordered,
+            not named, and without this the colours are a mood. */}
+        <p className="mt-3 text-xs text-faint">{m.wind.scale}</p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-faint">
+          {BIN_COLORS.map((fill, bin) => (
+            <span key={bin} className="inline-flex items-center gap-1">
+              <span
+                className="inline-block h-2.5 w-3.5 rounded-[2px] ring-1 ring-trail"
+                style={{ backgroundColor: fill }}
+              />
+              {binLabel(bin)}
+            </span>
+          ))}
+        </p>
+
         {/* Only worth saying when a real slice of the day is missing: a track
             without timestamps, or a stretch the hourly series didn't reach. */}
         {wind.coverage < 0.9 && (
-          <p className="mt-1 text-xs text-faint">
+          <p className="mt-2 text-xs text-faint">
             {m.wind.coverage(Math.round(wind.coverage * 100))}
           </p>
         )}

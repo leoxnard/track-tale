@@ -63,9 +63,11 @@ export interface WindSector {
   fromDeg: number;
   /** Metres ridden while the wind came from this sector. */
   distanceM: number;
+  /** Those metres split by speed class — the segments the petal stacks. */
+  bins: number[];
   /** Mean wind speed over those metres, km/h. */
   meanKmh: number;
-  /** That distance as a fraction of the strongest sector — the petal's length. */
+  /** That distance as a fraction of the busiest sector — the petal's length. */
   share: number;
 }
 
@@ -204,6 +206,9 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
   let windV = 0;
   const sectorM = new Array<number>(SECTOR_COUNT).fill(0);
   const sectorSpeed = new Array<number>(SECTOR_COUNT).fill(0);
+  const sectorBins = Array.from({ length: SECTOR_COUNT }, () =>
+    new Array<number>(SPEED_BINS.length).fill(0),
+  );
 
   for (const ride of rides) {
     const pts = ride.points;
@@ -244,6 +249,7 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
       const s = sectorOf(wind.fromDeg);
       sectorM[s] += d;
       sectorSpeed[s] += d * wind.speedKmh;
+      sectorBins[s][binOf(wind.speedKmh)] += d;
     }
   }
 
@@ -265,6 +271,7 @@ export function analyseWind(rides: Ride[]): WindAnalysis | null {
     sectors: sectorM.map((m, i) => ({
       fromDeg: i * SECTOR_DEG,
       distanceM: m,
+      bins: sectorBins[i],
       meanKmh: m > 0 ? sectorSpeed[i] / m : 0,
       share: busiest > 0 ? m / busiest : 0,
     })),
@@ -278,42 +285,50 @@ export function sectorOf(fromDeg: number): number {
 }
 
 /**
- * Beaufort force from a 10 m wind speed in km/h — the boundaries of the scale
- * itself, which is also what makes it a good colour ramp: its steps are the
- * steps a person outdoors actually notices.
+ * The speed classes the petals stack in, as lower bounds in km/h.
+ *
+ * A wind rose is a *stacked* chart by convention — each petal is banded by speed
+ * class, which is what lets one picture answer both "where from" and "how hard"
+ * at once. Colouring a whole petal by its mean was the first attempt and it lost
+ * exactly the thing worth seeing: a direction that was mostly calm with one
+ * vicious hour in it came out looking identical to one that blew steadily.
+ *
+ * The boundaries are Beaufort's (force 2, 3, 4 and 5 begin at 6, 12, 20 and
+ * 29 km/h), because that scale was built around what a person outdoors notices,
+ * and five classes is as many as a petal this size can hold apart.
  */
-const BEAUFORT_KMH = [1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118];
+export const SPEED_BINS = [0, 6, 12, 20, 29];
 
-export function beaufort(kmh: number): number {
-  let force = 0;
-  for (let i = 0; i < BEAUFORT_KMH.length; i++) if (kmh >= BEAUFORT_KMH[i]) force = i + 1;
-  return force;
+export function binOf(kmh: number): number {
+  let bin = 0;
+  for (let i = 0; i < SPEED_BINS.length; i++) if (kmh >= SPEED_BINS[i]) bin = i;
+  return bin;
+}
+
+/** `<6`, `6–11`, … `29+` — the legend's labels, derived so they cannot drift
+ *  out of step with the boundaries they describe. */
+export function binLabel(bin: number): string {
+  if (bin === 0) return `<${SPEED_BINS[1]}`;
+  if (bin === SPEED_BINS.length - 1) return `${SPEED_BINS[bin]}+`;
+  return `${SPEED_BINS[bin]}–${SPEED_BINS[bin + 1] - 1}`;
 }
 
 /**
- * The ring's colour ramp, indexed by Beaufort force: the page's own quiet sage
- * for air you would not notice, warming through to a red that means the day was
- * about the wind and nothing else. Not a rainbow — it has to sit next to the
- * day colours on the map without competing with them.
+ * The ramp, one step per speed class.
+ *
+ * Sequential, not categorical: lightness falls monotonically (0.92 → 0.80 →
+ * 0.69 → 0.54 → 0.38 in OKLab) so the order survives greyscale, a colourblind
+ * reader and a bad screen, and the hue warms along with it because a rider
+ * reading it expects the hard end to be the red end. The two middle steps sit
+ * closer in hue than a categorical palette would allow, which is why the rose
+ * never leans on colour alone: the classes are stacked in order from the hub
+ * outwards, separated by a hairline of paper, listed in that order in the
+ * legend, and spelled out in each petal's tooltip.
  */
-const FORCE_COLORS = [
-  "#d9ded6", // 0 calm
-  "#c3d0c2", // 1
-  "#a8c2a6", // 2
-  "#8fb98d", // 3 gentle
-  "#d8c46a", // 4 moderate
-  "#e0a049", // 5 fresh
-  "#d4703a", // 6 strong
-  "#c2452f", // 7 near gale
-  "#a32b1d", // 8 gale
-  "#8f2417", // 9
-  "#6e1a11", // 10
-  "#54120c", // 11
-  "#3a0b07", // 12 hurricane
-];
+export const BIN_COLORS = ["#e2e6dc", "#e6b833", "#e0801f", "#c33320", "#79180f"];
 
 export function windColor(kmh: number): string {
-  return FORCE_COLORS[Math.min(beaufort(kmh), FORCE_COLORS.length - 1)];
+  return BIN_COLORS[binOf(kmh)];
 }
 
 /**

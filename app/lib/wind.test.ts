@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { TrackPoint } from "./track";
 import type { HourlyWind } from "./weather";
 import {
+  BIN_COLORS,
   analyseWind,
   angleDiffDeg,
   bearingDeg,
-  beaufort,
+  binLabel,
+  binOf,
   sectorOf,
   verdictOf,
   windAt,
@@ -199,19 +201,45 @@ describe("analyseWind", () => {
   });
 });
 
-describe("the Beaufort ramp", () => {
-  it("puts the forces where the scale does", () => {
-    expect(beaufort(0)).toBe(0);
-    expect(beaufort(5)).toBe(1);
-    expect(beaufort(15)).toBe(3);
-    expect(beaufort(30)).toBe(5);
-    expect(beaufort(200)).toBe(12);
+describe("the speed classes", () => {
+  it("bins on the Beaufort boundaries the legend promises", () => {
+    expect(binOf(0)).toBe(0);
+    expect(binOf(5.9)).toBe(0);
+    expect(binOf(6)).toBe(1);
+    expect(binOf(19)).toBe(2);
+    expect(binOf(20)).toBe(3);
+    expect(binOf(29)).toBe(4);
+    expect(binOf(200)).toBe(4);
+  });
+
+  it("labels each class from the same boundaries, so the two cannot drift", () => {
+    expect(binLabel(0)).toBe("<6");
+    expect(binLabel(1)).toBe("6–11");
+    expect(binLabel(2)).toBe("12–19");
+    expect(binLabel(3)).toBe("20–28");
+    expect(binLabel(4)).toBe("29+");
   });
 
   it("gives every speed a colour, however silly", () => {
     for (const kmh of [0, 7, 25, 60, 140, 400]) {
       expect(windColor(kmh)).toMatch(/^#[0-9a-f]{6}$/);
     }
+    expect(BIN_COLORS).toHaveLength(5);
+  });
+
+  it("splits a petal's distance across the classes it was ridden in", () => {
+    // Half the day in a fresh breeze, half in a gentle one, all from the north.
+    const gusty: HourlyWind = {
+      time: Array.from({ length: 12 }, (_, i) => START + i * HOUR),
+      speedKmh: Array.from({ length: 12 }, (_, i) => (i < 6 ? 25 : 8)),
+      fromDeg: Array(12).fill(0),
+      gustKmh: Array(12).fill(40),
+    };
+    const long = line({ lat: 50, lng: 8 }, 0.01, 0, 40);
+    const north = analyseWind([{ points: long, hourly: gusty }])!.sectors[0];
+    expect(north.bins[3]).toBeGreaterThan(0);
+    expect(north.bins[1]).toBeGreaterThan(0);
+    expect(north.bins.reduce((s, v) => s + v, 0)).toBeCloseTo(north.distanceM, 5);
   });
 });
 
