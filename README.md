@@ -50,7 +50,8 @@ notes, stats and weather.
   bicycle in the middle. North is up; each petal is a compass direction the wind blew *from*;
   how far it reaches is how many kilometres were ridden under that wind, with the rings
   labelled so a petal is a number and not just a shape; and each petal is banded by speed
-  class from the hub outwards, on Beaufort's boundaries, with a legend naming the classes. The
+  class from the hub outwards, on Beaufort's boundaries, with the key to those classes printed
+  once, on the trip's own rose at the top of the page. The
   only thing changed from the convention is what the rings count: kilometres ridden rather
   than hours observed. The bicycle is ours, and it is the point — it holds the day's average
   heading, so petals crowding its nose *are* a day of headwind and petals behind the saddle

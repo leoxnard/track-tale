@@ -51,6 +51,12 @@ interface Props {
   size?: number;
   /** The day's colour, used for the bicycle so it belongs to the day it is in. */
   color?: string;
+  /**
+   * Whether to print the speed-class key. On once, at the top of the page: the
+   * ramp is the same on every rose below, and a legend repeated down twenty days
+   * is twenty times the ink for the same sentence.
+   */
+  showScale?: boolean;
 }
 
 /** Point on the ring at a compass bearing — SVG y grows downwards, north is up. */
@@ -112,7 +118,7 @@ function Bicycle({ color }: { color: string }) {
   );
 }
 
-export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
+export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = false }: Props) {
   const m = useMessages();
   const titleId = useId();
 
@@ -290,17 +296,17 @@ export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
       </svg>
 
       <figcaption className="min-w-[13rem] max-w-md flex-1 text-sm">
-        <p className="font-semibold text-pine">{m.wind.verdicts[verdict]}</p>
-        <p className="text-faint">
-          {m.wind.average(Math.round(wind.windKmh), compass(wind.windFromDeg))}
-          {wind.gustKmh > wind.windKmh + 5 && ` · ${m.wind.gusts(Math.round(wind.gustKmh))}`}
-        </p>
-        <p className="text-faint">
-          {head === 0
-            ? m.wind.evens
-            : head > 0
-              ? m.wind.costHead(head)
-              : m.wind.costTail(-head)}
+        {/* One line, because it is one sentence: what the wind did, how hard it
+            blew and where from. It read as three before, and three lines of
+            small print under every day is a page about the wind. */}
+        <p>
+          <strong className="font-semibold text-pine">{m.wind.verdicts[verdict]}</strong>
+          <span className="text-faint">
+            {" · "}
+            {m.wind.average(Math.round(wind.windKmh), compass(wind.windFromDeg))}
+            {wind.gustKmh > wind.windKmh + 8 && ` · ${m.wind.gusts(Math.round(wind.gustKmh))}`}
+            {head !== 0 && ` · ${m.wind.net(Math.abs(head), head > 0)}`}
+          </span>
         </p>
 
         {split > 0 && (
@@ -336,25 +342,26 @@ export function WindRose({ wind, size = 148, color = "#1e3a2f" }: Props) {
           </>
         )}
 
-        {/* The key to the petals' bands. Always present: the ramp is ordered,
-            not named, and without this the colours are a mood. */}
-        <p className="mt-3 text-xs text-faint">{m.wind.scale}</p>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-faint">
-          {BIN_COLORS.map((fill, bin) => (
-            <span key={bin} className="inline-flex items-center gap-1">
-              <span
-                className="inline-block h-2.5 w-3.5 rounded-[2px] ring-1 ring-trail"
-                style={{ backgroundColor: fill }}
-              />
-              {binLabel(bin)}
-            </span>
-          ))}
-        </p>
+        {/* The key to the petals' bands — printed once for the page. */}
+        {showScale && (
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-faint">
+            {m.wind.scale}
+            {BIN_COLORS.map((fill, bin) => (
+              <span key={bin} className="inline-flex items-center gap-1">
+                <span
+                  className="inline-block h-2.5 w-3.5 rounded-[2px] ring-1 ring-trail"
+                  style={{ backgroundColor: fill }}
+                />
+                {binLabel(bin)}
+              </span>
+            ))}
+          </p>
+        )}
 
         {/* Only worth saying when a real slice of the day is missing: a track
             without timestamps, or a stretch the hourly series didn't reach. */}
         {wind.coverage < 0.9 && (
-          <p className="mt-2 text-xs text-faint">
+          <p className="mt-1 text-xs text-faint">
             {m.wind.coverage(Math.round(wind.coverage * 100))}
           </p>
         )}

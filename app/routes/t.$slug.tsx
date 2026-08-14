@@ -1161,7 +1161,9 @@ export function TripView({
         {tripWind && (
           <section className="mb-10">
             <h2 className="font-display text-lg font-semibold text-pine">{m.wind.title}</h2>
-            <WindRose wind={tripWind} size={168} />
+            {/* The one rose that carries the key, since it is the one the page
+                is read down from. */}
+            <WindRose wind={tripWind} size={148} showScale />
           </section>
         )}
 
