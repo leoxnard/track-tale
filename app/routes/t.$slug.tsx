@@ -40,7 +40,7 @@ import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
 import { LivePhoto } from "../components/LivePhoto";
-import { DayWind, WindRose } from "../components/WindRose";
+import { WindChip, WindRose } from "../components/WindRose";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
 import {
@@ -1107,6 +1107,15 @@ export function TripView({
   // Off until asked for, like the route network: it is an animation over the
   // whole trip, and nobody should pay for it by opening the page.
   const [showWind, setShowWind] = useState(false);
+  // Which days have their wind rose unfolded. Held here rather than in each
+  // day, because a day is rendered inside a map() and cannot hold state of its
+  // own; several may be open at once, which is what makes two days comparable.
+  const [openWind, setOpenWind] = useState<number[]>([]);
+  const toggleWind = useCallback((dayNumber: number) => {
+    setOpenWind((open) =>
+      open.includes(dayNumber) ? open.filter((n) => n !== dayNumber) : [...open, dayNumber],
+    );
+  }, []);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -1473,6 +1482,19 @@ export function TripView({
                           )
                         : w?.precipitationMm != null &&
                           w.precipitationMm > 0.5 && <> · 💧 {w.precipitationMm.toFixed(0)} mm</>}
+                      {/* The wind joins the line it belongs on, beside the rain
+                          and the temperature: an arrow, a speed, and the rose a
+                          tap away for anyone who wants it. */}
+                      {wind && (
+                        <>
+                          {" · "}
+                          <WindChip
+                            wind={wind}
+                            open={openWind.includes(day.dayNumber)}
+                            onToggle={() => toggleWind(day.dayNumber)}
+                          />
+                        </>
+                      )}
                     </p>
                   )}
                 </div>
@@ -1499,9 +1521,9 @@ export function TripView({
                   </p>
                 )}
 
-                {/* One line under a day, opening to the full figure on a tap:
-                    twenty of these expanded is a page about the wind. */}
-                {wind && <DayWind wind={wind} color={day.color} />}
+                {wind && openWind.includes(day.dayNumber) && (
+                  <WindRose wind={wind} color={day.color} />
+                )}
 
                 {day.pieces.some((piece) => piece.profile.length > 1) && (
                   <ElevationProfile

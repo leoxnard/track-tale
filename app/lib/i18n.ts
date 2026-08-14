@@ -238,6 +238,8 @@ const en = {
     },
     scale: "km/h:",
     expand: "Show the day's wind in full",
+    /** The tooltip on the little arrow in a day's weather line. */
+    chip: (kmh: number, from: string) => `${kmh} km/h out of the ${from} — tap for the rose`,
     axis: "Kilometres ridden with the wind at that angle to the rider",
     coverage: (percent: number) => `From the ${percent}% of the riding that carried a clock`,
     /** The four quarters of the rose, which is drawn around the rider: up is
@@ -419,6 +421,7 @@ const de: Messages = {
     },
     scale: "km/h:",
     expand: "Den Wind des Tages ausklappen",
+    chip: (kmh: number, from: string) => `${kmh} km/h aus ${from} — für die Rose antippen`,
     axis: "Gefahrene Kilometer mit Wind aus diesem Winkel zur Fahrtrichtung",
     coverage: (percent: number) => `Aus den ${percent}% der Fahrt mit Zeitstempel`,
     around: ["vorn", "rechts", "hinten", "links"],
