@@ -66,7 +66,12 @@ export function useLiveMotion({ holdWithMouse = false, playOnTap = false }: Opti
     setPlaying(false);
     if (!video) return;
     video.pause();
-    video.currentTime = 0;
+    // Left where it stopped, deliberately. Rewinding here put frame one back on
+    // screen for the length of the cross-fade, so the end of a clip read as a
+    // flicker: last frame, first frame, photo. The video is on its way to
+    // invisible and the frame under it barely differs from the still, so the
+    // fade only works if nothing moves during it. `start` rewinds instead,
+    // while the element is still transparent.
   }, []);
 
   const clearHold = () => {
