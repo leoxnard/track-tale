@@ -5,7 +5,7 @@ import { RangeBrush } from "./RangeBrush";
 import { useDragZoom } from "./useDragZoom";
 import { useMessages } from "../lib/locale";
 import { TransitVehicle } from "./TransitVehicle";
-import { dashRuns, fitVehicle } from "../lib/train-fit";
+import { dashRuns, layTrain } from "../lib/train-fit";
 
 const W = 960;
 const H = 200;
@@ -150,38 +150,34 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
         line: toPath(day.points),
         area: `${toPath(day.points)}L${x(day.endM).toFixed(1)},${H - PAD_BOTTOM}L${x(day.startM).toFixed(1)},${H - PAD_BOTTOM}Z`,
       })),
-      // The train that fills the hole. How much of one, and where it stands,
-      // both depend on the chart's real width in pixels, which the viewBox
-      // cannot tell us — the chart is stretched to its box — so it is measured.
-      // The arithmetic is in lib/train-fit; the vehicles themselves are placed
-      // in the overlay below, where nothing squashes them.
+      // The train that fills the hole. How much of one is on screen depends on
+      // the chart's real width in pixels, which the viewBox cannot tell us —
+      // the chart is stretched to its box — so it is measured. The arithmetic
+      // is in lib/train-fit; the vehicles are placed in the overlay below,
+      // where nothing squashes them.
       hops: hops.map((hop) => {
         const fromX = x(hop.fromM);
         const toX = x(hop.toM);
-        const { carriages, centre, occupied } = fitVehicle(
-          fromX,
-          toX,
-          0,
-          W,
-          chartPx > 0 ? W / chartPx : 0,
-          hop.mode === "train",
-        );
+        const unitsPerPx = chartPx > 0 ? W / chartPx : 0;
+        const { parts, stands } = layTrain(fromX, toX, W, unitsPerPx, hop.mode === "train");
 
-        // The hop hangs between the heights either side of it, so a dash run
-        // takes its ends from the line between them.
-        const heightAt = (px: number) => {
-          const along = toX === fromX ? 0 : (px - fromX) / (toX - fromX);
+        // The hop hangs between the heights either side of it, so both the
+        // dashes and the vehicles standing on it take their height from the
+        // line between the two ends.
+        const heightAt = (at: number) => {
+          const along = toX === fromX ? 0 : (at - fromX) / (toX - fromX);
           return y(hop.fromE + (hop.toE - hop.fromE) * along);
         };
 
         return {
           ...hop,
-          // Where the vehicle is hung, which is the middle of the gap until
-          // zooming pushes that middle off screen.
-          trainX: centre,
-          trainY: centre === null ? 0 : heightAt(centre),
-          carriages,
-          lines: dashRuns(fromX, toX, occupied, centre ?? (fromX + toX) / 2).map(
+          // Positions come back in CSS pixels, which is what the overlay wants
+          // anyway; only the height has to be read off the chart.
+          parts: parts.map((part) => ({
+            ...part,
+            y: (heightAt(part.x * unitsPerPx) / H) * 100,
+          })),
+          lines: dashRuns(fromX, toX, stands).map(
             ([a, b]) =>
               `M${a.toFixed(1)},${heightAt(a).toFixed(1)}L${b.toFixed(1)},${heightAt(b).toFixed(1)}`,
           ),
@@ -405,22 +401,32 @@ export function TourProfile({ plan, planKm, days, onScrub, onScrubEnd, onSelectD
               {Math.round(t)} m
             </span>
           ))}
-          {/* The train standing in the hole it left, as long as the hole is
-              wide: a locomotive and as many carriages as fit. */}
+          {/* The train standing in the hole it left, nose at the point the
+              riding starts again, carriages tailing back into the gap. It is
+              clipped rather than fitted: whatever runs past the edge of the
+              chart is cut, which is why zooming never moves or re-lengths it.
+
+              Deliberately not clickable: the chart underneath is scrubbed by
+              moving a pointer across it, and a train that swallowed those
+              events would put a dead patch in the middle of the tour. */}
           {hops
-            .filter((hop) => hop.carriages !== null && hop.trainX !== null)
+            .filter((hop) => hop.parts.length > 0)
             .map((hop) => (
               <span
                 key={`train-${hop.dayNumber}-${hop.fromM.toFixed(0)}`}
-                className="absolute -translate-x-1/2 -translate-y-1/2"
-                style={{ left: `${((hop.trainX ?? 0) / W) * 100}%`, top: `${(hop.trainY / H) * 100}%` }}
+                className="absolute inset-0 overflow-hidden"
+                role="img"
+                aria-label={m.profile.skipped(hop.mode)}
               >
-                <TransitVehicle
-                  mode={hop.mode}
-                  color={hop.color}
-                  carriages={hop.carriages ?? 0}
-                  title={m.profile.skipped(hop.mode)}
-                />
+                {hop.parts.map((part) => (
+                  <span
+                    key={part.index}
+                    className="absolute -translate-y-1/2"
+                    style={{ left: `${part.x}px`, top: `${part.y}%` }}
+                  >
+                    <TransitVehicle mode={hop.mode} kind={part.kind} color={hop.color} />
+                  </span>
+                ))}
               </span>
             ))}
           {laid
