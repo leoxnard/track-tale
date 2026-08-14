@@ -61,11 +61,19 @@ interface Props {
   showScale?: boolean;
 }
 
-/** Point on the ring at a bearing from the rider's nose, which is straight up.
- *  SVG y grows downwards, hence the quarter turn. */
+/**
+ * Point on the ring at a bearing from the rider's nose, which is straight up.
+ * SVG y grows downwards, hence the quarter turn.
+ *
+ * Rounded, and that matters: at full precision the last bits of `Math.cos` do
+ * not always agree between the Node that renders the page and the browser that
+ * hydrates it, and React then reports every petal as a mismatch and gives up on
+ * patching them. Two decimals on a 160-unit box is a ten-thousandth of the
+ * drawing — invisible, deterministic, and a good deal less markup.
+ */
 function pointAt(deg: number, r: number): [number, number] {
   const rad = ((deg - 90) * Math.PI) / 180;
-  return [CENTER + r * Math.cos(rad), CENTER + r * Math.sin(rad)];
+  return [round(CENTER + r * Math.cos(rad)), round(CENTER + r * Math.sin(rad))];
 }
 
 /**
@@ -73,8 +81,76 @@ function pointAt(deg: number, r: number): [number, number] {
  * runs from the hub to the busiest sector's total, shared by every petal, which
  * is what makes their lengths comparable.
  */
-function radiusOf(metres: number, sectorM: number, share: number): number {
-  return HUB + 2 + (metres / (sectorM || 1)) * share * PETAL_MAX;
+function radiusOf(
+  metres: number,
+  sectorM: number,
+  share: number,
+  hub: number,
+  reach: number,
+): number {
+  return hub + 2 + (metres / (sectorM || 1)) * share * reach;
+}
+
+/**
+ * The petals themselves, which are all the little glyph keeps and the middle of
+ * what the full figure draws. Taking radii as arguments is what lets one shape
+ * serve both: the glyph fills its box, the figure leaves room for its labels.
+ */
+function Petals({
+  wind,
+  hub,
+  reach,
+  titleOf,
+}: {
+  wind: WindAnalysis;
+  hub: number;
+  reach: number;
+  /** A tooltip per petal — left off the glyph, which is a picture, not a table. */
+  titleOf?: (sector: WindAnalysis["sectors"][number]) => string;
+}) {
+  return (
+    <>
+      {wind.sectors.map((sector) => {
+        if (sector.distanceM === 0) return null;
+        // Each class stacks on the one below it, so the petal's total length is
+        // still the distance and the bands within it are the speeds.
+        let stacked = 0;
+        return (
+          <g key={sector.relativeDeg}>
+            {titleOf && <title>{titleOf(sector)}</title>}
+            {sector.bins.map((metres, bin) => {
+              if (metres === 0) return null;
+              const from = stacked;
+              stacked += metres;
+              const r0 = radiusOf(from, sector.distanceM, sector.share, hub, reach);
+              const r1 = radiusOf(stacked, sector.distanceM, sector.share, hub, reach);
+              return (
+                <path
+                  key={bin}
+                  d={petalPath(
+                    sector.relativeDeg,
+                    r0,
+                    // A hairline of paper between the bands, so where one speed
+                    // class ends is a boundary and not a hue judgement. Never
+                    // thinner than a sliver: a single kilometre out of the
+                    // north-east should be visible, not rounded away.
+                    Math.max(r0 + 0.7, r1 - 0.9),
+                    SECTOR_DEG - 3,
+                  )}
+                  fill={BIN_COLORS[bin]}
+                />
+              );
+            })}
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
+/** Two decimals, everywhere a number reaches the markup. See `pointAt`. */
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 /** An annular wedge: the petal for one sector, from `r0` out to `r1`. */
@@ -85,11 +161,13 @@ function petalPath(midDeg: number, r0: number, r1: number, widthDeg: number): st
   const [x1, y1] = pointAt(a1, r0);
   const [x2, y2] = pointAt(a1, r1);
   const [x3, y3] = pointAt(a0, r1);
+  // The radii reach the markup too, so they are rounded with everything else.
+  const [c0, c1] = [round(r0), round(r1)];
   return [
     `M ${x0} ${y0}`,
-    `A ${r0} ${r0} 0 0 1 ${x1} ${y1}`,
+    `A ${c0} ${c0} 0 0 1 ${x1} ${y1}`,
     `L ${x2} ${y2}`,
-    `A ${r1} ${r1} 0 0 0 ${x3} ${y3}`,
+    `A ${c1} ${c1} 0 0 0 ${x3} ${y3}`,
     "Z",
   ].join(" ");
 }
@@ -198,46 +276,18 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
           })}
         </g>
 
-        {wind.sectors.map((sector) => {
-          if (sector.distanceM === 0) return null;
-          // Each class stacks on the one below it, so the petal's total length
-          // is still the distance and the bands within it are the speeds.
-          let stacked = 0;
-          return (
-            <g key={sector.relativeDeg}>
-              <title>
-                {m.wind.petal(
-                  km(sector.distanceM),
-                  relative(sector.relativeDeg),
-                  Math.round(sector.meanKmh),
-                )}
-              </title>
-              {sector.bins.map((metres, bin) => {
-                if (metres === 0) return null;
-                const from = stacked;
-                stacked += metres;
-                const r0 = radiusOf(from, sector.distanceM, sector.share);
-                const r1 = radiusOf(stacked, sector.distanceM, sector.share);
-                return (
-                  <path
-                    key={bin}
-                    d={petalPath(
-                      sector.relativeDeg,
-                      r0,
-                      // A hairline of paper between the bands, so where one
-                      // speed class ends is a boundary and not a hue judgement.
-                      // Never thinner than a sliver: a single kilometre out of
-                      // the north-east should be visible, not rounded away.
-                      Math.max(r0 + 0.7, r1 - 0.9),
-                      SECTOR_DEG - 3,
-                    )}
-                    fill={BIN_COLORS[bin]}
-                  />
-                );
-              })}
-            </g>
-          );
-        })}
+        <Petals
+          wind={wind}
+          hub={HUB}
+          reach={PETAL_MAX}
+          titleOf={(sector) =>
+            m.wind.petal(
+              km(sector.distanceM),
+              relative(sector.relativeDeg),
+              Math.round(sector.meanKmh),
+            )
+          }
+        />
 
         {/* Where the wind sat on balance: an arrow outside the ring, blowing
             inwards, because that is the direction the rider felt it come from.
@@ -245,7 +295,7 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
             angle is an average of opposites and points nowhere real. */}
         {wind.relativeConcentration > 0.2 && (
           <g
-            transform={`rotate(${wind.relativeDeg} ${CENTER} ${CENTER})`}
+            transform={`rotate(${round(wind.relativeDeg)} ${CENTER} ${CENTER})`}
             fill={windColor(wind.windKmh)}
             stroke={windColor(wind.windKmh)}
           >
@@ -361,5 +411,60 @@ export function WindRose({ wind, size = 124, color = "#1e3a2f", showScale = fals
         )}
       </figcaption>
     </figure>
+  );
+}
+
+/** How much of the glyph's box the hub takes; the rest is petal. */
+const GLYPH_HUB = 26;
+const GLYPH_REACH = 50;
+
+/**
+ * The rose shrunk to a favicon: petals and a heading arrow, nothing else.
+ *
+ * At this size the rings, the labels and the numbers are illegible anyway, and
+ * dropping them is what makes the shape read — a lopsided flower with its weight
+ * ahead of the arrow or behind it. It is not meant to be measured, only
+ * recognised, and the figure it opens is where the measuring happens.
+ */
+export function WindRoseGlyph({ wind, size = 26, color = "#1e3a2f" }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 160 160" aria-hidden className="shrink-0">
+      <Petals wind={wind} hub={GLYPH_HUB} reach={GLYPH_REACH} />
+      <g transform={`translate(${CENTER} ${CENTER}) scale(1.15)`}>
+        <Heading color={color} />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * A day's wind, folded down to one line until it is asked for.
+ *
+ * The full figure is a rose, a bar, two lines of numbers and a key — worth the
+ * room once, at the top of the page, and far too much of it repeated under every
+ * day of a three-week trip, where it pushed the photographs and the writing off
+ * the screen. So each day keeps the glyph and the verdict, which is the part
+ * anyone scrolling actually reads, and the rest opens on a tap.
+ *
+ * A native `<details>` rather than state and a handler: it opens without
+ * JavaScript, it is a disclosure to a screen reader without any wiring, and the
+ * browser handles the keyboard.
+ */
+export function DayWind({ wind, color }: { wind: WindAnalysis; color?: string }) {
+  const m = useMessages();
+  const verdict = verdictOf(wind);
+  return (
+    <details className="group mt-3">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-trail bg-paper/70 py-1 pl-1.5 pr-2.5 text-xs hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine [&::-webkit-details-marker]:hidden">
+        <WindRoseGlyph wind={wind} color={color} />
+        <span className="font-semibold text-pine">{m.wind.verdicts[verdict]}</span>
+        <span className="text-faint">{Math.round(wind.windKmh)} km/h</span>
+        <span aria-hidden className="text-faint transition-transform group-open:rotate-180">
+          ▾
+        </span>
+        <span className="sr-only">{m.wind.expand}</span>
+      </summary>
+      <WindRose wind={wind} color={color} />
+    </details>
   );
 }

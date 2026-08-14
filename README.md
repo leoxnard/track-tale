@@ -66,6 +66,12 @@ notes, stats and weather.
   the day split into kilometres ridden against the wind, across it and with it — that bar in
   dark-to-pale rather than in colour, because the rose already spends colour on strength, and
   a second meaning for the same red an arm's length away is how a figure stops being readable.
+- Under a day all of that is folded into **one line** — a rose shrunk to a glyph, the verdict
+  and the mean wind — and opens on a tap. Expanded under every day of a three-week trip it
+  pushed the photographs and the writing off the screen; the glyph is the part anyone
+  scrolling actually reads, and it still shows at a glance whether the flower leans ahead of
+  the arrow or behind it. The trip's own rose at the top of the page stays open, since it is
+  the one worth the room and the one carrying the key.
 - The wind is **measured, not guessed**: Open-Meteo's hourly reanalysis, asked **every 10 km
   along the day's route** rather than only at its middle, so each stretch of riding is
   answered by the reading nearest to it — a hundred-kilometre stage does not have one wind.

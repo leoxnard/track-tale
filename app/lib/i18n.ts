@@ -234,6 +234,7 @@ const en = {
       with: (km: string) => `${km} km with`,
     },
     scale: "km/h:",
+    expand: "Show the day's wind in full",
     axis: "Kilometres ridden with the wind at that angle to the rider",
     coverage: (percent: number) => `From the ${percent}% of the riding that carried a clock`,
     /** The four quarters of the rose, which is drawn around the rider: up is
@@ -411,6 +412,7 @@ const de: Messages = {
       with: (km: string) => `${km} km damit`,
     },
     scale: "km/h:",
+    expand: "Den Wind des Tages ausklappen",
     axis: "Gefahrene Kilometer mit Wind aus diesem Winkel zur Fahrtrichtung",
     coverage: (percent: number) => `Aus den ${percent}% der Fahrt mit Zeitstempel`,
     around: ["vorn", "rechts", "hinten", "links"],

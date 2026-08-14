@@ -39,7 +39,7 @@ import { isSettled } from "../lib/livetrack";
 import { ElevationProfile } from "../components/ElevationProfile";
 import { TourProfile } from "../components/TourProfile";
 import { PhotoLightbox, type LightboxPhoto } from "../components/PhotoLightbox";
-import { WindRose } from "../components/WindRose";
+import { DayWind, WindRose } from "../components/WindRose";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
 import {
@@ -1494,7 +1494,9 @@ export function TripView({
                   </p>
                 )}
 
-                {wind && <WindRose wind={wind} color={day.color} />}
+                {/* One line under a day, opening to the full figure on a tap:
+                    twenty of these expanded is a page about the wind. */}
+                {wind && <DayWind wind={wind} color={day.color} />}
 
                 {day.pieces.some((piece) => piece.profile.length > 1) && (
                   <ElevationProfile
