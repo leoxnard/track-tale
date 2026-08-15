@@ -108,12 +108,17 @@ export interface TrackGeoJson {
 
 /** Keep coordinates compact: [lng, lat] pairs, times/alts as parallel arrays. */
 export function toGeoJson(points: TrackPoint[]): TrackGeoJson {
+  const times = points.map((p) => p.time ?? null);
+  const alts = points.map((p) => (p.alt !== undefined ? Math.round(p.alt * 10) / 10 : null));
+  // An array of nothing but nulls is worth more as an absent array: a planned
+  // route has no clock at all, so that is ten thousand `null`s stored, shipped
+  // to the page and parsed there to say what a missing key says for free.
+  // `fromGeoJson` and everything downstream already read these as optional,
+  // because a track saved before either field existed looks exactly like this.
+  const kept = <T>(values: (T | null)[]) => (values.some((v) => v !== null) ? values : undefined);
   return {
     type: "Feature",
-    properties: {
-      times: points.map((p) => p.time ?? null),
-      alts: points.map((p) => (p.alt !== undefined ? Math.round(p.alt * 10) / 10 : null)),
-    },
+    properties: { times: kept(times), alts: kept(alts) },
     geometry: {
       type: "LineString",
       coordinates: points.map((p) => [
@@ -151,16 +156,28 @@ export function decimate(points: TrackPoint[], maxPoints = 2000): TrackPoint[] {
  * be a weekend loop or six weeks across a continent, and a fixed budget spends
  * the same detail on both — lavish on the loop, and on the long one so coarse
  * that switchbacks turn into straight lines. Scaling by distance keeps the
- * resolution *per kilometre* constant instead, at roughly a point every 333 m:
- * 300 points for a 100 km day's worth of plan, 3000 for a 1000 km tour.
+ * resolution *per kilometre* constant instead, at roughly a point every 100 m:
+ * 1000 points for a 100 km day's worth of plan, 10 000 for a 1000 km tour.
+ *
+ * A point every 333 m, which this used to be, is invisible on a map of a whole
+ * country and plainly wrong as soon as anyone zooms into a valley: a hairpin
+ * becomes a corner and a lakeside road cuts across the water. 100 m is about
+ * where a zoomed-in plan stops disagreeing with the road under it, and the
+ * payload is still smaller than a single photograph.
  *
  * It also feeds the elevation chart, which matches each ridden day to the
  * nearest place on the planned line — the denser that line, the closer the
  * match lands to where the day actually rejoined the plan.
  */
-export const PLAN_POINTS_PER_KM = 3;
+export const PLAN_POINTS_PER_KM = 10;
 
-/** Below this a short plan would be thinned into a sketch; above it the page pays. */
+/**
+ * Below this a short plan would be thinned into a sketch; above it the page
+ * pays. The ceiling is per *segment*, and a plan is normally sent one Komoot
+ * tour at a time, so a long trip reaches its full detail as a dozen segments
+ * that each stay well under it — it only bites on a single uploaded file
+ * carrying more than 2000 km in one piece.
+ */
 const PLAN_MIN_POINTS = 500;
 const PLAN_MAX_POINTS = 20_000;
 

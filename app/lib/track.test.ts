@@ -132,13 +132,13 @@ describe("decimate", () => {
 });
 
 describe("planPointBudget", () => {
-  it("spends 300 points on every 100 km of plan", () => {
-    expect(planPointBudget(1_000_000)).toBe(3000);
-    expect(planPointBudget(2_000_000)).toBe(6000);
+  it("spends a point on every 100 m of plan", () => {
+    expect(planPointBudget(1_000_000)).toBe(10_000);
+    expect(planPointBudget(1_500_000)).toBe(15_000);
   });
 
   it("keeps a short plan from being thinned into a sketch", () => {
-    // 20 km would earn 60 points on the rate alone — too coarse for a line
+    // 20 km would earn 200 points on the rate alone — too coarse for a line
     // with switchbacks in it.
     expect(planPointBudget(20_000)).toBe(500);
   });
