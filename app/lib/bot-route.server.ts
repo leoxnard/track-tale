@@ -11,6 +11,7 @@ import {
   clampTargetKm,
   type PlanCut,
 } from "./route-cut";
+import { DEFAULT_AHEAD_KM as SHOPS_AHEAD_KM } from "./shops";
 import type { DbTrip } from "./db.server";
 
 /**
@@ -188,6 +189,10 @@ function targetKeyboard(km: number, position: Position): InlineKeyboard {
   keyboard
     .text(`− ${TARGET_STEP_KM} km`, encodeAction({ type: "cut", km: clampTargetKm(km - TARGET_STEP_KM), ...at }))
     .text(`+ ${TARGET_STEP_KM} km`, encodeAction({ type: "cut", km: clampTargetKm(km + TARGET_STEP_KM), ...at }));
+  // Where to buy food on the stretch that was just cut. It belongs here rather
+  // than only behind /supermarkt because a location sent to the bot is never
+  // stored — this button is what carries that position forward.
+  keyboard.row().text("🛒 Shops ahead", encodeAction({ type: "shops", km: SHOPS_AHEAD_KM, ...at }));
   return keyboard;
 }
 

@@ -68,6 +68,18 @@ export const env = {
     // in a .env file, and `?? ` would hand a blank style straight into the URL.
     return process.env.MAPTILER_KEY || null;
   },
+  /**
+   * Which Overpass instance `/supermarkt` asks. Optional, and the default is
+   * the public one — it needs no key and no account, which is most of why the
+   * shop search uses OpenStreetMap rather than a commercial places API.
+   *
+   * Worth pointing at your own instance if the searching ever gets heavy: the
+   * public endpoint is donated capacity with rate limits to match, and it
+   * answers a burst with a 429 rather than with shops.
+   */
+  get overpassUrl() {
+    return process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
+  },
   get maptilerStyle() {
     return process.env.MAPTILER_STYLE || "outdoor-v2";
   },

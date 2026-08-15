@@ -79,6 +79,7 @@ does I/O and generally does not.
 | `bot-motion.server.ts` | the video half of a Live Photo: matching it to its still by sight, or parking it until one arrives |
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-route.server.ts` | `/route` — where the traveller was last seen, and the cut GPX that goes back |
+| `shops.server.ts` | `/supermarkt` — the Overpass request for shops along the road ahead, and its message |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |
 | `manage.ts` / `manage.server.ts` | the `/manage`, `/replace` and Live-Photo pickers; `manage.ts` is pure because callback payloads have a hard 64-byte limit |
@@ -100,6 +101,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   wherever the traveller is. Read the header before changing what the target counts — the
   leg back onto the plan is deliberately *not* counted against it, and the position is
   deliberately the file's first point.
+- `shops.ts` — the pure half of `/supermarkt`: sampling the road ahead into a corridor,
+  building the Overpass query, and measuring every hit back against the route for the two
+  numbers that decide a stop — how far along, and how far off. Reuses `buildPlanIndex` from
+  `plan-anchor.ts` rather than projecting onto a line a third time. The sample spacing is the
+  search radius on purpose; the header says why.
 - `day-stretches.ts` — one answer to "what was pedalled, and where did it stop", shared by
   the page, the share card and the archive. Don't re-derive it a fourth time.
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the
@@ -215,4 +221,4 @@ Messages are **edited in place** rather than re-sent — that is the established
 `.env.example` is the complete list with per-var commentary. Required: `SUPABASE_URL`,
 `SUPABASE_SERVICE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
 `TELEGRAM_OWNER_ID`, `CRON_SECRET`, `APP_ORIGIN`. Optional: `LIVE_TRACKING`,
-`RESEND_API_KEY`, `RESEND_INBOUND_SECRET`, `MAPTILER_KEY`, `MAPTILER_STYLE`.
+`RESEND_API_KEY`, `RESEND_INBOUND_SECRET`, `MAPTILER_KEY`, `MAPTILER_STYLE`, `OVERPASS_URL`.

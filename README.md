@@ -61,6 +61,17 @@ notes, stats and weather.
   route is extra rather than counted against the 130, because the kilometres you did not
   choose should not shorten the day, and it is reported so a stale position that lands twenty
   kilometres out is visible rather than silent.
+- `/supermarkt` (or `/supermarket`) lists **the shops the route passes** — supermarkets and
+  corner shops within 300 m of the planned line over the next 50 km, in the order you reach
+  them, each with how far along the ride it is, how far off the route it sits, and what
+  OpenStreetMap knows of its opening hours. `/supermarkt 25` looks a shorter way ahead, the
+  buttons under the list look further, and the 🛒 button under a `/route` file searches from
+  the position that file was cut from — which is how a location you sent stays usable, since
+  it is never stored. If nothing at all sits within 300 m the search widens once, to 1.5 km,
+  and says that it did: "nothing near the route" and "nothing out there" are different days.
+  Data is OpenStreetMap through [Overpass](https://overpass-api.de) — no key, no account,
+  and the corridor query is native to it, where a places API would only answer for circles
+  around a point. Hours are quoted as the map has them rather than interpreted.
 - A Garmin LiveTrack link shows a "Live now" banner for 24 h, with the ride so far drawn on
   the map — including on day one, before any track has been uploaded. Paste it into the chat,
   or let Garmin email it: add the inbound address as a LiveTrack recipient and starting a ride
@@ -271,6 +282,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
 | `/archive` | download the trip as a self-contained bundle |
 | `/route`, `/route 150` | cut the next 130 km (or 150) of plan from where you are and send it as a GPX |
+| `/supermarkt`, `/supermarkt 25` | shops on the next 50 km (or 25) of route, nearest first |
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
 | `/refreshweather` | fill in weather and wind for older days, from the historical archive — including days with no route, from where their photos were taken |

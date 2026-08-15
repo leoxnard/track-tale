@@ -70,6 +70,10 @@ ${LIVE_HELP}*Plan*
   starting at your position so it leads back to the route. Buttons under it
   change the length; /route 150 asks for one directly; send me a location
   (📎 → Location) and you get the same file with no command at all
+/supermarkt — supermarkets and corner shops on the road ahead, in the order you
+  reach them, with how far along and how far off the route each one is.
+  /supermarkt 25 looks 25 km ahead; the 🛒 button under a /route file does the
+  same from the position that file was cut from
 /refreshplan — re-sync plan links after editing in Komoot
 /refreshweather — fill in weather for older days
 /refreshphotos — put photos on the map that arrived before their track

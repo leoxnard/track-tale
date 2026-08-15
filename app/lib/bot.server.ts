@@ -86,6 +86,8 @@ import {
 import { helpText, LIVE_OFF_NOTICE } from "./bot-help";
 import { cutForTrip, lastKnownPosition, loadPlan, type Position } from "./bot-route.server";
 import { DEFAULT_TARGET_KM } from "./route-cut";
+import { shopsAhead, shopsKeyboard, shopsMessage } from "./shops.server";
+import { DEFAULT_AHEAD_KM } from "./shops";
 import {
   backfillPhotoLocations,
   savePhoto,
@@ -607,6 +609,15 @@ export function createBot(): Bot {
       // document, so there is nothing to edit in place.
       if (action.type === "cut") {
         await sendCutRoute(
+          ctx,
+          trip,
+          { lat: action.lat, lng: action.lng, source: "the position of the last cut" },
+          action.km,
+        );
+        return;
+      }
+      if (action.type === "shops") {
+        await sendShopsAhead(
           ctx,
           trip,
           { lat: action.lat, lng: action.lng, source: "the position of the last cut" },
@@ -1219,6 +1230,41 @@ export function createBot(): Bot {
   });
 
   /**
+   * `/supermarkt` — what there is to buy on the road ahead.
+   *
+   * A `hears` rather than a `command` so the capitalisation German gives a noun
+   * does not decide whether the bot answers: `/Supermarkt` is what a phone
+   * keyboard offers, and grammy's command matching is case-sensitive. Both
+   * spellings work, and so does a distance after either.
+   */
+  bot.hears(/^\/(supermarkt|supermarket)(?:@\w+)?(?:\s+(.*))?$/i, async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const typed = ((ctx.match as RegExpMatchArray)[2] ?? "").trim();
+    const asked = Number(typed.replace(/\s*km\s*$/i, "").replace(",", "."));
+    if (typed && !Number.isFinite(asked)) {
+      await ctx.reply(
+        `"${typed}" is not a distance. /supermarkt 25 looks at the next 25 km — ` +
+          `${DEFAULT_AHEAD_KM} km without one.`,
+      );
+      return;
+    }
+
+    const pinned = ctx.message?.reply_to_message?.location;
+    const position = pinned
+      ? {
+          lat: pinned.latitude,
+          lng: pinned.longitude,
+          source: "the location you replied to",
+          at: new Date(),
+        }
+      : await lastKnownPosition(trip.id);
+
+    await sendShopsAhead(ctx, trip, position, typed ? asked : DEFAULT_AHEAD_KM);
+  });
+
+  /**
    * A location pinned in the chat cuts the route from it, with no command at
    * all — which is the fastest version of the morning: hold the paperclip, send
    * where you are, get the day's file back.
@@ -1624,4 +1670,54 @@ async function sendCutRoute(
     parse_mode: "Markdown",
     reply_markup: result.keyboard,
   });
+}
+
+/**
+ * Ask OpenStreetMap what is on the road ahead, and put the list in the chat.
+ *
+ * The "looking" message is not decoration: Overpass regularly takes several
+ * seconds, and a command that produces nothing at all for that long is one you
+ * send again. It is also the only thing in the chat if the search then fails,
+ * which is why the failure edits nothing and simply says so.
+ */
+async function sendShopsAhead(
+  ctx: Context,
+  trip: DbTrip,
+  position: Position | null,
+  aheadKm: number,
+) {
+  if (!position) {
+    await ctx.reply(
+      "I don't know where you are yet — no track and no located photo in the last few days. " +
+        "Send me a location (📎 → Location), then /supermarkt.",
+    );
+    return;
+  }
+
+  await ctx.reply(`🔎 Looking along the next ${Math.round(aheadKm)} km…`).catch(() => {});
+  try {
+    const found = await shopsAhead(trip, position, aheadKm);
+    const text = shopsMessage(found, position, aheadKm);
+    const options = {
+      reply_markup: shopsKeyboard(position, aheadKm),
+      // Eight shops means eight map links, and Telegram would put a preview
+      // card for the first one under the list.
+      link_preview_options: { is_disabled: true },
+    };
+    try {
+      await ctx.reply(text, { parse_mode: "Markdown", ...options });
+    } catch {
+      // Shop names come off OpenStreetMap and can hold anything — a bracket, a
+      // stray asterisk in "Edeka Müller*" — and Telegram rejects the whole
+      // message over one unbalanced entity. The list is worth more than its
+      // formatting, so the second attempt drops the markup and keeps the links
+      // as bare text.
+      await ctx.reply(text.replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 $2").replace(/[*_`]/g, ""), options);
+    }
+  } catch (err) {
+    await ctx.reply(
+      `⚠️ OpenStreetMap didn't answer: ${err instanceof Error ? err.message : "unknown error"}. ` +
+        `Nothing is wrong with the trip — try again in a minute.`,
+    );
+  }
 }

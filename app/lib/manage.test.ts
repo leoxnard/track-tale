@@ -55,6 +55,8 @@ describe("manage callback payloads", () => {
     { type: "cut", km: 130, lat: 47.3769, lng: 8.5417 },
     { type: "cut", km: 5, lat: -33.86785, lng: 151.20732 },
     { type: "cut", km: 400, lat: -54.80191, lng: -68.30295 },
+    { type: "shops", km: 50, lat: 47.3769, lng: 8.5417 },
+    { type: "shops", km: 200, lat: -54.80191, lng: -68.30295 },
     // The 64-byte test below is the point of these: a waiting video and a photo
     // both have to fit in one payload, which two full uuids would not.
     { type: "motionHome", code: "a1b2c3d4" },
@@ -108,6 +110,7 @@ describe("manage callback payloads", () => {
     expect(parseAction("mg:rc:130:91.00000:8.54170")).toBeNull();
     expect(parseAction("mg:rc:130:47.37690:181.00000")).toBeNull();
     expect(parseAction("mg:rc:130:47.37690")).toBeNull();
+    expect(parseAction("mg:sh:50:91.00000:8.54170")).toBeNull();
     // The same holes on the /replace side.
     expect(parseAction("mg:rd:3:-1")).toBeNull();
     expect(parseAction("mg:rp:3:")).toBeNull();

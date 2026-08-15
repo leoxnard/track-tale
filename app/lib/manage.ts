@@ -122,6 +122,8 @@ export type ManageAction =
    * and still leaves the payload at half the 64 bytes allowed.
    */
   | { type: "cut"; km: number; lat: number; lng: number }
+  /** The same position again, asking what is on the road ahead of it. */
+  | { type: "shops"; km: number; lat: number; lng: number }
   | { type: "motionHome"; code: string }
   | { type: "motionDay"; code: string; dayNumber: number; page: number }
   | { type: "motionPick"; code: string; id: string };
@@ -212,6 +214,8 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:rx:${action.dayNumber}`;
     case "cut":
       return `${PREFIX}:rc:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
+    case "shops":
+      return `${PREFIX}:sh:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
     case "motionHome":
       return `${PREFIX}:mh:${action.code}`;
     case "motionDay":
@@ -323,7 +327,8 @@ export function parseAction(data: string): ManageAction | null {
       if (!Number.isInteger(dayNumber)) return null;
       return { type: "replaceCancel", dayNumber };
     }
-    case "rc": {
+    case "rc":
+    case "sh": {
       const km = Number(parts[2]);
       const lat = Number(parts[3]);
       const lng = Number(parts[4]);
@@ -332,7 +337,7 @@ export function parseAction(data: string): ManageAction | null {
       // place; cutting from it would silently pick the plan's nearest end.
       if (!Number.isFinite(lat) || Math.abs(lat) > 90) return null;
       if (!Number.isFinite(lng) || Math.abs(lng) > 180) return null;
-      return { type: "cut", km, lat, lng };
+      return { type: parts[1] === "rc" ? "cut" : "shops", km, lat, lng };
     }
     case "mh": {
       const code = parts[2] ?? "";
