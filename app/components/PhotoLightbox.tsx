@@ -15,6 +15,12 @@ import { useLiveMotion } from "./live-motion";
  * saving it still work; this only takes over the plain click.
  */
 
+/** How far a finger has to travel sideways before it is paging and not tapping. */
+const SWIPE_PX = 50;
+
+/** The same, upwards or downwards, for the swipe that closes the viewer. */
+const DISMISS_PX = 80;
+
 export interface LightboxPhoto {
   url: string;
   thumbUrl: string;
@@ -199,8 +205,19 @@ export function PhotoLightbox({ photos, index, onIndex, onClose, showAuthors }: 
         if (!from) return;
         const dx = e.changedTouches[0].clientX - from.x;
         const dy = e.changedTouches[0].clientY - from.y;
-        // Mostly-horizontal and far enough to be a swipe rather than a tap.
-        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
+        // Which axis the finger travelled along decides what the swipe meant:
+        // sideways pages through the photos, up or down leaves the viewer and
+        // puts the trip back on screen. Comparing the two distances rather than
+        // measuring an angle is what makes "roughly vertical" enough — nobody
+        // swipes straight, and either gesture is unambiguous well before it is
+        // precise. Both need enough travel to not be a tap, and the way out
+        // asks for a little more than paging so that a thumb drifting off a
+        // sideways swipe doesn't close the thing.
+        if (Math.abs(dx) > Math.abs(dy)) {
+          if (Math.abs(dx) > SWIPE_PX) step(dx < 0 ? 1 : -1);
+        } else if (Math.abs(dy) > DISMISS_PX) {
+          onClose();
+        }
       }}
     >
       <div className="flex shrink-0 items-center justify-between gap-4 px-4 py-3 text-sm text-white/80">
