@@ -558,6 +558,7 @@ function TripMap({
     // into.
     let windFrame = 0;
     let detachWind = () => {};
+    let detachWheel = () => {};
 
     (async () => {
       const maplibregl = (await import("maplibre-gl")).default;
@@ -581,9 +582,37 @@ function TripMap({
         bounds,
         fitBoundsOptions: { padding: 48 },
         attributionControl: { compact: true },
-        cooperativeGestures: true,
+        // Deliberately *not* `cooperativeGestures`. That setting asks for two
+        // fingers before the map moves at all, which is the safe answer for a
+        // map dropped into the middle of a long article — and the wrong one
+        // here, where the map is the thing being read and one finger is what
+        // everybody tries first. The cost is that a finger starting on the map
+        // pans it instead of scrolling the page; the map only ever covers the
+        // top half of the screen, so there is always somewhere else to push
+        // off from.
+        //
+        // The wheel is the other half of that setting, and it stays off: the
+        // map is pinned to the top of the page, so on a laptop the pointer sits
+        // over it for most of the way down the trip, and a plain scroll there
+        // has to keep scrolling the page rather than zooming the map. Zooming
+        // is the +/− buttons, a double click, or two fingers.
+        scrollZoom: false,
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+
+      // …with one exception: a pinch on a trackpad, and a held Ctrl or ⌘, both
+      // reach the page as a wheel event with `ctrlKey` set, and both mean zoom
+      // in anybody's hands. Switching the handler on in the capture phase gets
+      // it enabled before MapLibre's own listener on the canvas below sees the
+      // very same event, so the gesture works from its first notch rather than
+      // its second.
+      const container = containerRef.current;
+      const onWheel = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) map?.scrollZoom.enable();
+        else map?.scrollZoom.disable();
+      };
+      container.addEventListener("wheel", onWheel, { capture: true, passive: true });
+      detachWheel = () => container.removeEventListener("wheel", onWheel, { capture: true });
 
       // The `skin` is ours to restyle; the element around it belongs to
       // MapLibre, which positions markers by writing an inline transform onto
@@ -941,6 +970,7 @@ function TripMap({
     return () => {
       disposed = true;
       detachWind();
+      detachWheel();
       map?.remove();
       handleRef.current = null;
     };
