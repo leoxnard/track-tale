@@ -113,6 +113,15 @@ export type ManageAction =
    * two full uuids do not — eight characters is still far more than enough to
    * pick one video out of the handful a single chat can have waiting.
    */
+  /**
+   * `/route` again at a different length. The position travels in the payload
+   * rather than being looked up afresh on the tap — see `targetKeyboard` in
+   * `bot-route.server.ts` for why a button must not move its own start point.
+   *
+   * Five decimals is a metre or so, which is far finer than any of this needs
+   * and still leaves the payload at half the 64 bytes allowed.
+   */
+  | { type: "cut"; km: number; lat: number; lng: number }
   | { type: "motionHome"; code: string }
   | { type: "motionDay"; code: string; dayNumber: number; page: number }
   | { type: "motionPick"; code: string; id: string };
@@ -201,6 +210,8 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:rp:${action.dayNumber}:${action.id}`;
     case "replaceCancel":
       return `${PREFIX}:rx:${action.dayNumber}`;
+    case "cut":
+      return `${PREFIX}:rc:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
     case "motionHome":
       return `${PREFIX}:mh:${action.code}`;
     case "motionDay":
@@ -311,6 +322,17 @@ export function parseAction(data: string): ManageAction | null {
       const dayNumber = Number(parts[2]);
       if (!Number.isInteger(dayNumber)) return null;
       return { type: "replaceCancel", dayNumber };
+    }
+    case "rc": {
+      const km = Number(parts[2]);
+      const lat = Number(parts[3]);
+      const lng = Number(parts[4]);
+      if (!Number.isFinite(km) || km <= 0) return null;
+      // A coordinate outside the world is a payload that was mangled, not a
+      // place; cutting from it would silently pick the plan's nearest end.
+      if (!Number.isFinite(lat) || Math.abs(lat) > 90) return null;
+      if (!Number.isFinite(lng) || Math.abs(lng) > 180) return null;
+      return { type: "cut", km, lat, lng };
     }
     case "mh": {
       const code = parts[2] ?? "";

@@ -66,6 +66,10 @@ map pin and place in the day all stay — handy after running a filter over them
 ${LIVE_HELP}*Plan*
 • A *planned* Komoot tour link → grey plan line + progress
 • GPX with caption "plan" → same
+/route — cut the next 130 km of plan from where you are and send it as a GPX,
+  starting at your position so it leads back to the route. Buttons under it
+  change the length; /route 150 asks for one directly; send me a location
+  (📎 → Location) and you get the same file with no command at all
 /refreshplan — re-sync plan links after editing in Komoot
 /refreshweather — fill in weather for older days
 /refreshphotos — put photos on the map that arrived before their track

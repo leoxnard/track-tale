@@ -78,6 +78,7 @@ does I/O and generally does not.
 | `bot-photos.server.ts` | photo + document upload, EXIF, compression, twin detection |
 | `bot-motion.server.ts` | the video half of a Live Photo: matching it to its still by sight, or parking it until one arrives |
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
+| `bot-route.server.ts` | `/route` — where the traveller was last seen, and the cut GPX that goes back |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |
 | `manage.ts` / `manage.server.ts` | the `/manage`, `/replace` and Live-Photo pickers; `manage.ts` is pure because callback payloads have a hard 64-byte limit |
@@ -95,6 +96,10 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `transport.ts` — a leg travelled rather than ridden (train/ferry/bus). The mode lives in
   the segment's existing `sport` column, deliberately, so it needs no migration. Transit
   kilometres are drawn but **excluded** from distance, climb and the progress bar.
+- `route-cut.ts` — `/route`, the pure half: the next N kilometres of the plan, cut from
+  wherever the traveller is. Read the header before changing what the target counts — the
+  leg back onto the plan is deliberately *not* counted against it, and the position is
+  deliberately the file's first point.
 - `day-stretches.ts` — one answer to "what was pedalled, and where did it stop", shared by
   the page, the share card and the archive. Don't re-derive it a fourth time.
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the

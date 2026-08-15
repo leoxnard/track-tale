@@ -17,6 +17,7 @@ import {
   tripDayCount,
   updateTrip,
   INVITE_TTL_DAYS,
+  type DbTrip,
 } from "./db.server";
 import { findKomootUrl, parseKomootUrl, mergeKomootTours } from "./komoot";
 import { findLiveTrackUrl } from "./live-link";
@@ -83,6 +84,8 @@ import {
   type BotState,
 } from "./bot-access.server";
 import { helpText, LIVE_OFF_NOTICE } from "./bot-help";
+import { cutForTrip, lastKnownPosition, loadPlan, type Position } from "./bot-route.server";
+import { DEFAULT_TARGET_KM } from "./route-cut";
 import {
   backfillPhotoLocations,
   savePhoto,
@@ -597,6 +600,18 @@ export function createBot(): Bot {
       const trip = await getActiveTrip(chat);
       if (!trip) {
         await ctx.reply("No active trip in this chat any more — /trips lists them.");
+        return;
+      }
+
+      // The one tap whose answer is a file rather than a screen: it sends a new
+      // document, so there is nothing to edit in place.
+      if (action.type === "cut") {
+        await sendCutRoute(
+          ctx,
+          trip,
+          { lat: action.lat, lng: action.lng, source: "the position of the last cut" },
+          action.km,
+        );
         return;
       }
 
@@ -1172,6 +1187,66 @@ export function createBot(): Bot {
     );
   });
 
+  /**
+   * `/route` — the next stretch of the plan, cut and sent as a GPX.
+   *
+   * `/route` on its own is the whole morning ritual: it takes the position the
+   * trip already knows, cuts the default day out of the plan from there, and
+   * sends the file. `/route 150` asks for a different length, and the buttons
+   * under the reply ask for one without typing.
+   */
+  bot.command("route", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const typed = (ctx.match as string).trim();
+    // "150", "150km", "150 km" — the unit is the only one this deals in, so it
+    // is noise to insist on either having it or leaving it off.
+    const asked = Number(typed.replace(/\s*km\s*$/i, "").replace(",", "."));
+    if (typed && !Number.isFinite(asked)) {
+      await ctx.reply(`"${typed}" is not a distance. /route 150 — or just /route for ${DEFAULT_TARGET_KM} km.`);
+      return;
+    }
+
+    // A location replied to is a deliberate answer to "where from", and beats
+    // anything the trip could work out for itself.
+    const pinned = ctx.message?.reply_to_message?.location;
+    const position = pinned
+      ? { lat: pinned.latitude, lng: pinned.longitude, source: "the location you replied to", at: new Date() }
+      : await lastKnownPosition(trip.id);
+
+    await sendCutRoute(ctx, trip, position, typed ? asked : DEFAULT_TARGET_KM);
+  });
+
+  /**
+   * A location pinned in the chat cuts the route from it, with no command at
+   * all — which is the fastest version of the morning: hold the paperclip, send
+   * where you are, get the day's file back.
+   *
+   * A trip with no plan says nothing here. Sharing a location is a normal thing
+   * to do in a chat with other people in it, and answering it with an error
+   * about plan segments would make the bot the loudest thing in the room.
+   */
+  bot.on("message:location", async (ctx) => {
+    // Private chats only. In a group, "here's where the campsite is" is a thing
+    // people say to each other, and answering every one of them with a route
+    // file would make the bot unbearable — there, /route in reply to the pin
+    // asks for it deliberately.
+    if (ctx.state.isGroup) return;
+    const trip = await getActiveTrip(ctx.state.chat);
+    if (!trip) return;
+    const plan = await loadPlan(trip.id);
+    if (plan.length === 0) return;
+
+    const { latitude, longitude } = ctx.message.location;
+    await sendCutRoute(
+      ctx,
+      trip,
+      { lat: latitude, lng: longitude, source: "the location you sent", at: new Date() },
+      DEFAULT_TARGET_KM,
+    );
+  });
+
   bot.command("refreshplan", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
@@ -1519,4 +1594,34 @@ export function createBot(): Bot {
   });
 
   return bot;
+}
+
+/**
+ * Cut the plan and put the file in the chat.
+ *
+ * Shared by the command, a pinned location and every length button, because
+ * all three want exactly the same reply — and a button that answered in a
+ * different shape from the command would read as a different feature.
+ *
+ * Each cut is sent as its own document rather than editing the last one. A GPX
+ * already in the chat is a file that may already be on a phone or a Garmin, and
+ * replacing yesterday's 130 km with today's 150 would take it back off.
+ */
+async function sendCutRoute(
+  ctx: Context,
+  trip: DbTrip,
+  position: Position | null,
+  targetKm: number,
+) {
+  const result = await cutForTrip(trip, position, targetKm);
+  if ("error" in result) {
+    await ctx.reply(result.error);
+    return;
+  }
+
+  await ctx.replyWithDocument(new InputFile(Buffer.from(result.gpx, "utf8"), result.filename), {
+    caption: result.caption,
+    parse_mode: "Markdown",
+    reply_markup: result.keyboard,
+  });
 }

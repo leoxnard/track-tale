@@ -49,6 +49,12 @@ describe("manage callback payloads", () => {
     { type: "replaceDay", dayNumber: 12, page: 3 },
     { type: "replacePick", id: uuid, dayNumber: 4 },
     { type: "replaceCancel", dayNumber: 4 },
+    // A cut of the plan, from a position that travels in the payload. Southern
+    // and western hemispheres included: a minus sign is a byte too, and a
+    // dropped one would cut the route from the other side of the world.
+    { type: "cut", km: 130, lat: 47.3769, lng: 8.5417 },
+    { type: "cut", km: 5, lat: -33.86785, lng: 151.20732 },
+    { type: "cut", km: 400, lat: -54.80191, lng: -68.30295 },
     // The 64-byte test below is the point of these: a waiting video and a photo
     // both have to fit in one payload, which two full uuids would not.
     { type: "motionHome", code: "a1b2c3d4" },
@@ -96,6 +102,12 @@ describe("manage callback payloads", () => {
     expect(parseAction("mg:et")).toBeNull();
     expect(parseAction("mg:dx:1:")).toBeNull();
     expect(parseAction("mg:cd:2:maybe")).toBeNull();
+    // A cut with no length, a length of nothing, and coordinates off the world.
+    expect(parseAction("mg:rc::47.37690:8.54170")).toBeNull();
+    expect(parseAction("mg:rc:0:47.37690:8.54170")).toBeNull();
+    expect(parseAction("mg:rc:130:91.00000:8.54170")).toBeNull();
+    expect(parseAction("mg:rc:130:47.37690:181.00000")).toBeNull();
+    expect(parseAction("mg:rc:130:47.37690")).toBeNull();
     // The same holes on the /replace side.
     expect(parseAction("mg:rd:3:-1")).toBeNull();
     expect(parseAction("mg:rp:3:")).toBeNull();

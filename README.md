@@ -49,6 +49,18 @@ notes, stats and weather.
 - `/day` picks which day uploads go to, from a keyboard of the trip's days; a silent 3 AM
   reminder pings you if a day has no track.
 - A *planned* Komoot tour link becomes the grey plan underlay + progress %; it re-syncs daily.
+- `/route` cuts **the next stretch of that plan** out and sends it as a GPX, so the morning
+  no longer starts by importing the whole tour into gpx.studio and scrubbing a cursor along
+  it. 130 km by default, changed by a button under the file or by `/route 150`. The cut
+  begins where the bot last saw you — the end of your newest track, or your newest located
+  photo if that is more recent, and the message names which — and the file *starts at that
+  position*, so its first leg is the way back to the planned line rather than a route that
+  begins somewhere you are not. In a private chat, simply sending a location (📎 → Location)
+  cuts from there with no command at all; in a group, `/route` in reply to a pin does the
+  same, since "here's the campsite" is a thing people say to each other. The join back to the
+  route is extra rather than counted against the 130, because the kilometres you did not
+  choose should not shorten the day, and it is reported so a stale position that lands twenty
+  kilometres out is visible rather than silent.
 - A Garmin LiveTrack link shows a "Live now" banner for 24 h, with the ride so far drawn on
   the map — including on day one, before any track has been uploaded. Paste it into the chat,
   or let Garmin email it: add the inbound address as a LiveTrack recipient and starting a ride
@@ -258,6 +270,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/live` | what the live banner is showing, and why; `/live off` takes it down |
 | `/mypage`, `/newmypage` | permanent page with all trips; new link |
 | `/archive` | download the trip as a self-contained bundle |
+| `/route`, `/route 150` | cut the next 130 km (or 150) of plan from where you are and send it as a GPX |
 | `/refreshplan` | re-sync planned Komoot routes |
 | `/refreshphotos` | pin photos that arrived before their day's track |
 | `/refreshweather` | fill in weather and wind for older days, from the historical archive — including days with no route, from where their photos were taken |
