@@ -47,6 +47,7 @@ import {
   TemperatureChip,
   TemperaturePanel,
 } from "../components/DayWeather";
+import { Collapsible } from "../components/Collapsible";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
 import {
@@ -1567,11 +1568,20 @@ export function TripView({
                   </p>
                 )}
 
-                {panel === "wind" && wind && <WindRose wind={wind} color={day.color} />}
-                {panel === "temp" && riding && <TemperaturePanel riding={riding} />}
-                {panel === "rain" && riding && (
-                  <RainPanel riding={riding} weather={w} distanceM={day.distanceM} />
-                )}
+                {/* One drawer each rather than one holding whichever panel is
+                    open: swapping the contents of a single drawer would animate
+                    the height between two panels while the old one is still on
+                    screen, and tapping wind while temperature is open reads
+                    better as the one closing and the other opening. */}
+                <Collapsible open={panel === "wind" && wind !== undefined}>
+                  {wind && <WindRose wind={wind} color={day.color} />}
+                </Collapsible>
+                <Collapsible open={panel === "temp" && riding !== undefined}>
+                  {riding && <TemperaturePanel riding={riding} />}
+                </Collapsible>
+                <Collapsible open={panel === "rain" && riding !== undefined}>
+                  {riding && <RainPanel riding={riding} weather={w} distanceM={day.distanceM} />}
+                </Collapsible>
 
                 {day.pieces.some((piece) => piece.profile.length > 1) && (
                   <ElevationProfile
