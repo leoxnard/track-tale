@@ -1237,9 +1237,37 @@ export function TripView({
     };
   }, [trip.days]);
 
+  /**
+   * Scroll something into view below the pinned map and its day ribbon.
+   *
+   * `scrollIntoView` with the `scroll-mt-*` on each target got this almost
+   * right and then hid the heading anyway: the class can only guess the sticky
+   * header's height, and the ribbon's height is not a constant. A fortnight of
+   * days wraps to two rows on a phone, three on a narrow one, and every extra
+   * row ate another line of whatever was jumped to — which is the "Day 5" the
+   * tap was asking for, since it is the first thing in the block.
+   *
+   * So measure it instead. By the time anything is scrolled to, the shell is
+   * pinned at the top of the viewport, and its rendered height is exactly what
+   * has to be cleared — however many rows the ribbon happens to be using.
+   */
+  const stickyRef = useRef<HTMLDivElement>(null);
+
+  const scrollToElement = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    const header = stickyRef.current?.getBoundingClientRect().height ?? 0;
+    window.scrollTo({
+      // A little air under the ribbon as well, so the heading sits *below* the
+      // edge rather than touching it and reading as half cut off.
+      top: target.getBoundingClientRect().top + window.scrollY - header - 12,
+      behavior: "smooth",
+    });
+  };
+
   const scrollToDay = (dayNumber: number) => {
     mapHandle.current?.flyToDay(dayNumber);
-    document.getElementById(`day-${dayNumber}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollToElement(`day-${dayNumber}`);
   };
 
   return (
@@ -1299,7 +1327,7 @@ export function TripView({
       </header>
 
       {/* Map stays pinned so scrubbing a day's elevation chart is visible on it. */}
-      <div className="map-shell sticky top-0 z-10 bg-paper">
+      <div ref={stickyRef} className="map-shell sticky top-0 z-10 bg-paper">
         {/* dvh, not vh: mobile Safari resolves vh against the viewport with the
             toolbars hidden, which made the map overhang the visible area. */}
         <div className="relative h-[38dvh] min-h-[200px] w-full bg-trail/40 sm:h-[48dvh]">
@@ -1366,9 +1394,7 @@ export function TripView({
               <button
                 onClick={() => {
                   mapHandle.current?.resetView();
-                  document
-                    .getElementById("tour-profile")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  scrollToElement("tour-profile");
                 }}
                 className="flex shrink-0 items-center gap-1.5 rounded-full border border-trail px-3 py-1 text-sm font-bold text-pine hover:border-pine-soft focus-visible:outline-2 focus-visible:outline-pine"
                 title={m.trip.wholeTourHint}
