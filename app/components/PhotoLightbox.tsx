@@ -21,6 +21,17 @@ const SWIPE_PX = 50;
 /** The same, upwards or downwards, for the swipe that closes the viewer. */
 const DISMISS_PX = 80;
 
+/**
+ * The two paging arrows, which have to be circles rather than the lozenges
+ * padding alone produced: `rounded-full` on a box that is wider than it is tall
+ * rounds the ends and leaves the sides straight. A fixed square is the only way
+ * to get a circle out of it, and 2.75rem is both a comfortable thumb target and
+ * about as big as the button can be without crowding a portrait photo.
+ * Everything except the side it sits on, so the two cannot drift apart.
+ */
+const ARROW_BUTTON =
+  "absolute z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/40 text-2xl leading-none text-white hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-white";
+
 export interface LightboxPhoto {
   url: string;
   thumbUrl: string;
@@ -246,7 +257,7 @@ export function PhotoLightbox({ photos, index, onIndex, onClose, showAuthors }: 
             type="button"
             onClick={() => step(-1)}
             aria-label={m.lightbox.previous}
-            className="absolute left-1 z-10 rounded-full bg-black/40 px-3 py-4 text-2xl leading-none text-white hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-white sm:left-3"
+            className={`${ARROW_BUTTON} left-1 sm:left-3`}
           >
             ‹
           </button>
@@ -263,7 +274,7 @@ export function PhotoLightbox({ photos, index, onIndex, onClose, showAuthors }: 
             type="button"
             onClick={() => step(1)}
             aria-label={m.lightbox.next}
-            className="absolute right-1 z-10 rounded-full bg-black/40 px-3 py-4 text-2xl leading-none text-white hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-white sm:right-3"
+            className={`${ARROW_BUTTON} right-1 sm:right-3`}
           >
             ›
           </button>
