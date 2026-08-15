@@ -130,7 +130,10 @@ notes, stats and weather.
   the kilometres ridden wet against dry, the heaviest hour, and what the whole day dropped by
   comparison: a day that saw 14 mm and gave the rider 2 of them is a different day from one
   that gave them all 14. The temperature opens the same way, onto the curve it followed over
-  the riding hours, marked at its coldest and warmest. **Only one panel is ever open** — these
+  the riding hours, marked at its coldest and warmest — and the range in the line above the
+  curve is read off those same hours, not off the interpolated instants between them, so the
+  heading and the curve's own two labels always say the same thing. **Only one panel is ever
+  open** — these
   sit inside a day's block, and two at once push the next day's photographs down the screen to
   explain the last one's weather. Neither chart puts a clock on anything: the hourly stamps
   are absolute and the trip's timezone is not on the page, so they are shaped by the ride and

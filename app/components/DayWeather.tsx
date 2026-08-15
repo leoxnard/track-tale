@@ -20,6 +20,15 @@ import type { DayWeather } from "../lib/weather";
 
 const CHART_W = 260;
 const CHART_H = 46;
+/**
+ * Room above and below the plot for the two labels, which hang off the highest
+ * and lowest points and would otherwise be sliced off by the viewBox — the line
+ * touches the very top and bottom of its own box by construction.
+ */
+const CHART_TOP = 16;
+const CHART_BOTTOM = 18;
+/** And at the sides, where the first and last dots sit exactly on the edge. */
+const CHART_SIDE = 6;
 
 /** Two decimals, everywhere a number reaches the markup — see `WindRose`. */
 function round(n: number): number {
@@ -66,9 +75,13 @@ export function TemperaturePanel({ riding }: { riding: RidingWeather }) {
       </p>
       {points.length > 1 && (
         <svg
-          viewBox={`0 -6 ${CHART_W} ${CHART_H + 12}`}
+          viewBox={`${-CHART_SIDE} ${-CHART_TOP} ${CHART_W + CHART_SIDE * 2} ${
+            CHART_H + CHART_TOP + CHART_BOTTOM
+          }`}
+          // No width or height of its own: with a viewBox and a width from the
+          // page, the height follows the aspect ratio. Pinning the height as
+          // well made the browser letterbox the drawing inside it.
           className="mt-2 w-full max-w-md"
-          height={CHART_H + 12}
           role="img"
           aria-label={m.riding.tempAria(
             Math.round(riding.tempMinC),
@@ -94,7 +107,7 @@ export function TemperaturePanel({ riding }: { riding: RidingWeather }) {
                 <circle cx={x(i)} cy={y(v)} r={3} fill={fill} />
                 <text
                   x={x(i)}
-                  y={y(v) + (v === hi ? -6 : 12)}
+                  y={y(v) + (v === hi ? -7 : 13)}
                   textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}
                   fontSize={10}
                   fill="#6b7a72"

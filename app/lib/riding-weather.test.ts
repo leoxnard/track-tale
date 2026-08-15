@@ -168,6 +168,19 @@ describe("analyseRidingWeather", () => {
     expect(a.tempMeanC).toBeLessThan(a.tempMaxC);
   });
 
+  it("takes the range off the same hours the curve plots", () => {
+    // The panel draws `hours` and heads it with min/max. Reading those off the
+    // interpolated instants instead gave a heading of 9–11 over a curve whose
+    // own ends said 9 and 10.
+    const temp = Array.from({ length: 24 }, (_, i) => i);
+    const a = analyseRidingWeather([
+      { points: ride(10, 4), sites: sitesOf(day(Array(24).fill(0), temp)) },
+    ])!;
+    const drawn = a.hours.map((h) => h.tempC!);
+    expect(a.tempMinC).toBeCloseTo(Math.min(...drawn), 10);
+    expect(a.tempMaxC).toBeCloseTo(Math.max(...drawn), 10);
+  });
+
   it("leaves a hole in the hours where a day was interrupted", () => {
     // Ride 08–10, then nothing until 14, then ride to 15.
     const points = [...ride(8, 2), ...ride(14, 1)];

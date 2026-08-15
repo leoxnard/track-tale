@@ -51,7 +51,15 @@ export interface RidingWeather {
   rainMm: number;
   /** Metres ridden while it was raining. */
   wetM: number;
-  /** Coldest and warmest it was out there, °C. */
+  /**
+   * Coldest and warmest it was out there, °C — over the *hours*, the same
+   * numbers the curve in the panel plots.
+   *
+   * Taking them off the interpolated instants instead was the first version, and
+   * it invented precision the data has not got: the series is hourly, the
+   * in-between values are ours, and a headline of "9–11°C" over a curve whose
+   * own ends read 9 and 10 looks like an arithmetic bug to anyone who checks.
+   */
   tempMinC: number;
   tempMaxC: number;
   /** Time-weighted mean, which is not the middle of min and max. */
@@ -130,8 +138,6 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
   let seconds = 0;
   let sampledM = 0;
   let totalM = 0;
-  let tempMinC = Infinity;
-  let tempMaxC = -Infinity;
   let tempSum = 0;
   let tempSeconds = 0;
   let sawTemp = false;
@@ -170,8 +176,6 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
 
       const temp = tempAt(hourly, middle);
       if (temp !== null) {
-        tempMinC = Math.min(tempMinC, temp);
-        tempMaxC = Math.max(tempMaxC, temp);
         tempSum += temp * (dt / 1000);
         tempSeconds += dt / 1000;
         sawTemp = true;
@@ -194,23 +198,25 @@ export function analyseRidingWeather(rides: Ride[]): RidingWeather | null {
   }
 
   if (seconds === 0) return null;
+  const hours = [...byHour.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([at, bucket]) => ({
+      at,
+      tempC: bucket.seconds > 0 && bucket.tempSum !== 0 ? bucket.tempSum / bucket.seconds : null,
+      rainMm: bucket.rainMm,
+      rateMmH: bucket.rateMmH,
+      seconds: bucket.seconds,
+    }));
+  const hourly = hours.map((h) => h.tempC).filter((t): t is number => t !== null);
   return {
     rainMm,
     wetM,
-    tempMinC: sawTemp ? tempMinC : NaN,
-    tempMaxC: sawTemp ? tempMaxC : NaN,
+    tempMinC: sawTemp && hourly.length > 0 ? Math.min(...hourly) : NaN,
+    tempMaxC: sawTemp && hourly.length > 0 ? Math.max(...hourly) : NaN,
     tempMeanC: tempSeconds > 0 ? tempSum / tempSeconds : NaN,
     seconds,
     coverage: totalM > 0 ? sampledM / totalM : 0,
-    hours: [...byHour.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([at, bucket]) => ({
-        at,
-        tempC: bucket.seconds > 0 && bucket.tempSum !== 0 ? bucket.tempSum / bucket.seconds : null,
-        rainMm: bucket.rainMm,
-        rateMmH: bucket.rateMmH,
-        seconds: bucket.seconds,
-      })),
+    hours,
   };
 }
 
