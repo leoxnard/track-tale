@@ -228,9 +228,8 @@ notes, stats and weather.
   totals up kilometres nobody rode. The ridden tracks are **the days as the page draws
   them** — what the database holds is the imported line reduced to a drawing budget, and the
   uploaded GPX or FIT itself is never stored. The **planned route** is the exception, and it
-  is offered as its own file: it goes through the same path `/route` does, fetching the
-  original back from Komoot where the plan came from there, so what a device gets bends the
-  way the road does. The pictures come as they are stored — the untouched
+  is offered as its own file: it comes from the original kept at import, through the same
+  path `/route` takes, so what a device gets bends the way the road does. The pictures come as they are stored — the untouched
   file for anything sent as a document, a 2048 px copy for the rest, a Live Photo's motion
   beside its still — and the page says so, because the camera original never reached the bot
   in the first place. Nothing is packed until a link is tapped, and nothing is cached: a

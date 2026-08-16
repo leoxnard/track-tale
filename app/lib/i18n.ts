@@ -142,7 +142,7 @@ const en = {
      * difference in bends the moment a device tries to match it to a road.
      */
     planNote:
-      "The planned route comes at the resolution it was drawn at — fetched back from Komoot where it came from there, rather than the copy the map is drawn from.",
+      "The planned route comes as it was imported, at full resolution — not the thinned copy the map is drawn from. A plan imported before the originals were kept falls back to that copy until its next refresh.",
     tooLarge: "Too much to pack in one go — take the days one at a time instead.",
   },
   error: {
@@ -377,7 +377,7 @@ const de: Messages = {
     trackNote:
       "Die Tracks sind die Tage so, wie die Seite sie zeichnet. Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist.",
     planNote:
-      "Die geplante Route kommt in der Auflösung, in der sie gezeichnet wurde — von Komoot zurückgeholt, wo sie von dort stammt, statt aus der Kopie, aus der die Karte gezeichnet wird.",
+      "Die geplante Route kommt so, wie sie importiert wurde, in voller Auflösung — nicht als die gedünnte Kopie, aus der die Karte gezeichnet wird. Ein Plan, der vor dem Aufheben der Originale importiert wurde, fällt bis zur nächsten Aktualisierung auf diese Kopie zurück.",
     tooLarge: "Zu viel für ein Paket — lade die Tage einzeln herunter.",
   },
   error: {

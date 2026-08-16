@@ -115,14 +115,15 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
 }
 
 /**
- * The planned route, at the resolution it was drawn at.
+ * The planned route as it was imported.
  *
- * The one file here that is not simply the page's own line written out: the
- * stored plan is thinned for drawing, so the original is fetched back from
- * Komoot where there is one to fetch — the same reasoning, and the same
- * machinery, as `/route`. A plan uploaded as GPX has no original to go back to
- * and comes as stored, which since it is now thinned by shape is within about a
- * metre of the line anyway.
+ * The one file here that is not simply the page's own line written out. What
+ * the row holds is thinned for drawing; what the `plans` bucket holds is the
+ * line exactly as it came in, and that is what a reader importing this into a
+ * mapping tool wants — the same reasoning, and the same machinery, as `/route`.
+ * A plan imported before originals were kept falls back the way `/route` does:
+ * Komoot, then the thinned line, which since it is thinned by shape is within a
+ * few metres of the route anyway.
  */
 export async function buildPlanGpx(
   slug: string,
