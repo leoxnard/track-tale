@@ -226,11 +226,18 @@ grant usage on schema public to service_role;
 grant all privileges on all tables in schema public to service_role;
 alter default privileges in schema public grant all on tables to service_role;
 
--- Storage: public buckets. `photos` is read directly by the viewer page and also
--- holds the generated share cards under og/; `archives` holds /archive bundles
--- too large to send through Telegram.
+-- Storage: `photos` is read directly by the viewer page and also holds the
+-- generated share cards under og/; `archives` holds /archive bundles too large
+-- to send through Telegram. Both are public, because a browser fetches them.
 insert into storage.buckets (id, name, public)
 values ('photos', 'photos', true), ('archives', 'archives', true)
+on conflict (id) do nothing;
+
+-- `plans` holds each planned route as it was imported, at full resolution, for
+-- /route to cut a rideable file out of. Private: only the server reads it, with
+-- the service key, and unlike a photo it is never put in front of a visitor.
+insert into storage.buckets (id, name, public)
+values ('plans', 'plans', false)
 on conflict (id) do nothing;
 
 -- Columns added after the first release. Safe to re-run; new environments get
@@ -242,6 +249,10 @@ alter table trips add column if not exists og_updated_at timestamptz;
 alter table trips add column if not exists archive_path text;
 alter table trips add column if not exists archived_at timestamptz;
 alter table invites add column if not exists expires_at timestamptz;
+-- Where the untouched imported route lives in the `plans` bucket. The geojson
+-- column beside it is a thinned copy sized for drawing the whole tour on a
+-- page; this is the line itself, which is what a navigation device needs.
+alter table plan_segments add column if not exists source_path text;
 -- Photos sent as files keep their EXIF, so we can record the real capture time
 -- and tell an exact fix apart from one inferred off the track.
 alter table media add column if not exists taken_at timestamptz;

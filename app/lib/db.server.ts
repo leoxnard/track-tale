@@ -245,6 +245,7 @@ async function removeStoragePrefix(bucket: string, prefix: string): Promise<void
 export async function deleteTrip(trip: DbTrip): Promise<void> {
   await removeStoragePrefix("photos", trip.id);
   await removeStoragePrefix("archives", trip.id);
+  await removeStoragePrefix("plans", trip.id);
   if (trip.og_path) await supabase().storage.from("photos").remove([trip.og_path]);
 
   const { error } = await supabase().from("trips").delete().eq("id", trip.id);

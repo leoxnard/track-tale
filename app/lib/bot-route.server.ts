@@ -12,6 +12,7 @@ import {
 } from "./track";
 import { buildPlanIndex } from "./plan-anchor";
 import { fetchKomootTour, parseKomootUrl } from "./komoot";
+import { loadPlanOriginal } from "./plan-source.server";
 import { toGpx } from "./gpx-export";
 import {
   cutPlan,
@@ -113,19 +114,22 @@ interface PlanPiece {
   points: TrackPoint[];
   /** The Komoot tour this piece was imported from, where there was one. */
   sourceUrl: string | null;
+  /** The untouched imported line in storage, where one was kept. */
+  sourcePath: string | null;
 }
 
 /** The trip's plan as stored, one entry per imported segment, in order. */
 async function loadPlanPieces(tripId: string): Promise<PlanPiece[]> {
   const { data: rows } = await supabase()
     .from("plan_segments")
-    .select("geojson, source_url")
+    .select("geojson, source_url, source_path")
     .eq("trip_id", tripId)
     .order("sort_order");
 
   return (rows ?? []).map((row) => ({
     points: fromGeoJson(row.geojson as TrackGeoJson),
     sourceUrl: (row.source_url as string | null) ?? null,
+    sourcePath: (row.source_path as string | null) ?? null,
   }));
 }
 
@@ -145,9 +149,11 @@ const SOURCE_FETCH_TIMEOUT_MS = 7_000;
 
 export interface PlanForCut {
   points: TrackPoint[];
-  /** Segments the cut crosses that were re-fetched at full resolution. */
+  /** Segments the cut crosses that came from the kept original. */
+  fromStore: number;
+  /** Segments the cut crosses that had to be re-fetched from Komoot. */
   fromSource: number;
-  /** Segments that had an original to fetch, where the fetch failed. */
+  /** Segments whose original could not be had, and were cut from the thinned line. */
   degraded: number;
 }
 
@@ -163,16 +169,22 @@ export interface PlanForCut {
  * off-grid, which is precisely what cutting the tour by hand in gpx.studio
  * never did, because that worked from the original export.
  *
- * So the original is fetched back — but only for the segments the day actually
- * crosses, worked out first from the stored copy, which is accurate enough to
- * answer *which* segment while being wrong about its corners. A day is normally
- * one segment, so this is normally one request.
+ * So the original is used — but only for the segments the day actually crosses,
+ * worked out first from the thinned copy, which is accurate enough to answer
+ * *which* segment while being wrong about its corners. A day is normally one
+ * segment.
  *
- * Komoot stays a preference and never a dependency: anything that fails or is
- * slow leaves that segment as stored, and the caller says so in the message.
- * A plan uploaded as GPX has no original to go back to at all — for those the
- * stored line is the best there is, which is the other half of why it is now
- * thinned by shape rather than by counting.
+ * Three places that line can come from, in order:
+ *
+ * 1. The copy kept in storage at import. Exact, one read, no third party.
+ * 2. Komoot, re-fetched. For plans imported before originals were kept — the
+ *    nightly refresh fills those in, so this fades out on its own.
+ * 3. The thinned line on the row. Correct to a few metres, and what a plan
+ *    uploaded as GPX before this existed will always fall back to.
+ *
+ * Komoot never became a dependency and now is barely a fallback: anything that
+ * fails or is slow drops to the next option down, and the caller is told when
+ * the answer came from the thinned line so the file can be explained.
  */
 export async function planForCut(
   tripId: string,
@@ -180,21 +192,31 @@ export async function planForCut(
   targetM: number,
 ): Promise<PlanForCut> {
   const pieces = await loadPlanPieces(tripId);
-  if (pieces.length === 0) return { points: [], fromSource: 0, degraded: 0 };
+  if (pieces.length === 0) return { points: [], fromStore: 0, fromSource: 0, degraded: 0 };
 
   const spanned = piecesSpannedBy(pieces, from, targetM);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_FETCH_TIMEOUT_MS);
 
+  let fromStore = 0;
   let fromSource = 0;
   let degraded = 0;
   try {
     const fetched = await Promise.all(
       pieces.map(async (piece, i) => {
-        const ref = spanned.has(i) ? parseKomootUrl(piece.sourceUrl ?? "") : null;
+        if (!spanned.has(i)) return null;
+
+        const kept = await loadPlanOriginal(piece.sourcePath);
+        if (kept) return { points: kept, kept: true };
+
+        const ref = parseKomootUrl(piece.sourceUrl ?? "");
+        // Nothing kept and nothing to fetch: an old GPX plan, whose thinned
+        // line is the only line there has ever been. Not a degraded answer —
+        // there is no better one to have been denied.
         if (!ref) return null;
         try {
-          return await fetchKomootTour(ref, controller.signal);
+          const tour = await fetchKomootTour(ref, controller.signal);
+          return { points: tour.points, kept: false };
         } catch {
           return "failed" as const;
         }
@@ -214,13 +236,14 @@ export async function planForCut(
         degraded++;
         append(pieces[i].points);
       } else if (result) {
-        fromSource++;
+        if (result.kept) fromStore++;
+        else fromSource++;
         append(result.points);
       } else {
         append(pieces[i].points);
       }
     });
-    return { points, fromSource, degraded };
+    return { points, fromStore, fromSource, degraded };
   } finally {
     clearTimeout(timer);
   }
@@ -387,7 +410,7 @@ export async function cutForTrip(
   const km = clampTargetKm(targetKm);
   const plan = position
     ? await planForCut(trip.id, position, km * 1000)
-    : { points: await loadPlan(trip.id), fromSource: 0, degraded: 0 };
+    : { points: await loadPlan(trip.id), fromStore: 0, fromSource: 0, degraded: 0 };
   if (plan.points.length === 0) {
     return {
       error:

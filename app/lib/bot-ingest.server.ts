@@ -3,6 +3,7 @@ import { supabase } from "./supabase.server";
 import type { DbTrip } from "./db.server";
 import { fetchKomootTour, parseKomootUrl } from "./komoot";
 import { decimate, planPointBudget, thinPlan, toGeoJson, type NormalizedTrack } from "./track";
+import { removePlanOriginal, storePlanOriginal } from "./plan-source.server";
 import { cacheDayWeather } from "./day-weather.server";
 import { renderOgCard } from "./og.server";
 import { escapeErr, escapeMd } from "./telegram-md";
@@ -87,7 +88,17 @@ export async function saveTrackSegment(
 
 export async function savePlanSegment(ctx: Context, trip: DbTrip, track: NormalizedTrack, sourceUrl?: string) {
   if (sourceUrl) {
-    // Re-sending the same planned tour replaces it instead of duplicating.
+    // Re-sending the same planned tour replaces it instead of duplicating — and
+    // takes the original it had kept with it, or the new row's own original
+    // would be written beside a file nothing points at any more.
+    const { data: replaced } = await supabase()
+      .from("plan_segments")
+      .select("source_path")
+      .eq("trip_id", trip.id)
+      .eq("source_url", sourceUrl);
+    for (const row of replaced ?? []) {
+      await removePlanOriginal((row.source_path as string | null) ?? null);
+    }
     await supabase().from("plan_segments").delete().eq("trip_id", trip.id).eq("source_url", sourceUrl);
   }
   const { count } = await supabase()
@@ -95,18 +106,29 @@ export async function savePlanSegment(ctx: Context, trip: DbTrip, track: Normali
     .select("*", { count: "exact", head: true })
     .eq("trip_id", trip.id);
 
-  const { error } = await supabase().from("plan_segments").insert({
-    trip_id: trip.id,
-    source_url: sourceUrl ?? null,
-    name: track.name ?? null,
-    // `thinPlan`, not `decimate`: this line is what /route cuts a rideable GPX
-    // out of, and a stride would cut the corners off every bend on the way.
-    geojson: toGeoJson(thinPlan(track.points, planPointBudget(track.stats.distanceM))),
-    distance_m: track.stats.distanceM,
-    elevation_up: track.stats.elevationUp,
-    sort_order: count ?? 0,
-  });
+  const { data: inserted, error } = await supabase()
+    .from("plan_segments")
+    .insert({
+      trip_id: trip.id,
+      source_url: sourceUrl ?? null,
+      name: track.name ?? null,
+      // `thinPlan`, not `decimate`: this line is what /route cuts a rideable GPX
+      // out of, and a stride would cut the corners off every bend on the way.
+      geojson: toGeoJson(thinPlan(track.points, planPointBudget(track.stats.distanceM))),
+      distance_m: track.stats.distanceM,
+      elevation_up: track.stats.elevationUp,
+      sort_order: count ?? 0,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+
+  // The row carries the thinned line for drawing; the untouched one goes to
+  // storage, because that is what /route has to cut a rideable file out of.
+  const path = await storePlanOriginal(trip.id, inserted.id, track.points);
+  if (path) {
+    await supabase().from("plan_segments").update({ source_path: path }).eq("id", inserted.id);
+  }
   await ctx
     .reply(
       `🗺️ Plan segment saved${track.name ? ` — ${track.name}` : ""} (${km(track.stats.distanceM)} km).` +
@@ -172,7 +194,7 @@ export async function saveNote(ctx: Context, text: string) {
 export async function refreshPlan(tripId: string): Promise<number> {
   const { data: plans } = await supabase()
     .from("plan_segments")
-    .select("id, source_url")
+    .select("id, source_url, source_path")
     .eq("trip_id", tripId)
     .not("source_url", "is", null);
 
@@ -182,6 +204,9 @@ export async function refreshPlan(tripId: string): Promise<number> {
     if (!ref) continue;
     try {
       const tour = await fetchKomootTour(ref);
+      // The nightly refresh is also how a plan imported before originals were
+      // kept comes to have one, without anybody re-sending anything.
+      const path = await storePlanOriginal(tripId, plan.id as string, tour.points);
       await supabase()
         .from("plan_segments")
         .update({
@@ -189,6 +214,7 @@ export async function refreshPlan(tripId: string): Promise<number> {
           geojson: toGeoJson(thinPlan(tour.points, planPointBudget(tour.stats.distanceM))),
           distance_m: tour.stats.distanceM,
           elevation_up: tour.stats.elevationUp,
+          ...(path ? { source_path: path } : {}),
         })
         .eq("id", plan.id);
       updated++;

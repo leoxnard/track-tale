@@ -80,6 +80,7 @@ does I/O and generally does not.
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-route.server.ts` | `/route` — where the traveller was last seen, and the cut GPX that goes back |
 | `shops.server.ts` | `/supermarkt` — the Overpass request for shops along the road ahead, and its message |
+| `plan-source.server.ts` | keeping each planned route as imported, at full resolution, for `/route` to cut from |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |
 | `manage.ts` / `manage.server.ts` | the `/manage`, `/replace` and Live-Photo pickers; `manage.ts` is pure because callback payloads have a hard 64-byte limit |
@@ -211,9 +212,11 @@ Messages are **edited in place** rather than re-sent — that is the established
 - **Live tracking is off by default** (`LIVE_TRACKING=0`) because the page fetched Garmin on
   every render. The code, columns and translations all remain — every entrance is shut, not
   removed. Keep it that way when touching that path.
-- **The stored plan is a thinned copy, and `/route` fetches the original back.** Anything
+- **The stored plan is a thinned copy; the original lives in the `plans` bucket.** Anything
   that cuts a file for a device rather than drawing a line on a page must go through
-  `planForCut`, not `loadPlan` — and must survive Komoot not answering.
+  `planForCut`, not `loadPlan`. It reads the kept original first, falls back to re-fetching
+  from Komoot, then to the thinned line — and must survive all three being unavailable.
+  Deleting a plan segment or a trip has to take the stored original with it.
 - **Komoot ingestion uses an unofficial internal API.** It can break at any time; GPX upload
   is the always-works fallback, by design. Don't make Komoot a hard dependency of anything.
 - **Callback payloads are capped at 64 bytes** by Telegram — that constraint is why
@@ -232,3 +235,5 @@ Messages are **edited in place** rather than re-sent — that is the established
 `SUPABASE_SERVICE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
 `TELEGRAM_OWNER_ID`, `CRON_SECRET`, `APP_ORIGIN`. Optional: `LIVE_TRACKING`,
 `RESEND_API_KEY`, `RESEND_INBOUND_SECRET`, `MAPTILER_KEY`, `MAPTILER_STYLE`, `OVERPASS_URL`.
+Storage buckets: `photos` and `archives` are public; `plans` is private and holds the
+untouched planned routes.
