@@ -270,14 +270,20 @@ function clampUnit(n: number): number {
 /**
  * The tolerances tried when thinning a plan to fit its budget, in metres.
  *
- * It starts at a metre because that is already below what a GPS fix or a
- * drawn route is worth arguing about, and stops at eight because a plan whose
- * line has been moved further than that is one a routing engine may no longer
- * recognise as being on the road — which is exactly the failure this exists to
- * avoid. Past the last of them the every-nth fallback takes over, and only a
- * plan of several thousand kilometres in one segment ever gets that far.
+ * It starts at a metre, already below what a GPS fix or a drawn route is worth
+ * arguing about, and climbs slowly through the range where a line is still
+ * plainly on its road — a carriageway is about six metres wide, and importers
+ * match to a way with tens of metres of slack.
+ *
+ * It runs further than it should ever need to on purpose. A budget of ten
+ * points per kilometre is comfortable at three metres for an alpine route with
+ * switchbacks in it — measured, not guessed — but "comfortable" is not "always",
+ * and what used to happen past the end of this ladder was a fall back to
+ * keeping every nth point. That is the silent cliff this whole exercise exists
+ * to remove: it swaps a line three metres off its road for one a hundred metres
+ * off it, in the one case nobody would think to check.
  */
-const PLAN_TOLERANCES_M = [1, 2, 3, 5, 8];
+const PLAN_TOLERANCES_M = [1, 2, 3, 5, 8, 12, 20];
 
 /**
  * Thin a planned route to its budget while keeping its shape.
@@ -296,13 +302,19 @@ const PLAN_TOLERANCES_M = [1, 2, 3, 5, 8];
  */
 export function thinPlan(points: TrackPoint[], maxPoints: number): TrackPoint[] {
   if (points.length <= maxPoints) return points;
+
+  let thinned = points;
   for (const tolerance of PLAN_TOLERANCES_M) {
-    const thinned = simplify(points, tolerance);
+    thinned = simplify(points, tolerance);
     if (thinned.length <= maxPoints) return thinned;
   }
-  // Nothing left but to drop points on count. Simplifying first still helps:
-  // the stride then falls on a line whose redundant points are already gone.
-  return decimate(simplify(points, PLAN_TOLERANCES_M[PLAN_TOLERANCES_M.length - 1]), maxPoints);
+
+  // Past the widest tolerance the budget loses, and deliberately: what comes
+  // back is still within twenty metres of the original everywhere, where a
+  // stride to fit the count would put arbitrary chords across the bends. The
+  // budget protects a page render; the shape is what a route file means. No
+  // route this side of a coastline traced by hand ever gets here.
+  return thinned;
 }
 
 export function planPointBudget(distanceM: number): number {

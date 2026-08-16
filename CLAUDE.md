@@ -101,7 +101,9 @@ Messages are **edited in place** rather than re-sent — that is the established
   is thinned is load-bearing: `decimate` keeps every nth point, which cuts the corner off any
   bend whose apex falls between two kept indices, and the resulting line is what `/route`
   hands to a device. Plans go through `thinPlan` (Douglas-Peucker, bounded shape error);
-  rides still use `decimate`, where the stride is only ever drawn.
+  rides still use `decimate`, where the stride is only ever drawn. `thinPlan` will exceed the
+  point budget rather than fall back to a stride — the budget protects a page render, the
+  shape is what a route file means.
 - `route-cut.ts` — `/route`, the pure half: the next N kilometres of the plan, cut from
   wherever the traveller is. Read the header before changing what the target counts — the
   leg back onto the plan is deliberately *not* counted against it, and the position is

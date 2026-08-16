@@ -368,6 +368,29 @@ describe("thinPlan", () => {
     expect(inStraightHalf).toBeLessThan(thinned.length / 4);
   });
 
+  it("keeps the shape rather than the budget when it cannot have both", () => {
+    // A line with a bend on every point: no tolerance thins it much, so the
+    // budget has to give. What must never happen is the old fallback to a
+    // stride, which meets the budget by cutting the corners off instead.
+    const zigzag: TrackPoint[] = Array.from({ length: 4000 }, (_, i) => ({
+      lat: 50 + (i % 2) * 0.0009,
+      lng: 8 + i * 0.0009,
+    }));
+    const thinned = thinPlan(zigzag, 100);
+
+    expect(thinned.length).toBeGreaterThan(100);
+    // Still the zigzag: every kept point is one of the original's own, and the
+    // line never wanders far from it.
+    for (const point of thinned) expect(zigzag).toContain(point);
+    for (let i = 0; i < zigzag.length; i += 7) {
+      let nearest = Infinity;
+      for (let j = 1; j < thinned.length; j++) {
+        nearest = Math.min(nearest, distanceToSegmentM(zigzag[i], thinned[j - 1], thinned[j]));
+      }
+      expect(nearest).toBeLessThanOrEqual(21);
+    }
+  });
+
   it("hands back a plan already inside its budget untouched", () => {
     expect(thinPlan(windy.slice(0, 100), 500)).toHaveLength(100);
   });
