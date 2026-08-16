@@ -21,13 +21,16 @@
  * is the ride with the shopping trips and wrong turnings taken out of it.
  */
 export interface DownloadRequest {
-  kind: "gpx" | "photos" | "plan";
+  kind: "gpx" | "photos" | "plan" | "packing";
   /** A day number, or null for the whole trip. */
   day: number | null;
 }
 
 /** The name that goes in the URL. Inverse of `parseDownloadFile`. */
 export function downloadFileName(req: DownloadRequest): string {
+  // The packing list is the trip's and never a day's, so there is no stem to
+  // build its name from.
+  if (req.kind === "packing") return "packing.csv";
   const stem = req.day === null ? "trip" : `day-${req.day}`;
   if (req.kind === "plan") return req.day === null ? "plan.gpx" : `${stem}-plan.gpx`;
   return req.kind === "gpx" ? `${stem}.gpx` : `${stem === "trip" ? "photos" : `${stem}-photos`}.zip`;
@@ -42,6 +45,7 @@ export function downloadFileName(req: DownloadRequest): string {
 export function parseDownloadFile(file: string): DownloadRequest | null {
   if (file === "trip.gpx") return { kind: "gpx", day: null };
   if (file === "plan.gpx") return { kind: "plan", day: null };
+  if (file === "packing.csv") return { kind: "packing", day: null };
   if (file === "photos.zip") return { kind: "photos", day: null };
 
   const gpx = /^day-(\d{1,4})\.gpx$/.exec(file);
@@ -78,6 +82,7 @@ export function slugifyName(name: string): string {
 /** What the browser saves it as: the trip, then which part of it. */
 export function attachmentName(tripName: string, req: DownloadRequest): string {
   const base = slugifyName(tripName);
+  if (req.kind === "packing") return `${base}-packing.csv`;
   const part = req.day === null ? "" : `-day-${req.day}`;
   if (req.kind === "plan") return `${base}${part}-plan.gpx`;
   return req.kind === "gpx" ? `${base}${part}.gpx` : `${base}${part}-photos.zip`;

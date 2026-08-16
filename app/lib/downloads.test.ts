@@ -14,6 +14,7 @@ const REQUESTS: DownloadRequest[] = [
   { kind: "photos", day: null },
   { kind: "photos", day: 7 },
   { kind: "plan", day: 7 },
+  { kind: "packing", day: null },
 ];
 
 describe("download file names", () => {
@@ -25,6 +26,7 @@ describe("download file names", () => {
       "photos.zip",
       "day-7-photos.zip",
       "day-7-plan.gpx",
+      "packing.csv",
     ]);
   });
 
@@ -43,6 +45,8 @@ describe("download file names", () => {
       "day-7-photos.tar",
       "day-7-plans.gpx",
       "plan-7.gpx",
+      "day-7-packing.csv",
+      "packing.CSV",
       "../secret.gpx",
       "day-7.gpx/../trip.gpx",
       "",
@@ -64,6 +68,12 @@ describe("attachmentName", () => {
     expect(attachmentName("Rhône 2026", { kind: "plan", day: null })).toBe("rhone-2026-plan.gpx");
     expect(attachmentName("Rhône 2026", { kind: "plan", day: 3 })).toBe(
       "rhone-2026-day-3-plan.gpx",
+    );
+  });
+
+  it("names the packing list after the trip it was packed for", () => {
+    expect(attachmentName("Rhône 2026", { kind: "packing", day: null })).toBe(
+      "rhone-2026-packing.csv",
     );
   });
 

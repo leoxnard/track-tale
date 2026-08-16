@@ -45,7 +45,20 @@ const DURATION_MS = 140;
 const HIDDEN = { opacity: "0", transform: "translateY(-4px) scale(0.96)" };
 const SHOWN = { opacity: "1", transform: "translateY(0) scale(1)" };
 
-export function TripMenu({ slug, className = "" }: { slug: string; className?: string }) {
+export function TripMenu({
+  slug,
+  hasPacking = false,
+  className = "",
+}: {
+  slug: string;
+  /**
+   * Whether this trip has a packing list at all. A menu entry leading to an
+   * empty page is a worse answer than no entry: the family has no way to add
+   * one, so the emptiness is never theirs to fix.
+   */
+  hasPacking?: boolean;
+  className?: string;
+}) {
   const m = useMessages();
   const [open, setOpen] = useState(false);
   // Whether the panel is in the document, which lags `open` by the length of
@@ -56,6 +69,7 @@ export function TripMenu({ slug, className = "" }: { slug: string; className?: s
   const unmount = useRef<number | null>(null);
 
   const items: TripMenuItem[] = [{ to: `/t/${slug}/downloads`, label: m.menu.downloads }];
+  if (hasPacking) items.push({ to: `/t/${slug}/packing`, label: m.menu.packing });
 
   useLayoutEffect(() => {
     if (unmount.current !== null) {

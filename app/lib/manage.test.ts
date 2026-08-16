@@ -59,6 +59,10 @@ describe("manage callback payloads", () => {
     { type: "shops", km: 200, lat: -54.80191, lng: -68.30295 },
     // The 64-byte test below is the point of these: a waiting video and a photo
     // both have to fit in one payload, which two full uuids would not.
+    { type: "packHome", page: 0 },
+    { type: "packHome", page: 4 },
+    { type: "packAsk", id: uuid },
+    { type: "packDel", id: uuid },
     { type: "motionHome", code: "a1b2c3d4" },
     { type: "motionDay", code: "a1b2c3d4", dayNumber: 12, page: 3 },
     { type: "motionPick", code: "a1b2c3d4", id: uuid },
@@ -96,6 +100,11 @@ describe("manage callback payloads", () => {
     expect(parseAction("mg:mdy::3:0")).toBeNull();
     expect(parseAction(`mg:mpk::${uuid}`)).toBeNull();
     expect(parseAction("mg:mpk:a1b2c3d4:")).toBeNull();
+    // A packing list page that is not a page, and a bin with nothing to bin.
+    expect(parseAction("mg:pk:x")).toBeNull();
+    expect(parseAction("mg:pk:-1")).toBeNull();
+    expect(parseAction("mg:pa:")).toBeNull();
+    expect(parseAction("mg:py:")).toBeNull();
     // A picker with no mode, a day that is not one, and a two-step action
     // missing the half that says whether it was confirmed.
     expect(parseAction("mg:dp:0")).toBeNull();

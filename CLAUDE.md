@@ -45,6 +45,7 @@ app/routes/
   home.tsx                  landing page
   t.$slug.tsx               the family page — the big one (~1.3k lines)
   t.$slug.downloads.tsx     the download centre, first entry in the page's menu
+  t.$slug.packing.tsx       the packing list, second entry — trip-level, not a day's
   t.$slug.download.$file.ts the files it links to — GPX and photo zips, built per request
   traveler.$slug.tsx        a traveller's permanent page across all trips
   preview.tsx               fixture-driven family page, dev only
@@ -82,6 +83,7 @@ does I/O and generally does not.
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-route.server.ts` | `/route` — where the traveller was last seen, and the cut GPX that goes back |
 | `shops.server.ts` | `/supermarkt` — the Overpass request for shops along the road ahead, and its message |
+| `packing.ts` / `packing.server.ts` | `/pack` — the trip's packing list: reading `Title \| Model \| Link` (pure, and matched by shape rather than by position), the rows, and the CSV the download centre hands out |
 | `originals.server.ts` | keeping a line as it was imported — the plan for `/route` to cut from, a ridden day for the download centre to hand back |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |

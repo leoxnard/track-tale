@@ -5,6 +5,7 @@ export default [
   route("t/:slug", "routes/t.$slug.tsx"),
   route("t/:slug/downloads", "routes/t.$slug.downloads.tsx"),
   route("t/:slug/download/:file", "routes/t.$slug.download.$file.ts"),
+  route("t/:slug/packing", "routes/t.$slug.packing.tsx"),
   route("traveler/:slug", "routes/traveler.$slug.tsx"),
   route("lang", "routes/lang.ts"),
   route("api/telegram", "routes/api.telegram.ts"),

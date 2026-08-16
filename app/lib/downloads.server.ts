@@ -25,6 +25,8 @@ import { wholePlanAtSource } from "./bot-route.server";
 import { loadRideOriginal } from "./originals.server";
 import { cutPlanBetween } from "./route-cut";
 import { riddenStretches, type StoredSegment } from "./day-stretches";
+import { packListCsv } from "./packing";
+import { listPackItems } from "./packing.server";
 
 /**
  * How much a zip may weigh before it is refused.
@@ -59,6 +61,8 @@ export interface TripDownloads {
   daysWithTrack: number;
   /** Whether the trip has a planned route to hand out at all. */
   hasPlan: boolean;
+  /** How many things are on the packing list — zero hides its row entirely. */
+  packItems: number;
 }
 
 interface TrackDayRow {
@@ -84,7 +88,7 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
   if (!trip) return null;
 
   const db = supabase();
-  const [{ data: rows }, { count: planCount }] = await Promise.all([
+  const [{ data: rows }, { count: planCount }, { count: packCount }] = await Promise.all([
     db
       .from("days")
       .select("day_number, date, color, track_segments(distance_m, sport), media(id)")
@@ -94,6 +98,7 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
       .from("plan_segments")
       .select("*", { count: "exact", head: true })
       .eq("trip_id", trip.id),
+    db.from("pack_items").select("*", { count: "exact", head: true }).eq("trip_id", trip.id),
   ]);
 
   const days: DownloadDay[] = (rows ?? [])
@@ -123,7 +128,25 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
     totalPhotos: days.reduce((s, d) => s + d.photos, 0),
     daysWithTrack: days.filter((d) => d.hasTrack).length,
     hasPlan: (planCount ?? 0) > 0,
+    packItems: packCount ?? 0,
   };
+}
+
+/**
+ * The packing list as a file.
+ *
+ * The one download here that is not a line or a picture: three columns and a
+ * link per row, so a reader planning their own trip can take the list with them
+ * — which is the whole reason the page shows it at all.
+ */
+export async function buildPackingCsv(
+  slug: string,
+): Promise<{ trip: DbTrip; csv: string } | null> {
+  const trip = await getTripBySlug(slug);
+  if (!trip) return null;
+  const items = await listPackItems(trip.id);
+  if (items.length === 0) return null;
+  return { trip, csv: packListCsv(items) };
 }
 
 /**

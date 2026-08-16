@@ -80,6 +80,12 @@ ${LIVE_HELP}*Plan*
 /refreshphotos — put photos on the map that arrived before their track
 /compressphotos — shrink oversized photos uploaded before compression existed
 
+*Packing list*
+/pack Tent | Hilleberg Anjan 2 | https://… — one thing packed; the model and
+  the link are optional, so /pack Spare tube is a whole entry
+/pack — the whole list, with a bin beside every line. The family sees it in the
+  page's menu and can download it as a spreadsheet
+
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX
 /mergegpx "Tour Name" — merge your recent GPX uploads (last hour) into one GPX

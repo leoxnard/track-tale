@@ -243,6 +243,16 @@ notes, stats and weather.
   in the first place. Nothing is packed until a link is tapped, and nothing is cached: a
   zip is built for that one request and handed straight to the browser. A trip too large to
   pack in one go says so and points at the day-by-day files, which always work.
+- The menu's second entry, on a trip that has one, is the **packing list**: what went along,
+  each thing with an optional model and an optional link, in the order it was packed rather
+  than sorted — a list is written the way it is carried, and alphabetising it loses the
+  grouping the traveller had in their head. It is the one page here that is not about a day:
+  it exists before the first one does. Links leave with no referrer and say only which site
+  they go to, because half a product URL is tracking parameters and the row has to stay one
+  line on a phone. The whole list is downloadable as a **CSV** — three columns, the same
+  three fields — from the page itself and from the download centre, for the reader who is
+  planning the same trip. A trip with nothing packed gets no menu entry at all: the family
+  cannot add to the list, so an empty page would be an emptiness they can do nothing about.
 
 ## Setup
 
@@ -310,6 +320,8 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/endtrip` | mark finished — pages stay, uploads stop |
 | `/deletetrip` | pick a trip and confirm; erases it and its photos, irreversibly |
 | `/note …` | journal entry (plain text works too) |
+| `/pack Tent \| Hilleberg Anjan 2 \| https://…` | one thing on the packing list; model and link optional |
+| `/pack` | the whole list, with a bin beside every line |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
 | `/livephoto` | place a Live Photo's video by hand: pick the day, then the photo |
@@ -387,3 +399,17 @@ Drop the folder on any static host — including your own server — and it work
 That is the traveller's copy of the whole trip, made from Telegram. The family's is the
 **download centre** in the page's own menu, which needs no bot and no command: single days,
 single kinds of file, built on request.
+
+## Packing lists
+
+`/pack Tent | Hilleberg Anjan 2 | https://hilleberg.com/anjan` puts one thing on the trip's
+list. The model and the link are both optional and are told apart by their shape rather than
+by how many bars were typed, so `/pack Stove | https://trangia.se` needs no empty field held
+open in the middle for it and `/pack Spare tube` is a whole entry. A link has to start with
+`http://`, `https://` or `www.`; anything else is read as part of the model, which is text on
+a page and nothing more.
+
+`/pack` on its own shows the list as a screen — numbered lines, a bin beside each, paged like
+`/manage` — and the 🗑 button under each confirmation, `/undo` and a `/delete` reply all reach
+a line the usual way. The list belongs to the trip and not to a day, so it never touches
+`/day`: it is packed once, before the first day exists.

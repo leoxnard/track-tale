@@ -124,6 +124,15 @@ export type ManageAction =
   | { type: "cut"; km: number; lat: number; lng: number }
   /** The same position again, asking what is on the road ahead of it. */
   | { type: "shops"; km: number; lat: number; lng: number }
+  /**
+   * The packing list: the whole list, then the two taps it takes to remove a
+   * line from it. It hangs off the trip rather than off a day, so it needs
+   * screens of its own rather than a fifth `ItemKind` — every day-shaped
+   * payload above carries a day number this has no answer for.
+   */
+  | { type: "packHome"; page: number }
+  | { type: "packAsk"; id: string }
+  | { type: "packDel"; id: string }
   | { type: "motionHome"; code: string }
   | { type: "motionDay"; code: string; dayNumber: number; page: number }
   | { type: "motionPick"; code: string; id: string };
@@ -216,6 +225,12 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:rc:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
     case "shops":
       return `${PREFIX}:sh:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
+    case "packHome":
+      return `${PREFIX}:pk:${action.page}`;
+    case "packAsk":
+      return `${PREFIX}:pa:${action.id}`;
+    case "packDel":
+      return `${PREFIX}:py:${action.id}`;
     case "motionHome":
       return `${PREFIX}:mh:${action.code}`;
     case "motionDay":
@@ -338,6 +353,17 @@ export function parseAction(data: string): ManageAction | null {
       if (!Number.isFinite(lat) || Math.abs(lat) > 90) return null;
       if (!Number.isFinite(lng) || Math.abs(lng) > 180) return null;
       return { type: parts[1] === "rc" ? "cut" : "shops", km, lat, lng };
+    }
+    case "pk": {
+      const page = Number(parts[2]);
+      if (!Number.isInteger(page) || page < 0) return null;
+      return { type: "packHome", page };
+    }
+    case "pa":
+    case "py": {
+      const id = parts.slice(2).join(":");
+      if (id.length === 0) return null;
+      return { type: parts[1] === "pa" ? "packAsk" : "packDel", id };
     }
     case "mh": {
       const code = parts[2] ?? "";

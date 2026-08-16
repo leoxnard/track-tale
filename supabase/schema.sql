@@ -118,6 +118,22 @@ create table if not exists media (
   created_at timestamptz not null default now()
 );
 
+-- The trip's packing list: what was taken along, one row per thing. Belongs to
+-- the trip rather than to a day — it is packed once, before the first day, and
+-- the family page shows it beside the download centre rather than on a date.
+create table if not exists pack_items (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references trips(id) on delete cascade,
+  title text not null,
+  -- Both optional: "spare tube" is a complete entry, and plenty of things have
+  -- a link that says more than any model number would.
+  model text,
+  url text,
+  author_telegram_id bigint,
+  author_name text,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists notes (
   id uuid primary key default gen_random_uuid(),
   day_id uuid not null references days(id) on delete cascade,
@@ -142,7 +158,7 @@ create table if not exists bot_actions (
   chat_id bigint not null,
   message_id bigint not null,
   entity_type text not null check (
-    entity_type in ('note', 'media', 'track_segment', 'plan_segment', 'comment')
+    entity_type in ('note', 'media', 'track_segment', 'plan_segment', 'comment', 'pack_item')
   ),
   entity_id uuid not null,
   created_at timestamptz not null default now(),
@@ -199,6 +215,7 @@ create index if not exists pending_motions_chat_idx on pending_motions(chat_id);
 
 create index if not exists track_segments_day_idx on track_segments(day_id);
 create index if not exists days_trip_idx on days(trip_id);
+create index if not exists pack_items_trip_idx on pack_items(trip_id, created_at);
 create index if not exists media_day_idx on media(day_id);
 create index if not exists notes_day_idx on notes(day_id);
 create index if not exists comments_day_idx on comments(day_id);
@@ -221,6 +238,7 @@ alter table bot_actions enable row level security;
 alter table weather_cache enable row level security;
 alter table pending_replacements enable row level security;
 alter table pending_motions enable row level security;
+alter table pack_items enable row level security;
 
 grant usage on schema public to service_role;
 grant all privileges on all tables in schema public to service_role;
@@ -280,6 +298,13 @@ alter table media add column if not exists motion_ms integer;
 -- /newtrip takes an optional end date; a trip runs until /endtrip otherwise.
 alter table trips alter column end_date drop not null;
 alter table users add column if not exists traveler_slug text unique;
+-- A packing list entry is deletable like everything else the bot creates, so
+-- the record of which message made it has to be allowed to name one. Dropping
+-- and re-adding is the only way to widen a check constraint in place.
+alter table bot_actions drop constraint if exists bot_actions_entity_type_check;
+alter table bot_actions add constraint bot_actions_entity_type_check check (
+  entity_type in ('note', 'media', 'track_segment', 'plan_segment', 'comment', 'pack_item')
+);
 -- Redemption compares against expires_at, and NULL never compares true, so give
 -- codes issued before expiry existed a deadline rather than breaking them.
 update invites set expires_at = created_at + interval '7 days' where expires_at is null;

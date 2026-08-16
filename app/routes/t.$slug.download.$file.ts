@@ -1,7 +1,12 @@
 import { data } from "react-router";
 import type { Route } from "./+types/t.$slug.download.$file";
 import { attachmentName, parseDownloadFile } from "../lib/downloads";
-import { buildDownloadGpx, buildPhotoZip, buildPlanGpx } from "../lib/downloads.server";
+import {
+  buildDownloadGpx,
+  buildPackingCsv,
+  buildPhotoZip,
+  buildPlanGpx,
+} from "../lib/downloads.server";
 import { messages, resolveLocale } from "../lib/i18n";
 
 /**
@@ -21,6 +26,18 @@ const NO_STORE = "private, no-store";
 export async function loader({ params, request }: Route.LoaderArgs) {
   const req = parseDownloadFile(params.file);
   if (!req) throw data("Not found", { status: 404 });
+
+  if (req.kind === "packing") {
+    const built = await buildPackingCsv(params.slug);
+    if (!built) throw data("Not found", { status: 404 });
+    return new Response(built.csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${attachmentName(built.trip.name, req)}"`,
+        "Cache-Control": NO_STORE,
+      },
+    });
+  }
 
   if (req.kind === "gpx" || req.kind === "plan") {
     const built =

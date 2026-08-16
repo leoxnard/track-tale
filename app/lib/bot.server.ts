@@ -62,6 +62,9 @@ import {
   endTripConfirmView,
   km,
   myPageConfirmView,
+  packConfirmView,
+  packDeleteView,
+  packListView,
   pageOfDay,
   relinkConfirmView,
   tripFinishedView,
@@ -72,6 +75,7 @@ import {
 import {
   downloadTelegramFile,
   editView,
+  recordAction,
   sendView,
   TELEGRAM_DOWNLOAD_LIMIT,
   WEBHOOK_UPDATES,
@@ -84,6 +88,8 @@ import {
   type BotState,
 } from "./bot-access.server";
 import { helpText, LIVE_OFF_NOTICE } from "./bot-help";
+import { packItemLine, parsePackItem } from "./packing";
+import { addPackItem } from "./packing.server";
 import { cutForTrip, lastKnownPosition, loadPlan, type Position } from "./bot-route.server";
 import { DEFAULT_TARGET_KM } from "./route-cut";
 import { shopsAhead, shopsKeyboard, shopsMessage } from "./shops.server";
@@ -292,6 +298,49 @@ export function createBot(): Bot {
       return;
     }
     await saveNote(ctx, text);
+  });
+
+  /**
+   * The packing list: `/pack Tent | Hilleberg Anjan 2 | https://…` adds a line,
+   * `/pack` on its own shows the list with a bin beside every entry.
+   *
+   * It belongs to the trip and not to the current day — a list is packed once,
+   * before the first day exists — so unlike a note this never touches /day.
+   */
+  bot.command("pack", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+
+    const text = (ctx.match as string).trim();
+    if (!text) {
+      await sendView(ctx, await packListView(trip, 0));
+      return;
+    }
+
+    const parsed = parsePackItem(text);
+    if (!parsed.ok) {
+      await ctx.reply(
+        parsed.reason === "bad-url"
+          ? "That link isn't one I can put on the page — it needs to start with http:// or https://."
+          : "Usage: /pack Tent | Hilleberg Anjan 2 | https://…\n\n" +
+              "The model and the link are optional, but the name isn't — " +
+              "/pack Spare tube is a whole entry.",
+      );
+      return;
+    }
+
+    const { senderId, senderName } = ctx.state;
+    const id = await addPackItem(trip.id, parsed.fields, { id: senderId, name: senderName });
+    const sent = await ctx
+      .reply(`🎒 Packed: ${packItemLine(parsed.fields)}`, {
+        // The whole list is one tap away, and that is also where the bins are.
+        reply_markup: new InlineKeyboard()
+          .text("🗑 Remove this", encodeAction({ type: "packAsk", id }))
+          .text("🎒 Packing list", encodeAction({ type: "packHome", page: 0 })),
+        link_preview_options: { is_disabled: true },
+      })
+      .catch(() => undefined);
+    await recordAction(ctx, sent, "pack_item", id);
   });
 
   bot.command("delete", async (ctx) => {
@@ -736,6 +785,15 @@ export function createBot(): Bot {
           await clearReplacement(ctx.chat!.id);
           view = await replaceDayView(trip, action.dayNumber, 0);
           break;
+        case "packHome":
+          view = await packListView(trip, action.page);
+          break;
+        case "packAsk":
+          view = await packConfirmView(trip, action.id);
+          break;
+        case "packDel":
+          view = await packDeleteView(trip, action.id);
+          break;
         case "motionHome":
           view = await motionOverview(trip, action.code);
           break;
@@ -797,11 +855,16 @@ export function createBot(): Bot {
         const dayNumber = "dayNumber" in action ? action.dayNumber : 0;
         // Back to the browser the tap came from. Dropping someone out of
         // /replace into the delete screen would be a bad place to put them by
-        // accident, of all the screens to land on.
-        view =
-          action.type === "replacePick"
-            ? await replaceDayView(trip, dayNumber, 0)
-            : await dayView(trip, dayNumber, 0);
+        // accident, of all the screens to land on — and the packing list is
+        // not on a day at all, so it has nowhere else to come back to.
+        if (action.type === "packAsk" || action.type === "packDel") {
+          view = await packListView(trip, 0);
+        } else {
+          view =
+            action.type === "replacePick"
+              ? await replaceDayView(trip, dayNumber, 0)
+              : await dayView(trip, dayNumber, 0);
+        }
       }
 
       await editView(ctx, { ...view, text: notice + view.text });

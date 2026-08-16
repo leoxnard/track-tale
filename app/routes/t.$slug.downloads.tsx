@@ -84,10 +84,10 @@ function DownloadRow({
 }
 
 export default function DownloadsPage({ loaderData, params }: Route.ComponentProps) {
-  const { name, days, totalPhotos, daysWithTrack, hasPlan } = loaderData;
+  const { name, days, totalPhotos, daysWithTrack, hasPlan, packItems } = loaderData;
   const locale = useLocale();
   const m = useMessages();
-  const file = (day: number | null, kind: "gpx" | "photos" | "plan") =>
+  const file = (day: number | null, kind: "gpx" | "photos" | "plan" | "packing") =>
     `/t/${params.slug}/download/${downloadFileName({ kind, day })}`;
 
   return (
@@ -105,9 +105,11 @@ export default function DownloadsPage({ loaderData, params }: Route.ComponentPro
         <p className="mt-2 text-faint">{m.downloads.intro}</p>
       </header>
 
-      {days.length === 0 ? (
+      {days.length === 0 && packItems === 0 && (
         <p className="mt-10 text-faint">{m.downloads.empty}</p>
-      ) : (
+      )}
+
+      {days.length > 0 && (
         <>
           <section className="mt-8">
             <h2 className="font-display text-xl font-semibold text-pine">
@@ -186,6 +188,30 @@ export default function DownloadsPage({ loaderData, params }: Route.ComponentPro
             </ul>
           </section>
         </>
+      )}
+
+      {/* Its own section rather than a row under "the whole trip": a packing
+          list exists before the first day does, and belongs to the trip in a
+          way a day's photos never are. */}
+      {packItems > 0 && (
+        <section className="mt-10">
+          <h2 className="font-display text-xl font-semibold text-pine">{m.packing.title}</h2>
+          <div className="mt-3 grid gap-2">
+            <DownloadRow
+              href={file(null, "packing")}
+              label={m.downloads.packing}
+              detail={m.downloads.packingDetail(packItems)}
+            />
+          </div>
+          <p className="mt-3 text-xs text-faint">
+            <Link
+              to={`/t/${params.slug}/packing`}
+              className="underline underline-offset-2 hover:text-pine"
+            >
+              {m.menu.packing}
+            </Link>
+          </p>
+        </section>
       )}
 
       <footer className="mt-16 flex flex-wrap items-center justify-between gap-2 border-t border-trail pt-4 text-xs text-faint">

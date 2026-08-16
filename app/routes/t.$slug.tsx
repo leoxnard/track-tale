@@ -169,7 +169,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const trip = await getTripBySlug(params.slug);
   if (!trip) throw data("Trip not found", { status: 404 });
 
-  const [{ data: dayRows }, { data: planRows }] = await Promise.all([
+  const [{ data: dayRows }, { data: planRows }, { count: packCount }] = await Promise.all([
     supabase()
       .from("days")
       .select(
@@ -182,6 +182,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       .select("geojson, distance_m, name, sort_order")
       .eq("trip_id", trip.id)
       .order("sort_order"),
+    // Only whether there is a list — the list itself lives on its own page, and
+    // the menu needs nothing more than whether to offer it.
+    supabase().from("pack_items").select("*", { count: "exact", head: true }).eq("trip_id", trip.id),
   ]);
 
   const storage = supabase().storage.from("photos");
@@ -307,6 +310,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     startDate: trip.start_date,
     endDate: trip.end_date,
     finished: trip.finished_at !== null,
+    hasPacking: (packCount ?? 0) > 0,
     liveUrl: showLive ? trip.live_url : null,
     // A session with no points yet is a valid read with nothing to draw.
     live: live === null || live.points.length === 0 ? null : {
@@ -995,6 +999,9 @@ export interface ViewerTrip {
   startDate: string;
   endDate: string | null;
   finished: boolean;
+  /** Whether the menu offers the packing list — optional, so the preview
+   * fixture, which has no menu at all, need not carry it. */
+  hasPacking?: boolean;
   liveUrl: string | null;
   live?: ViewerLive | null;
   showAuthors: boolean;
@@ -1349,7 +1356,7 @@ export function TripView({
               </a>
             )}
             <ShareButton title={trip.name} />
-            {slug && <TripMenu slug={slug} />}
+            {slug && <TripMenu slug={slug} hasPacking={trip.hasPacking} />}
           </div>
         </div>
         {progressPct !== null && (

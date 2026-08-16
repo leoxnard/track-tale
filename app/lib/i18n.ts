@@ -111,6 +111,15 @@ const en = {
     /** Like the share button, a glyph on screen and the words only here. */
     label: "Menu",
     downloads: "Download centre",
+    packing: "Packing list",
+  },
+  packing: {
+    title: "Packing list",
+    intro: "What went along — and, where it matters, exactly which one.",
+    back: (name: string) => `← Back to ${name}`,
+    count: (n: number) => `${n} ${n === 1 ? "thing" : "things"}`,
+    download: "Download as CSV",
+    empty: "Nothing has been packed on this trip yet.",
   },
   downloads: {
     title: "Download centre",
@@ -148,6 +157,8 @@ const en = {
     planNote:
       "The planned route comes as it was imported, at full resolution — not the thinned copy the map is drawn from. A day's own stretch of it is cut from where that day's riding began to where it stopped, so the shopping trips and wrong turnings the ride took are not in it. A plan imported before the originals were kept falls back to the thinned copy until its next refresh.",
     tooLarge: "Too much to pack in one go — take the days one at a time instead.",
+    packing: "Packing list (CSV)",
+    packingDetail: (n: number) => `${n} ${n === 1 ? "thing" : "things"}`,
   },
   error: {
     oops: "Oops!",
@@ -360,6 +371,15 @@ const de: Messages = {
   menu: {
     label: "Menü",
     downloads: "Download-Center",
+    packing: "Packliste",
+  },
+  packing: {
+    title: "Packliste",
+    intro: "Was mitgekommen ist — und, wo es darauf ankommt, genau welches.",
+    back: (name: string) => `← Zurück zu ${name}`,
+    count: (n: number) => `${n} ${n === 1 ? "Sache" : "Sachen"}`,
+    download: "Als CSV herunterladen",
+    empty: "Auf dieser Reise wurde noch nichts eingepackt.",
   },
   downloads: {
     title: "Download-Center",
@@ -386,6 +406,8 @@ const de: Messages = {
     planNote:
       "Die geplante Route kommt so, wie sie importiert wurde, in voller Auflösung — nicht als die gedünnte Kopie, aus der die Karte gezeichnet wird. Die Etappe eines Tages wird von dort, wo die Fahrt begann, bis dorthin, wo sie endete, herausgeschnitten — Einkaufswege und falsche Abbiegungen sind also nicht darin. Ein Plan, der vor dem Aufheben der Originale importiert wurde, fällt bis zur nächsten Aktualisierung auf die gedünnte Kopie zurück.",
     tooLarge: "Zu viel für ein Paket — lade die Tage einzeln herunter.",
+    packing: "Packliste (CSV)",
+    packingDetail: (n: number) => `${n} ${n === 1 ? "Sache" : "Sachen"}`,
   },
   error: {
     oops: "Hoppla!",

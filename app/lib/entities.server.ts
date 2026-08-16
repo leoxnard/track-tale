@@ -10,7 +10,13 @@ import { removePlanOriginal, removeRideOriginal } from "./originals.server";
  * long past having a confirmation message to reply to.
  */
 
-export type EntityType = "note" | "media" | "track_segment" | "plan_segment" | "comment";
+export type EntityType =
+  | "note"
+  | "media"
+  | "track_segment"
+  | "plan_segment"
+  | "comment"
+  | "pack_item";
 
 export const ENTITY_TABLE: Record<EntityType, string> = {
   note: "notes",
@@ -18,6 +24,7 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   track_segment: "track_segments",
   plan_segment: "plan_segments",
   comment: "comments",
+  pack_item: "pack_items",
 };
 
 export const ENTITY_LABEL: Record<EntityType, string> = {
@@ -26,6 +33,7 @@ export const ENTITY_LABEL: Record<EntityType, string> = {
   track_segment: "Track",
   plan_segment: "Plan segment",
   comment: "Comment",
+  pack_item: "Packing list entry",
 };
 
 /**
