@@ -71,14 +71,33 @@ describe("corridorPoints", () => {
 });
 
 describe("overpassQuery", () => {
+  const corridor = [
+    { lat: 50, lng: 8 },
+    { lat: 50.1, lng: 8.1 },
+  ];
+
   it("asks for every shop kind within the radius of the corridor", () => {
-    const query = overpassQuery([{ lat: 50, lng: 8 }, { lat: 50.1, lng: 8.1 }], 300);
+    const query = overpassQuery(corridor, 300);
     expect(query).toContain("[out:json]");
     expect(query).toContain("supermarket|convenience|grocery|general");
     expect(query).toContain("(around:300,50.00000,8.00000,50.10000,8.10000)");
     // Nodes, ways and relations, with a coordinate for the ones that are shapes.
     expect(query).toContain("nwr");
-    expect(query).toContain("out center tags");
+  });
+
+  it("never asks for the tags-only output, which would strip node coordinates", () => {
+    // `out tags` is a verbosity level meaning "ids and tags, no geometry". It
+    // reads like the leaner request and costs less, and it silently returns
+    // every shop mapped as a plain node — most of them — with nowhere to put it.
+    const query = overpassQuery(corridor, 300);
+    expect(query).toContain("out center ");
+    expect(query).not.toContain("out tags");
+  });
+
+  it("hands Overpass the same deadline the caller is holding", () => {
+    expect(overpassQuery(corridor, 300, 12)).toContain("[out:json][timeout:12]");
+    // Never zero or negative, whatever budget is left when it is called.
+    expect(overpassQuery(corridor, 300, 0.2)).toContain("[timeout:1]");
   });
 });
 

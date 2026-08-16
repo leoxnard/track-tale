@@ -37,6 +37,18 @@ export function haversineM(a: TrackPoint, b: TrackPoint): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
 }
 
+/**
+ * How the bot says a distance out loud: metres up close, kilometres past one.
+ *
+ * One function rather than one per caller, because the three that grew
+ * independently — how far along a ride, how far off a route, how far back to
+ * the plan — had all landed on the same rule and would have drifted apart at
+ * the first tweak.
+ */
+export function formatDistanceM(m: number): string {
+  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
 /** Hysteresis threshold so GPS altitude noise doesn't inflate elevation gain. */
 const ELEVATION_THRESHOLD_M = 3;
 /** Below this speed between samples we consider the traveler stopped. */

@@ -1699,7 +1699,9 @@ async function sendShopsAhead(
     const found = await shopsAhead(trip, position, aheadKm);
     const text = shopsMessage(found, position, aheadKm);
     const options = {
-      reply_markup: shopsKeyboard(position, aheadKm),
+      // No plan means no search happened, and offering "look 100 km further"
+      // under that would be offering to do it again.
+      ...(found.hasPlan ? { reply_markup: shopsKeyboard(position, aheadKm) } : {}),
       // Eight shops means eight map links, and Telegram would put a preview
       // card for the first one under the list.
       link_preview_options: { is_disabled: true },

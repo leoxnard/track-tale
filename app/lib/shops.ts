@@ -125,17 +125,32 @@ export function corridorPoints(route: TrackPoint[], radiusM: number): TrackPoint
 /**
  * The Overpass QL for one corridor.
  *
- * `nwr` because a supermarket is as often a building outline or a
- * multipolygon as it is a point, and `out center` so those come back with a
- * coordinate instead of a member list we would have to assemble ourselves.
+ * `nwr` because a supermarket is as often a building outline or a multipolygon
+ * as it is a point, and `out center` so those come back with a coordinate
+ * instead of a member list we would have to assemble ourselves.
+ *
+ * Not `out tags center`, which reads like the tighter request and is what this
+ * asked for first: `tags` is an Overpass *verbosity level* meaning "ids and
+ * tags, no geometry", and it strips the coordinates off plain nodes — which is
+ * how most shops are mapped. The query looked right, cost less, and would have
+ * returned a supermarket every few kilometres with nowhere to put any of them.
+ * The default level carries the tags anyway.
+ *
+ * The server-side `timeout` matches the caller's own budget: an instance still
+ * chewing on a query nobody is waiting for helps neither of us.
  */
-export function overpassQuery(corridor: TrackPoint[], radiusM: number, limit = 60): string {
+export function overpassQuery(
+  corridor: TrackPoint[],
+  radiusM: number,
+  timeoutS = 25,
+  limit = 60,
+): string {
   const coords = corridor.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
   const kinds = SHOP_KINDS.join("|");
   return [
-    "[out:json][timeout:25];",
+    `[out:json][timeout:${Math.max(1, Math.round(timeoutS))}];`,
     `nwr["shop"~"^(${kinds})$"](around:${Math.round(radiusM)},${coords});`,
-    `out center tags ${limit};`,
+    `out center ${limit};`,
   ].join("\n");
 }
 
@@ -229,14 +244,6 @@ function kindNoun(kind: ShopKind): string {
 /** A link every phone opens, whichever map app it prefers. */
 export function mapLink(lat: number, lng: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(5)},${lng.toFixed(5)}`;
-}
-
-export function formatAlong(m: number): string {
-  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
-}
-
-export function formatOffset(m: number): string {
-  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
 }
 
 /**

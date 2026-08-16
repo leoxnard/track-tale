@@ -3,11 +3,10 @@ import { env } from "./env.server";
 import { escapeMd } from "./telegram-md";
 import { encodeAction } from "./manage";
 import { cutPlan, DEFAULT_TARGET_KM, type PlanCut } from "./route-cut";
+import { formatDistanceM } from "./track";
 import { loadPlan, type Position } from "./bot-route.server";
 import {
   corridorPoints,
-  formatAlong,
-  formatOffset,
   mapLink,
   overpassQuery,
   parseShops,
@@ -37,14 +36,25 @@ import type { DbTrip } from "./db.server";
 const USER_AGENT = "TrackTale/1.0 (trip journal bot; +https://github.com/leoxnard/track-tale)";
 
 /**
- * Overpass can take its time under load, and the whole search sits inside a
- * Telegram webhook that has to answer. Twenty seconds is long enough for a
- * healthy instance and short enough to fail while there is still time to say so.
+ * How long the whole search may take, both requests together.
+ *
+ * A budget rather than a per-request timeout, because there can be two of them:
+ * the tight corridor and, when that comes back empty, the wider one. Two
+ * twenty-second timeouts in a row is forty seconds inside a webhook handler
+ * that a serverless platform will cut off long before then, and a cut-off
+ * function tells the traveller nothing at all — the "looking…" line just sits
+ * there. Overpass is given the same number as its own `timeout`, so an instance
+ * is not left grinding on a query nobody is waiting for any more.
  */
-const REQUEST_TIMEOUT_MS = 20_000;
+const SEARCH_BUDGET_MS = 18_000;
+
+/** Below this there is no point starting another request. */
+const MIN_ATTEMPT_MS = 4_000;
 
 export interface ShopSearch {
   shops: ShopHit[];
+  /** False when the trip has no planned route to search along at all. */
+  hasPlan: boolean;
   /** Metres of route searched — less than asked for near the end of a plan. */
   searchedM: number;
   radiusM: number;
@@ -58,15 +68,15 @@ export interface ShopSearch {
  * Throws only where there is nothing sensible to return — a dead Overpass, a
  * request that timed out. A valid answer with nothing in it is an answer.
  */
-async function search(route: PlanCut, radiusM: number): Promise<ShopHit[]> {
+async function search(route: PlanCut, radiusM: number, budgetMs: number): Promise<ShopHit[]> {
   const corridor = corridorPoints(route.points, radiusM);
   if (corridor.length === 0) return [];
 
   const res = await fetch(env.overpassUrl, {
     method: "POST",
     headers: { "Content-Type": "text/plain", "User-Agent": USER_AGENT },
-    body: overpassQuery(corridor, radiusM),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    body: overpassQuery(corridor, radiusM, budgetMs / 1000),
+    signal: AbortSignal.timeout(budgetMs),
   });
   if (!res.ok) throw new Error(`Overpass answered ${res.status}`);
 
@@ -95,15 +105,23 @@ export async function shopsAhead(
   const plan = await loadPlan(trip.id);
   const km = Math.min(MAX_AHEAD_KM, Math.max(1, Math.round(aheadKm)));
   const route = cutPlan(plan, position, km * 1000);
-  if (!route) return { shops: [], searchedM: 0, radiusM: NEAR_RADIUS_M, widened: false };
-
-  const near = await search(route, NEAR_RADIUS_M);
-  if (near.length > 0) {
-    return { shops: near, searchedM: route.cutM, radiusM: NEAR_RADIUS_M, widened: false };
+  if (!route) {
+    return { shops: [], hasPlan: false, searchedM: 0, radiusM: NEAR_RADIUS_M, widened: false };
   }
 
-  const wide = await search(route, WIDE_RADIUS_M);
-  return { shops: wide, searchedM: route.cutM, radiusM: WIDE_RADIUS_M, widened: true };
+  const deadline = Date.now() + SEARCH_BUDGET_MS;
+  const near = await search(route, NEAR_RADIUS_M, SEARCH_BUDGET_MS);
+  const found = { shops: near, hasPlan: true, searchedM: route.cutM };
+  if (near.length > 0) return { ...found, radiusM: NEAR_RADIUS_M, widened: false };
+
+  // Nothing close by. Widening is worth a second request — but only with enough
+  // of the budget left to finish one, and the answer says which radius it is
+  // reporting on either way, so running out of time cannot read as "empty".
+  const left = deadline - Date.now();
+  if (left < MIN_ATTEMPT_MS) return { ...found, radiusM: NEAR_RADIUS_M, widened: false };
+
+  const wide = await search(route, WIDE_RADIUS_M, left);
+  return { ...found, shops: wide, radiusM: WIDE_RADIUS_M, widened: true };
 }
 
 /**
@@ -115,6 +133,16 @@ export async function shopsAhead(
  * phone.
  */
 export function shopsMessage(search: ShopSearch, position: Position, aheadKm: number): string {
+  // A trip with no plan cannot answer this at all, and saying "nothing found"
+  // would send the traveller looking for shops that were never searched for.
+  if (!search.hasPlan) {
+    return (
+      "No plan on this trip yet, so there is no road ahead to search along. " +
+      'Send the planned Komoot link, or a GPX with the caption "plan", and ' +
+      "/supermarkt will work from it."
+    );
+  }
+
   const searchedKm = Math.round(search.searchedM / 1000);
   const lines: string[] = [
     `🛒 *Shops on the next ${searchedKm} km*`,
@@ -122,9 +150,12 @@ export function shopsMessage(search: ShopSearch, position: Position, aheadKm: nu
   ];
 
   if (search.shops.length === 0) {
+    // Named by the radius actually searched, not by the widest one there is:
+    // when the budget ran out after the tight pass, saying "nothing within
+    // 1.5 km" would be a claim the search never tested.
     lines.push(
       "",
-      `Nothing within ${formatOffset(WIDE_RADIUS_M)} of the route in that stretch — ` +
+      `Nothing within ${formatDistanceM(search.radiusM)} of the route in that stretch — ` +
         `not on OpenStreetMap, at least. Try a longer look: /supermarkt ${Math.min(MAX_AHEAD_KM, aheadKm * 2)}`,
     );
     return lines.join("\n");
@@ -133,16 +164,16 @@ export function shopsMessage(search: ShopSearch, position: Position, aheadKm: nu
   if (search.widened) {
     lines.push(
       "",
-      `Nothing within ${formatOffset(NEAR_RADIUS_M)} of the route, so this is the ` +
-        `wider look — up to ${formatOffset(WIDE_RADIUS_M)} off it.`,
+      `Nothing within ${formatDistanceM(NEAR_RADIUS_M)} of the route, so this is the ` +
+        `wider look — up to ${formatDistanceM(WIDE_RADIUS_M)} off it.`,
     );
   }
 
   lines.push("");
   for (const shop of search.shops) {
-    const detour = `${formatOffset(shop.offsetM)} off`;
+    const detour = `${formatDistanceM(shop.offsetM)} off`;
     lines.push(
-      `${SHOP_ICON[shop.kind]} *${formatAlong(shop.alongM)}* — ` +
+      `${SHOP_ICON[shop.kind]} *${formatDistanceM(shop.alongM)}* — ` +
         `[${escapeMd(shop.name)}](${mapLink(shop.lat, shop.lng)}) · ${detour}` +
         (shop.openingHours ? `\n   🕒 ${escapeMd(shortHours(shop.openingHours))}` : ""),
     );

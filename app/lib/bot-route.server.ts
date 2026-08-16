@@ -2,7 +2,13 @@ import { InlineKeyboard } from "grammy";
 import { supabase } from "./supabase.server";
 import { escapeMd } from "./telegram-md";
 import { encodeAction } from "./manage";
-import { computeStats, fromGeoJson, type TrackGeoJson, type TrackPoint } from "./track";
+import {
+  computeStats,
+  formatDistanceM,
+  fromGeoJson,
+  type TrackGeoJson,
+  type TrackPoint,
+} from "./track";
 import { toGpx } from "./gpx-export";
 import {
   cutPlan,
@@ -144,7 +150,7 @@ export function buildCutRoute(trip: DbTrip, position: Position, targetKm: number
   // says whether the position was a sensible one to cut from.
   if (cut.joinM > 50) {
     lines.push(
-      `↩️ ${formatDistance(cut.joinM)} back to the plan first — the file starts where you are.`,
+      `↩️ ${formatDistanceM(cut.joinM)} back to the plan first — the file starts where you are.`,
     );
   }
   if (cut.reachedEnd) {
@@ -192,7 +198,9 @@ function targetKeyboard(km: number, position: Position): InlineKeyboard {
   // Where to buy food on the stretch that was just cut. It belongs here rather
   // than only behind /supermarkt because a location sent to the bot is never
   // stored — this button is what carries that position forward.
-  keyboard.row().text("🛒 Shops ahead", encodeAction({ type: "shops", km: SHOPS_AHEAD_KM, ...at }));
+  keyboard
+    .row()
+    .text(`🛒 Shops (${SHOPS_AHEAD_KM} km)`, encodeAction({ type: "shops", km: SHOPS_AHEAD_KM, ...at }));
   return keyboard;
 }
 
@@ -228,11 +236,6 @@ export async function cutForTrip(
   const cut = cutPlan(plan, position, km * 1000);
   if (!cut) return { error: "The plan on this trip has no coordinates in it." };
   return buildCutRoute(trip, position, km, cut);
-}
-
-/** "1.2 km" under ten, "340 m" below that: metres matter at walking scale. */
-function formatDistance(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
 
 /** " (2 h ago)" — silent when the position came with no clock on it. */
