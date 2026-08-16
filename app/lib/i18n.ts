@@ -120,6 +120,8 @@ const en = {
     perDay: "Day by day",
     tracks: "Tracks (GPX)",
     photos: "Photos (ZIP)",
+    plan: "Planned route (GPX)",
+    planDetail: "the whole tour",
     daysWithTrack: (n: number) => `${n} ${n === 1 ? "day" : "days"} with a track`,
     photoCount: (n: number) => `${n} ${n === 1 ? "photo" : "photos"}`,
     noTrack: "no track",
@@ -133,7 +135,14 @@ const en = {
     photoNote:
       "Photos come as they are stored: the untouched file for anything sent as a document, a 2048 px copy for the rest. A Live Photo's motion travels beside its still.",
     trackNote:
-      "Each day is its own track in the file, and a leg taken by train, ferry or bus is one of its own — so nothing counts kilometres nobody rode.",
+      "The tracks are the days as they are drawn on the page. Each day is its own track in the file, and a leg taken by train, ferry or bus is one of its own — so nothing counts kilometres nobody rode.",
+    /**
+     * Worth its own sentence: this is the one file here that is not the page's
+     * own line written out, and a reader importing it will notice the
+     * difference in bends the moment a device tries to match it to a road.
+     */
+    planNote:
+      "The planned route comes at the resolution it was drawn at — fetched back from Komoot where it came from there, rather than the copy the map is drawn from.",
     tooLarge: "Too much to pack in one go — take the days one at a time instead.",
   },
   error: {
@@ -356,6 +365,8 @@ const de: Messages = {
     perDay: "Tag für Tag",
     tracks: "Tracks (GPX)",
     photos: "Fotos (ZIP)",
+    plan: "Geplante Route (GPX)",
+    planDetail: "die ganze Tour",
     daysWithTrack: (n: number) => `${n} ${n === 1 ? "Tag" : "Tage"} mit Track`,
     photoCount: (n: number) => `${n} ${n === 1 ? "Foto" : "Fotos"}`,
     noTrack: "kein Track",
@@ -364,7 +375,9 @@ const de: Messages = {
     photoNote:
       "Die Fotos kommen so, wie sie gespeichert sind: die unveränderte Datei bei allem, was als Datei geschickt wurde, sonst eine 2048-px-Kopie. Die Bewegung eines Live Photos liegt neben seinem Standbild.",
     trackNote:
-      "Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist.",
+      "Die Tracks sind die Tage so, wie die Seite sie zeichnet. Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist.",
+    planNote:
+      "Die geplante Route kommt in der Auflösung, in der sie gezeichnet wurde — von Komoot zurückgeholt, wo sie von dort stammt, statt aus der Kopie, aus der die Karte gezeichnet wird.",
     tooLarge: "Zu viel für ein Paket — lade die Tage einzeln herunter.",
   },
   error: {

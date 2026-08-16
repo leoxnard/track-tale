@@ -9,6 +9,7 @@ import {
 
 const REQUESTS: DownloadRequest[] = [
   { kind: "gpx", day: null },
+  { kind: "plan", day: null },
   { kind: "gpx", day: 7 },
   { kind: "photos", day: null },
   { kind: "photos", day: 7 },
@@ -18,6 +19,7 @@ describe("download file names", () => {
   it("names each of the four things the centre offers", () => {
     expect(REQUESTS.map(downloadFileName)).toEqual([
       "trip.gpx",
+      "plan.gpx",
       "day-7.gpx",
       "photos.zip",
       "day-7-photos.zip",
@@ -37,6 +39,7 @@ describe("download file names", () => {
       "day-x.gpx",
       "day-7.GPX",
       "day-7-photos.tar",
+      "day-7-plan.gpx",
       "../secret.gpx",
       "day-7.gpx/../trip.gpx",
       "",
@@ -52,6 +55,10 @@ describe("attachmentName", () => {
     expect(attachmentName("Rhône 2026", { kind: "photos", day: null })).toBe(
       "rhone-2026-photos.zip",
     );
+  });
+
+  it("keeps the plan apart from the ride it was planned for", () => {
+    expect(attachmentName("Rhône 2026", { kind: "plan", day: null })).toBe("rhone-2026-plan.gpx");
   });
 
   it("survives a name with nothing usable in it", () => {

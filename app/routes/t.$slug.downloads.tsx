@@ -84,10 +84,10 @@ function DownloadRow({
 }
 
 export default function DownloadsPage({ loaderData, params }: Route.ComponentProps) {
-  const { name, days, totalPhotos, daysWithTrack } = loaderData;
+  const { name, days, totalPhotos, daysWithTrack, hasPlan } = loaderData;
   const locale = useLocale();
   const m = useMessages();
-  const file = (day: number | null, kind: "gpx" | "photos") =>
+  const file = (day: number | null, kind: "gpx" | "photos" | "plan") =>
     `/t/${params.slug}/download/${downloadFileName({ kind, day })}`;
 
   return (
@@ -126,8 +126,16 @@ export default function DownloadsPage({ loaderData, params }: Route.ComponentPro
                 detail={m.downloads.photoCount(totalPhotos)}
                 disabled={totalPhotos === 0}
               />
+              {hasPlan && (
+                <DownloadRow
+                  href={file(null, "plan")}
+                  label={m.downloads.plan}
+                  detail={m.downloads.planDetail}
+                />
+              )}
             </div>
             <p className="mt-3 text-xs text-faint">{m.downloads.trackNote}</p>
+            {hasPlan && <p className="mt-1 text-xs text-faint">{m.downloads.planNote}</p>}
             <p className="mt-1 text-xs text-faint">{m.downloads.photoNote}</p>
           </section>
 

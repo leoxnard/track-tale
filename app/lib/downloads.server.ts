@@ -21,6 +21,7 @@ import { fromGeoJson, type TrackGeoJson } from "./track";
 import { toGpxTracks, type GpxTrack } from "./gpx-export";
 import { byPhotoTime, type OrderablePhoto } from "./photo-order";
 import { transitMode, type TransitMode } from "./transport";
+import { wholePlanAtSource } from "./bot-route.server";
 
 /**
  * How much a zip may weigh before it is refused.
@@ -51,6 +52,8 @@ export interface TripDownloads {
   days: DownloadDay[];
   totalPhotos: number;
   daysWithTrack: number;
+  /** Whether the trip has a planned route to hand out at all. */
+  hasPlan: boolean;
 }
 
 interface TrackDayRow {
@@ -69,11 +72,18 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
   const trip = await getTripBySlug(slug);
   if (!trip) return null;
 
-  const { data: rows } = await supabase()
-    .from("days")
-    .select("day_number, date, color, track_segments(distance_m, sport), media(id)")
-    .eq("trip_id", trip.id)
-    .order("day_number");
+  const db = supabase();
+  const [{ data: rows }, { count: planCount }] = await Promise.all([
+    db
+      .from("days")
+      .select("day_number, date, color, track_segments(distance_m, sport), media(id)")
+      .eq("trip_id", trip.id)
+      .order("day_number"),
+    db
+      .from("plan_segments")
+      .select("*", { count: "exact", head: true })
+      .eq("trip_id", trip.id),
+  ]);
 
   const days: DownloadDay[] = (rows ?? [])
     .map((d) => {
@@ -100,7 +110,29 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
     days,
     totalPhotos: days.reduce((s, d) => s + d.photos, 0),
     daysWithTrack: days.filter((d) => d.hasTrack).length,
+    hasPlan: (planCount ?? 0) > 0,
   };
+}
+
+/**
+ * The planned route, at the resolution it was drawn at.
+ *
+ * The one file here that is not simply the page's own line written out: the
+ * stored plan is thinned for drawing, so the original is fetched back from
+ * Komoot where there is one to fetch — the same reasoning, and the same
+ * machinery, as `/route`. A plan uploaded as GPX has no original to go back to
+ * and comes as stored, which since it is now thinned by shape is within about a
+ * metre of the line anyway.
+ */
+export async function buildPlanGpx(
+  slug: string,
+): Promise<{ trip: DbTrip; gpx: string } | null> {
+  const trip = await getTripBySlug(slug);
+  if (!trip) return null;
+
+  const plan = await wholePlanAtSource(trip.id);
+  if (plan.points.length === 0) return null;
+  return { trip, gpx: toGpxTracks([{ name: `${trip.name} — plan`, segments: [plan.points] }]) };
 }
 
 /** Days in order, geometry included — one day of them, or all of them. */

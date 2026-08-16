@@ -120,7 +120,9 @@ Messages are **edited in place** rather than re-sent — that is the established
   names, which *are* the request (`day-3-photos.zip`), parsed straight back out of the URL.
   The server half builds a GPX (one `<trk>` per day, transit legs in tracks of their own) or
   a zip of the stored photos, in memory, per request — hence the size ceiling and the 413 it
-  answers with, which points at the day files instead.
+  answers with, which points at the day files instead. Ridden tracks are the *stored* line,
+  which is what the page draws; the planned route goes through `wholePlanAtSource` in
+  `bot-route.server.ts` for the same reason `/route` does.
 - `day-stretches.ts` — one answer to "what was pedalled, and where did it stop", shared by
   the page, the share card and the archive. Don't re-derive it a fourth time.
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the
@@ -220,10 +222,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   every render. The code, columns and translations all remain — every entrance is shut, not
   removed. Keep it that way when touching that path.
 - **The stored plan is a thinned copy; the original lives in the `plans` bucket.** Anything
-  that cuts a file for a device rather than drawing a line on a page must go through
-  `planForCut`, not `loadPlan`. It reads the kept original first, falls back to re-fetching
-  from Komoot, then to the thinned line — and must survive all three being unavailable.
-  Deleting a plan segment or a trip has to take the stored original with it.
+  that hands a file to a device rather than drawing a line on a page must go through
+  `planForCut` (a cut from a position) or `wholePlanAtSource` (the whole thing), not
+  `loadPlan`. Both read the kept original first, fall back to re-fetching from Komoot, then
+  to the thinned line — and must survive all three being unavailable. Deleting a plan
+  segment or a trip has to take the stored original with it.
 - **Komoot ingestion uses an unofficial internal API.** It can break at any time; GPX upload
   is the always-works fallback, by design. Don't make Komoot a hard dependency of anything.
 - **Callback payloads are capped at 64 bytes** by Telegram — that constraint is why

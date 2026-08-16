@@ -1,7 +1,7 @@
 import { data } from "react-router";
 import type { Route } from "./+types/t.$slug.download.$file";
 import { attachmentName, parseDownloadFile } from "../lib/downloads";
-import { buildDownloadGpx, buildPhotoZip } from "../lib/downloads.server";
+import { buildDownloadGpx, buildPhotoZip, buildPlanGpx } from "../lib/downloads.server";
 import { messages, resolveLocale } from "../lib/i18n";
 
 /**
@@ -22,8 +22,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const req = parseDownloadFile(params.file);
   if (!req) throw data("Not found", { status: 404 });
 
-  if (req.kind === "gpx") {
-    const built = await buildDownloadGpx(params.slug, req.day);
+  if (req.kind === "gpx" || req.kind === "plan") {
+    const built =
+      req.kind === "plan"
+        ? await buildPlanGpx(params.slug)
+        : await buildDownloadGpx(params.slug, req.day);
     if (!built) throw data("Not found", { status: 404 });
     return new Response(built.gpx, {
       headers: {

@@ -147,6 +147,14 @@ export async function loadPlan(tripId: string): Promise<TrackPoint[]> {
  */
 const SOURCE_FETCH_TIMEOUT_MS = 7_000;
 
+/**
+ * The same wait for a download of the whole plan. Longer, because it is a
+ * browser showing a spinner rather than a traveller at a roadside — and because
+ * this one may have to re-fetch every segment of an old plan, not just the one
+ * a day crosses.
+ */
+const WHOLE_PLAN_FETCH_TIMEOUT_MS = 20_000;
+
 export interface PlanForCut {
   points: TrackPoint[];
   /** Segments the cut crosses that came from the kept original. */
@@ -195,8 +203,43 @@ export async function planForCut(
   if (pieces.length === 0) return { points: [], fromStore: 0, fromSource: 0, degraded: 0 };
 
   const spanned = piecesSpannedBy(pieces, from, targetM);
+  return assemblePlan(pieces, (i) => spanned.has(i), SOURCE_FETCH_TIMEOUT_MS);
+}
+
+/**
+ * The whole plan as it was imported — every segment, not just the ones a day
+ * crosses.
+ *
+ * The download centre hands the plan to a reader who is going to open it in a
+ * mapping tool, which is the same need `/route` has: a line thinned for drawing
+ * describes a road that bends less than the real one. Normally this is now one
+ * storage read per segment and no third party at all. The Komoot fallback is
+ * still behind it for plans imported before originals were kept, and it is
+ * given longer than `/route` allows, because nobody is standing in a car park
+ * waiting for this one.
+ */
+export async function wholePlanAtSource(tripId: string): Promise<PlanForCut> {
+  const pieces = await loadPlanPieces(tripId);
+  if (pieces.length === 0) return { points: [], fromStore: 0, fromSource: 0, degraded: 0 };
+  return assemblePlan(pieces, () => true, WHOLE_PLAN_FETCH_TIMEOUT_MS);
+}
+
+/**
+ * Lay the plan end to end, at full resolution for the pieces `wanted` picks out
+ * and as thinned for the rest.
+ *
+ * The three sources are tried in the order the header above gives them, per
+ * piece. Everything that fails lands in the same place — the thinned line on
+ * the row — and only `degraded` tells the two kinds of "as stored" apart,
+ * because a piece that never had an original is not a piece that lost one.
+ */
+async function assemblePlan(
+  pieces: PlanPiece[],
+  wanted: (index: number) => boolean,
+  timeoutMs: number,
+): Promise<PlanForCut> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let fromStore = 0;
   let fromSource = 0;
@@ -204,7 +247,7 @@ export async function planForCut(
   try {
     const fetched = await Promise.all(
       pieces.map(async (piece, i) => {
-        if (!spanned.has(i)) return null;
+        if (!wanted(i)) return null;
 
         const kept = await loadPlanOriginal(piece.sourcePath);
         if (kept) return { points: kept, kept: true };
