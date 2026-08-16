@@ -1,5 +1,5 @@
 import { supabase } from "./supabase.server";
-import { removePlanOriginal } from "./plan-source.server";
+import { removePlanOriginal, removeRideOriginal } from "./originals.server";
 
 /**
  * Removing a single thing a traveller added.
@@ -30,20 +30,22 @@ export const ENTITY_LABEL: Record<EntityType, string> = {
 
 /**
  * Delete one row, and the stored blobs that belong to it — a photo's files, or
- * a plan segment's untouched original.
+ * a segment's untouched original, planned or ridden.
  *
  * The blobs go first: a row left behind by a failed delete still points at
  * something, whereas a row deleted before its files would strand them in the
  * bucket with nothing left to name them.
  */
 export async function deleteEntity(entityType: EntityType, entityId: string): Promise<void> {
-  if (entityType === "plan_segment") {
+  if (entityType === "plan_segment" || entityType === "track_segment") {
     const { data } = await supabase()
-      .from("plan_segments")
+      .from(ENTITY_TABLE[entityType])
       .select("source_path")
       .eq("id", entityId)
       .maybeSingle();
-    await removePlanOriginal((data?.source_path as string | null) ?? null);
+    const path = (data?.source_path as string | null) ?? null;
+    if (entityType === "plan_segment") await removePlanOriginal(path);
+    else await removeRideOriginal(path);
   }
 
   if (entityType === "media") {

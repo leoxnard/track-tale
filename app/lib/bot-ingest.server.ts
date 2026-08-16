@@ -3,7 +3,7 @@ import { supabase } from "./supabase.server";
 import type { DbTrip } from "./db.server";
 import { fetchKomootTour, parseKomootUrl } from "./komoot";
 import { decimate, planPointBudget, thinPlan, toGeoJson, type NormalizedTrack } from "./track";
-import { removePlanOriginal, storePlanOriginal } from "./plan-source.server";
+import { removePlanOriginal, storePlanOriginal, storeRideOriginal } from "./originals.server";
 import { cacheDayWeather } from "./day-weather.server";
 import { renderOgCard } from "./og.server";
 import { escapeErr, escapeMd } from "./telegram-md";
@@ -48,6 +48,19 @@ export async function saveTrackSegment(
     .select("id")
     .single();
   if (error) throw error;
+
+  // The recording as it arrived, kept for the download centre to hand back.
+  // Only when the line above actually lost something: a Komoot day or a short
+  // GPX comes in under the budget, `decimate` returns it untouched, and the row
+  // itself already *is* the original — a second copy of it in a bucket would be
+  // storage spent on nothing. A FIT file at a point a second is the other case
+  // entirely, and it is the one that cannot be recovered from anywhere else.
+  if (track.points.length > points.length) {
+    const sourcePath = await storeRideOriginal(trip.id, inserted.id, track.points);
+    if (sourcePath) {
+      await supabase().from("track_segments").update({ source_path: sourcePath }).eq("id", inserted.id);
+    }
+  }
 
   await cacheDayWeather(day.id, day.date, points);
   // Photos uploaded before this track had nothing to match against.

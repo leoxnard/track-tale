@@ -82,7 +82,7 @@ does I/O and generally does not.
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-route.server.ts` | `/route` — where the traveller was last seen, and the cut GPX that goes back |
 | `shops.server.ts` | `/supermarkt` — the Overpass request for shops along the road ahead, and its message |
-| `plan-source.server.ts` | keeping each planned route as imported, at full resolution, for `/route` to cut from |
+| `originals.server.ts` | keeping a line as it was imported — the plan for `/route` to cut from, a ridden day for the download centre to hand back |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |
 | `manage.ts` / `manage.server.ts` | the `/manage`, `/replace` and Live-Photo pickers; `manage.ts` is pure because callback payloads have a hard 64-byte limit |
@@ -120,9 +120,10 @@ Messages are **edited in place** rather than re-sent — that is the established
   names, which *are* the request (`day-3-photos.zip`), parsed straight back out of the URL.
   The server half builds a GPX (one `<trk>` per day, transit legs in tracks of their own) or
   a zip of the stored photos, in memory, per request — hence the size ceiling and the 413 it
-  answers with, which points at the day files instead. Ridden tracks are the *stored* line,
-  which is what the page draws; the planned route goes through `wholePlanAtSource` in
-  `bot-route.server.ts` for the same reason `/route` does.
+  answers with, which points at the day files instead. Both kinds of line are handed back at
+  the resolution they arrived at, not the one the page draws: a ridden day through
+  `loadRideOriginal`, the plan through `wholePlanAtSource` in `bot-route.server.ts`, each
+  falling back to the row when there is no original kept.
 - `day-stretches.ts` — one answer to "what was pedalled, and where did it stop", shared by
   the page, the share card and the archive. Don't re-derive it a fourth time.
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the
@@ -221,12 +222,17 @@ Messages are **edited in place** rather than re-sent — that is the established
 - **Live tracking is off by default** (`LIVE_TRACKING=0`) because the page fetched Garmin on
   every render. The code, columns and translations all remain — every entrance is shut, not
   removed. Keep it that way when touching that path.
-- **The stored plan is a thinned copy; the original lives in the `plans` bucket.** Anything
-  that hands a file to a device rather than drawing a line on a page must go through
-  `planForCut` (a cut from a position) or `wholePlanAtSource` (the whole thing), not
-  `loadPlan`. Both read the kept original first, fall back to re-fetching from Komoot, then
-  to the thinned line — and must survive all three being unavailable. Deleting a plan
-  segment or a trip has to take the stored original with it.
+- **What a row holds is sized for drawing; the original lives in a bucket.** A plan is
+  thinned to a budget and a ride is cut to 4 000 points, both so the page can redraw the
+  whole thing on every visit. `originals.server.ts` keeps the line as it arrived — `plans`
+  for a planned route, `tracks` for a ridden day, and for a ride only when the cut actually
+  lost something (under the budget the row already *is* the original). Anything that hands a
+  file to a device rather than drawing a line on a page must go through those: `planForCut`
+  (a cut from a position) or `wholePlanAtSource` (the whole plan) for a plan, `loadRideOriginal`
+  for a ride — never `loadPlan` or the raw `geojson`. The plan path reads the kept original
+  first, falls back to re-fetching from Komoot, then to the thinned line, and must survive
+  all three being unavailable. Deleting a segment or a trip has to take the stored original
+  with it — `deleteEntity` and `deleteTrip` both do.
 - **Komoot ingestion uses an unofficial internal API.** It can break at any time; GPX upload
   is the always-works fallback, by design. Don't make Komoot a hard dependency of anything.
 - **Callback payloads are capped at 64 bytes** by Telegram — that constraint is why
@@ -245,5 +251,5 @@ Messages are **edited in place** rather than re-sent — that is the established
 `SUPABASE_SERVICE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
 `TELEGRAM_OWNER_ID`, `CRON_SECRET`, `APP_ORIGIN`. Optional: `LIVE_TRACKING`,
 `RESEND_API_KEY`, `RESEND_INBOUND_SECRET`, `MAPTILER_KEY`, `MAPTILER_STYLE`, `OVERPASS_URL`.
-Storage buckets: `photos` and `archives` are public; `plans` is private and holds the
-untouched planned routes.
+Storage buckets: `photos` and `archives` are public; `plans` and `tracks` are private and
+hold the lines as they were imported — planned and ridden.

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { decodeOriginal, encodeOriginal } from "./plan-source.server";
+import { decodeOriginal, encodeOriginal } from "./originals.server";
 import type { TrackPoint } from "./track";
 
 /**
  * The codec only — storing and reading go through Supabase and are not
- * exercised here. What is worth pinning down is that a route survives the round
- * trip unchanged, because the whole point of keeping the original is that it is
- * the original.
+ * exercised here. What is worth pinning down is that a line survives the round
+ * trip unchanged, whether it was planned or ridden, because the whole point of
+ * keeping the original is that it is the original.
  */
-describe("plan original codec", () => {
+describe("original codec", () => {
   const route: TrackPoint[] = Array.from({ length: 5000 }, (_, i) => ({
     lat: 50 + Math.sin(i / 40) * 0.002,
     lng: 8 + i * 0.00005,
@@ -27,6 +27,16 @@ describe("plan original codec", () => {
       expect(point.lng).toBeCloseTo(route[i].lng, 6);
       expect(point.alt).toBeCloseTo(route[i].alt!, 1);
     });
+  });
+
+  it("keeps the clock on a recording, which is what makes it a ride", () => {
+    // A plan has no timestamps and a ride is nothing without them: the moving
+    // time, the weather over the riding hours and every photo pinned by time
+    // all read them back off a line like this one.
+    const start = Date.parse("2026-06-01T07:00:00Z");
+    const ridden = route.map((p, i) => ({ ...p, time: start + i * 1000 }));
+    const back = decodeOriginal(encodeOriginal(ridden));
+    expect(back.map((p) => p.time)).toEqual(ridden.map((p) => p.time));
   });
 
   it("keeps a route without elevation without inventing any", () => {

@@ -22,6 +22,7 @@ import { toGpxTracks, type GpxTrack } from "./gpx-export";
 import { byPhotoTime, type OrderablePhoto } from "./photo-order";
 import { transitMode, type TransitMode } from "./transport";
 import { wholePlanAtSource } from "./bot-route.server";
+import { loadRideOriginal } from "./originals.server";
 
 /**
  * How much a zip may weigh before it is refused.
@@ -58,7 +59,13 @@ export interface TripDownloads {
 
 interface TrackDayRow {
   day_number: number;
-  track_segments: { geojson: TrackGeoJson; sport: string | null; started_at: string | null }[];
+  track_segments: {
+    geojson: TrackGeoJson;
+    sport: string | null;
+    started_at: string | null;
+    /** The recording as it arrived, where thinning it for the page lost something. */
+    source_path: string | null;
+  }[];
 }
 
 /** A stored photo, as the zip needs it: where it is, and when it happened. */
@@ -140,7 +147,7 @@ export async function buildPlanGpx(
 async function daysWithTracks(trip: DbTrip, day: number | null): Promise<TrackDayRow[]> {
   let query = supabase()
     .from("days")
-    .select("day_number, track_segments(geojson, sport, started_at)")
+    .select("day_number, track_segments(geojson, sport, started_at, source_path)")
     .eq("trip_id", trip.id)
     .order("day_number");
   if (day !== null) query = query.eq("day_number", day);
@@ -148,26 +155,46 @@ async function daysWithTracks(trip: DbTrip, day: number | null): Promise<TrackDa
   return (data ?? []) as unknown as TrackDayRow[];
 }
 
-function gpxTracksFor(tripName: string, row: TrackDayRow): GpxTrack[] {
+/**
+ * A day's segments in the order they were ridden, each at the best resolution
+ * there is for it.
+ *
+ * The row's `geojson` is the line the page draws, cut to a point budget on the
+ * way in. Where that cut lost something the recording was kept whole, and this
+ * is what it was kept for: a day handed to somebody who is going to open it in
+ * a mapping tool should be the ride, not the drawing of it. Where no original
+ * was kept the row *is* the original — nothing was dropped — so the fallback
+ * costs nothing.
+ */
+async function segmentsOf(row: TrackDayRow) {
   const segments = [...row.track_segments].sort(
     (a, b) => Date.parse(a.started_at ?? "0") - Date.parse(b.started_at ?? "0"),
   );
-  const ridden = segments.filter((s) => transitMode(s.sport) === null);
+  return Promise.all(
+    segments.map(async (seg) => ({
+      mode: transitMode(seg.sport),
+      points: (await loadRideOriginal(seg.source_path)) ?? fromGeoJson(seg.geojson),
+    })),
+  );
+}
+
+async function gpxTracksFor(tripName: string, row: TrackDayRow): Promise<GpxTrack[]> {
+  const segments = await segmentsOf(row);
+  const ridden = segments.filter((s) => s.mode === null);
   const tracks: GpxTrack[] = [];
   if (ridden.length > 0) {
     tracks.push({
       name: `${tripName} — day ${row.day_number}`,
-      segments: ridden.map((s) => fromGeoJson(s.geojson)),
+      segments: ridden.map((s) => s.points),
     });
   }
   // Each travelled leg on its own so it can be told apart from the riding at a
   // glance, exactly as the map does with its hatching.
   for (const seg of segments) {
-    const mode = transitMode(seg.sport);
-    if (mode === null) continue;
+    if (seg.mode === null) continue;
     tracks.push({
-      name: `${tripName} — day ${row.day_number} (${mode})`,
-      segments: [fromGeoJson(seg.geojson)],
+      name: `${tripName} — day ${row.day_number} (${seg.mode})`,
+      segments: [seg.points],
     });
   }
   return tracks;
@@ -182,7 +209,7 @@ export async function buildDownloadGpx(
   if (!trip) return null;
 
   const rows = await daysWithTracks(trip, day);
-  const tracks = rows.flatMap((row) => gpxTracksFor(trip.name, row));
+  const tracks = (await Promise.all(rows.map((row) => gpxTracksFor(trip.name, row)))).flat();
   if (tracks.length === 0) return null;
   return { trip, gpx: toGpxTracks(tracks) };
 }

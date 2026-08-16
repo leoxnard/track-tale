@@ -135,7 +135,7 @@ const en = {
     photoNote:
       "Photos come as they are stored: the untouched file for anything sent as a document, a 2048 px copy for the rest. A Live Photo's motion travels beside its still.",
     trackNote:
-      "The tracks are the days as they are drawn on the page. Each day is its own track in the file, and a leg taken by train, ferry or bus is one of its own — so nothing counts kilometres nobody rode.",
+      "The tracks come as they were recorded, at full resolution, rather than as the line the map is drawn from. Each day is its own track in the file, and a leg taken by train, ferry or bus is one of its own — so nothing counts kilometres nobody rode. A day uploaded before the recordings were kept comes as the map draws it.",
     /**
      * Worth its own sentence: this is the one file here that is not the page's
      * own line written out, and a reader importing it will notice the
@@ -375,7 +375,7 @@ const de: Messages = {
     photoNote:
       "Die Fotos kommen so, wie sie gespeichert sind: die unveränderte Datei bei allem, was als Datei geschickt wurde, sonst eine 2048-px-Kopie. Die Bewegung eines Live Photos liegt neben seinem Standbild.",
     trackNote:
-      "Die Tracks sind die Tage so, wie die Seite sie zeichnet. Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist.",
+      "Die Tracks kommen so, wie sie aufgezeichnet wurden, in voller Auflösung — nicht als die Linie, aus der die Karte gezeichnet wird. Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist. Ein Tag, der vor dem Aufheben der Aufzeichnungen hochgeladen wurde, kommt so, wie die Karte ihn zeichnet.",
     planNote:
       "Die geplante Route kommt so, wie sie importiert wurde, in voller Auflösung — nicht als die gedünnte Kopie, aus der die Karte gezeichnet wird. Ein Plan, der vor dem Aufheben der Originale importiert wurde, fällt bis zur nächsten Aktualisierung auf diese Kopie zurück.",
     tooLarge: "Zu viel für ein Paket — lade die Tage einzeln herunter.",

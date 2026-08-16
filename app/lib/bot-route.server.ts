@@ -12,7 +12,7 @@ import {
 } from "./track";
 import { buildPlanIndex } from "./plan-anchor";
 import { fetchKomootTour, parseKomootUrl } from "./komoot";
-import { loadPlanOriginal } from "./plan-source.server";
+import { loadPlanOriginal } from "./originals.server";
 import { toGpx } from "./gpx-export";
 import {
   cutPlan,

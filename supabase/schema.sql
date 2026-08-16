@@ -234,10 +234,12 @@ values ('photos', 'photos', true), ('archives', 'archives', true)
 on conflict (id) do nothing;
 
 -- `plans` holds each planned route as it was imported, at full resolution, for
--- /route to cut a rideable file out of. Private: only the server reads it, with
--- the service key, and unlike a photo it is never put in front of a visitor.
+-- /route to cut a rideable file out of; `tracks` does the same for a ridden day,
+-- which the download centre hands back as GPX. Private: only the server reads
+-- them, with the service key, and unlike a photo neither is ever put in front of
+-- a visitor.
 insert into storage.buckets (id, name, public)
-values ('plans', 'plans', false)
+values ('plans', 'plans', false), ('tracks', 'tracks', false)
 on conflict (id) do nothing;
 
 -- Columns added after the first release. Safe to re-run; new environments get
@@ -253,6 +255,10 @@ alter table invites add column if not exists expires_at timestamptz;
 -- column beside it is a thinned copy sized for drawing the whole tour on a
 -- page; this is the line itself, which is what a navigation device needs.
 alter table plan_segments add column if not exists source_path text;
+-- The same for a ridden day: where the recording as it arrived lives in the
+-- `tracks` bucket. Null where the line on the row is already the whole of it,
+-- which is every segment that came in under the drawing budget.
+alter table track_segments add column if not exists source_path text;
 -- Photos sent as files keep their EXIF, so we can record the real capture time
 -- and tell an exact fix apart from one inferred off the track.
 alter table media add column if not exists taken_at timestamptz;

@@ -225,11 +225,13 @@ notes, stats and weather.
   the photos as a zip, for the whole trip or for a single day, each day listed with what it
   actually has on it so nobody taps a day that holds nothing. Each day is its own `<trk>` in
   the GPX and a leg taken by train, ferry or bus is a track of its own, so no mapping tool
-  totals up kilometres nobody rode. The ridden tracks are **the days as the page draws
-  them** — what the database holds is the imported line reduced to a drawing budget, and the
-  uploaded GPX or FIT itself is never stored. The **planned route** is the exception, and it
-  is offered as its own file: it comes from the original kept at import, through the same
-  path `/route` takes, so what a device gets bends the way the road does. The pictures come as they are stored — the untouched
+  totals up kilometres nobody rode. Both kinds of line come **as they arrived**, not as the
+  page draws them: what the database holds is reduced to a drawing budget, so every ride
+  whose recording the budget cut into is kept whole in a private `tracks` bucket, and the
+  **planned route** — offered as its own file — comes from the copy `/route` cuts from. A
+  FIT file recorded at a point a second is the case that matters: nothing on the internet
+  has a copy of it, so what is not kept at import is gone. Days uploaded before this existed
+  come as the map draws them. The pictures come as they are stored — the untouched
   file for anything sent as a document, a 2048 px copy for the rest, a Live Photo's motion
   beside its still — and the page says so, because the camera original never reached the bot
   in the first place. Nothing is packed until a link is tapped, and nothing is cached: a
@@ -239,7 +241,8 @@ notes, stats and weather.
 ## Setup
 
 1. **Supabase**: create a project, run [supabase/schema.sql](supabase/schema.sql) in the SQL
-   editor (creates tables + public `photos` bucket).
+   editor (creates the tables, the public `photos` and `archives` buckets and the private
+   `plans` and `tracks` ones).
 2. **Telegram**: create a bot via [@BotFather](https://t.me/BotFather); get your user id from
    [@userinfobot](https://t.me/userinfobot).
 3. **Env**: copy [.env.example](.env.example) to `.env` and fill everything in. Everything
