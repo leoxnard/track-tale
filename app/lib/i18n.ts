@@ -122,6 +122,10 @@ const en = {
     photos: "Photos (ZIP)",
     plan: "Planned route (GPX)",
     planDetail: "the whole tour",
+    /** The day's share of the plan, which is not the day's ride. */
+    planDay: "Planned route (GPX)",
+    planDayDetail: "this day's stretch",
+    noPlanDay: "not on the plan",
     daysWithTrack: (n: number) => `${n} ${n === 1 ? "day" : "days"} with a track`,
     photoCount: (n: number) => `${n} ${n === 1 ? "photo" : "photos"}`,
     noTrack: "no track",
@@ -142,7 +146,7 @@ const en = {
      * difference in bends the moment a device tries to match it to a road.
      */
     planNote:
-      "The planned route comes as it was imported, at full resolution — not the thinned copy the map is drawn from. A plan imported before the originals were kept falls back to that copy until its next refresh.",
+      "The planned route comes as it was imported, at full resolution — not the thinned copy the map is drawn from. A day's own stretch of it is cut from where that day's riding began to where it stopped, so the shopping trips and wrong turnings the ride took are not in it. A plan imported before the originals were kept falls back to the thinned copy until its next refresh.",
     tooLarge: "Too much to pack in one go — take the days one at a time instead.",
   },
   error: {
@@ -367,6 +371,9 @@ const de: Messages = {
     photos: "Fotos (ZIP)",
     plan: "Geplante Route (GPX)",
     planDetail: "die ganze Tour",
+    planDay: "Geplante Route (GPX)",
+    planDayDetail: "die Etappe dieses Tages",
+    noPlanDay: "nicht auf der Route",
     daysWithTrack: (n: number) => `${n} ${n === 1 ? "Tag" : "Tage"} mit Track`,
     photoCount: (n: number) => `${n} ${n === 1 ? "Foto" : "Fotos"}`,
     noTrack: "kein Track",
@@ -377,7 +384,7 @@ const de: Messages = {
     trackNote:
       "Die Tracks kommen so, wie sie aufgezeichnet wurden, in voller Auflösung — nicht als die Linie, aus der die Karte gezeichnet wird. Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist. Ein Tag, der vor dem Aufheben der Aufzeichnungen hochgeladen wurde, kommt so, wie die Karte ihn zeichnet.",
     planNote:
-      "Die geplante Route kommt so, wie sie importiert wurde, in voller Auflösung — nicht als die gedünnte Kopie, aus der die Karte gezeichnet wird. Ein Plan, der vor dem Aufheben der Originale importiert wurde, fällt bis zur nächsten Aktualisierung auf diese Kopie zurück.",
+      "Die geplante Route kommt so, wie sie importiert wurde, in voller Auflösung — nicht als die gedünnte Kopie, aus der die Karte gezeichnet wird. Die Etappe eines Tages wird von dort, wo die Fahrt begann, bis dorthin, wo sie endete, herausgeschnitten — Einkaufswege und falsche Abbiegungen sind also nicht darin. Ein Plan, der vor dem Aufheben der Originale importiert wurde, fällt bis zur nächsten Aktualisierung auf die gedünnte Kopie zurück.",
     tooLarge: "Zu viel für ein Paket — lade die Tage einzeln herunter.",
   },
   error: {

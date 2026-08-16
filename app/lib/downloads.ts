@@ -16,8 +16,9 @@
  * What the reader asked for.
  *
  * `gpx` is what was *ridden* and `plan` is what was *planned* — two different
- * lines, and only the second one has an original to go back to. A day number
- * belongs to a ride; the plan is the trip's and never a day's.
+ * lines for the same ground. Either can be asked for a single day or for the
+ * whole trip: a day's plan is the stretch of the route that day covered, which
+ * is the ride with the shopping trips and wrong turnings taken out of it.
  */
 export interface DownloadRequest {
   kind: "gpx" | "photos" | "plan";
@@ -27,8 +28,8 @@ export interface DownloadRequest {
 
 /** The name that goes in the URL. Inverse of `parseDownloadFile`. */
 export function downloadFileName(req: DownloadRequest): string {
-  if (req.kind === "plan") return "plan.gpx";
   const stem = req.day === null ? "trip" : `day-${req.day}`;
+  if (req.kind === "plan") return req.day === null ? "plan.gpx" : `${stem}-plan.gpx`;
   return req.kind === "gpx" ? `${stem}.gpx` : `${stem === "trip" ? "photos" : `${stem}-photos`}.zip`;
 }
 
@@ -48,6 +49,9 @@ export function parseDownloadFile(file: string): DownloadRequest | null {
 
   const zip = /^day-(\d{1,4})-photos\.zip$/.exec(file);
   if (zip) return { kind: "photos", day: Number(zip[1]) };
+
+  const dayPlan = /^day-(\d{1,4})-plan\.gpx$/.exec(file);
+  if (dayPlan) return { kind: "plan", day: Number(dayPlan[1]) };
 
   return null;
 }
@@ -74,7 +78,7 @@ export function slugifyName(name: string): string {
 /** What the browser saves it as: the trip, then which part of it. */
 export function attachmentName(tripName: string, req: DownloadRequest): string {
   const base = slugifyName(tripName);
-  if (req.kind === "plan") return `${base}-plan.gpx`;
   const part = req.day === null ? "" : `-day-${req.day}`;
+  if (req.kind === "plan") return `${base}${part}-plan.gpx`;
   return req.kind === "gpx" ? `${base}${part}.gpx` : `${base}${part}-photos.zip`;
 }

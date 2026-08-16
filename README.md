@@ -228,7 +228,10 @@ notes, stats and weather.
   totals up kilometres nobody rode. Both kinds of line come **as they arrived**, not as the
   page draws them: what the database holds is reduced to a drawing budget, so every ride
   whose recording the budget cut into is kept whole in a private `tracks` bucket, and the
-  **planned route** — offered as its own file — comes from the copy `/route` cuts from. A
+  **planned route** — offered as its own file, for the whole tour and for each day — comes
+  from the copy `/route` cuts from. A day's stretch of it is cut from where that day's
+  riding began to where it stopped, so it is the day as it was *meant* to go: the ride round
+  a one-way system, up a wrong turning and out to a supermarket is not in it. A
   FIT file recorded at a point a second is the case that matters: nothing on the internet
   has a copy of it, so what is not kept at import is gone. Days imported before this existed
   come as the map draws them until `/refreshtracks` (or the nightly job) fetches them back

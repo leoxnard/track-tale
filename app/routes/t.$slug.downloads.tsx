@@ -168,6 +168,18 @@ export default function DownloadsPage({ loaderData, params }: Route.ComponentPro
                       }
                       disabled={day.photos === 0}
                     />
+                    {hasPlan && (
+                      <DownloadRow
+                        href={file(day.dayNumber, "plan")}
+                        label={m.downloads.planDay}
+                        // A day that pedalled nothing has no two ends to cut
+                        // the plan between — a rest day, or one spent on a train.
+                        detail={
+                          day.hasRidden ? m.downloads.planDayDetail : m.downloads.noPlanDay
+                        }
+                        disabled={!day.hasRidden}
+                      />
+                    )}
                   </div>
                 </li>
               ))}

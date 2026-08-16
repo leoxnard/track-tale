@@ -149,6 +149,67 @@ export function cutPlan(
   };
 }
 
+export interface PlanStretch {
+  /** The plan from one end to the other, its own vertices in between. */
+  points: TrackPoint[];
+  /** Where the stretch begins and ends along the plan, in metres. */
+  startM: number;
+  endM: number;
+}
+
+/**
+ * The stretch of plan between two places — where a day's riding began and
+ * where it stopped.
+ *
+ * This is the planned line for a day rather than the ridden one, which is the
+ * whole reason anybody would want it: the ride wanders off to a supermarket, up
+ * a wrong turning and round a one-way system, and none of that is in the route
+ * that was planned. Nothing is added at either end — no join leg, unlike
+ * `cutPlan` — because both ends are places the traveller demonstrably was, so
+ * the file starts and stops on the line.
+ *
+ * The ends are ordered along the plan rather than trusted in the order they
+ * arrive: a plan drawn from the far end backwards is still the same route, and
+ * a file that runs the wrong way round is no use to a device. What this cannot
+ * tell apart is a tour that passes near itself — the same ambiguity `cutPlan`
+ * reports rather than guesses at, and here the day's own two ends are all there
+ * is to go on.
+ *
+ * Times are dropped for the same reason they are in `cutPlan`: a plan carrying
+ * whoever drew it's timestamps reads as a past activity to half the tools that
+ * open one.
+ */
+export function cutPlanBetween(
+  plan: TrackPoint[],
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): PlanStretch | null {
+  if (plan.length === 0) return null;
+  if (plan.length === 1) {
+    return { points: [stripTime(plan[0])], startM: 0, endM: 0 };
+  }
+
+  const cum = cumulative(plan);
+  const ends = [nearestOnPath(plan, from), nearestOnPath(plan, to)]
+    .map((end) => ({
+      ...end,
+      d: end.index === 0 ? 0 : cum[end.index - 1] + segmentSpan(plan, end.index, end.t),
+    }))
+    .sort((a, b) => a.d - b.d);
+  const [head, tail] = ends;
+
+  const points: TrackPoint[] = [stripTime(head.point)];
+  // Every vertex strictly between the two ends, exactly as the plan has them —
+  // the same rule as `cutPlan`: a cut decides where a route starts and stops,
+  // never what it looks like in between.
+  for (let i = head.index; i < tail.index; i++) {
+    if (haversineM(points[points.length - 1], plan[i]) > 0) points.push(stripTime(plan[i]));
+  }
+  if (haversineM(points[points.length - 1], tail.point) > 0) points.push(stripTime(tail.point));
+
+  return { points, startM: head.d, endM: tail.d };
+}
+
 /**
  * The point on a polyline closest to a coordinate, as a vertex index, a
  * fraction into the segment that ends at it, and the coordinate itself.

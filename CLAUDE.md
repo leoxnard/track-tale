@@ -108,7 +108,9 @@ Messages are **edited in place** rather than re-sent — that is the established
   point budget rather than fall back to a stride — the budget protects a page render, the
   shape is what a route file means.
 - `route-cut.ts` — `/route`, the pure half: the next N kilometres of the plan, cut from
-  wherever the traveller is. Read the header before changing what the target counts — the
+  wherever the traveller is, plus `cutPlanBetween` — the stretch between two places, which
+  is how the download centre gives a day its share of the plan without the detours the ride
+  took. Read the header before changing what the target counts — the
   leg back onto the plan is deliberately *not* counted against it, and the position is
   deliberately the file's first point.
 - `shops.ts` — the pure half of `/supermarkt`: sampling the road ahead into a corridor,

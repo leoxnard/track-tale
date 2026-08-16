@@ -17,12 +17,14 @@ import { zipSync } from "fflate";
 import { supabase } from "./supabase.server";
 import { getTripBySlug } from "./db.server";
 import type { DbTrip } from "./db.server";
-import { fromGeoJson, type TrackGeoJson } from "./track";
+import { fromGeoJson, type TrackGeoJson, type TrackPoint } from "./track";
 import { toGpxTracks, type GpxTrack } from "./gpx-export";
 import { byPhotoTime, type OrderablePhoto } from "./photo-order";
 import { transitMode, type TransitMode } from "./transport";
 import { wholePlanAtSource } from "./bot-route.server";
 import { loadRideOriginal } from "./originals.server";
+import { cutPlanBetween } from "./route-cut";
+import { riddenStretches, type StoredSegment } from "./day-stretches";
 
 /**
  * How much a zip may weigh before it is refused.
@@ -43,6 +45,8 @@ export interface DownloadDay {
   km: number;
   transitModes: TransitMode[];
   hasTrack: boolean;
+  /** Whether anything was pedalled — a day carried by train has ends but no ride. */
+  hasRidden: boolean;
   photos: number;
 }
 
@@ -103,6 +107,7 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
         km: ridden.reduce((s, x) => s + x.distance_m, 0) / 1000,
         transitModes: [...new Set(segments.map((s) => transitMode(s.sport)).filter((m) => m !== null))],
         hasTrack: segments.length > 0,
+        hasRidden: ridden.length > 0,
         photos: (d.media as { id: string }[]).length,
       };
     })
@@ -134,13 +139,66 @@ export async function tripDownloads(slug: string): Promise<TripDownloads | null>
  */
 export async function buildPlanGpx(
   slug: string,
+  day: number | null,
 ): Promise<{ trip: DbTrip; gpx: string } | null> {
   const trip = await getTripBySlug(slug);
   if (!trip) return null;
 
   const plan = await wholePlanAtSource(trip.id);
   if (plan.points.length === 0) return null;
-  return { trip, gpx: toGpxTracks([{ name: `${trip.name} — plan`, segments: [plan.points] }]) };
+  if (day === null) {
+    return { trip, gpx: toGpxTracks([{ name: `${trip.name} — plan`, segments: [plan.points] }]) };
+  }
+
+  const ends = await ridingEnds(trip, day);
+  if (!ends) return null;
+  const stretch = cutPlanBetween(plan.points, ends.from, ends.to);
+  if (!stretch || stretch.points.length < 2) return null;
+  return {
+    trip,
+    gpx: toGpxTracks([
+      { name: `${trip.name} — day ${day} (plan)`, segments: [stretch.points] },
+    ]),
+  };
+}
+
+/**
+ * Where a day's riding began and where it stopped.
+ *
+ * Ridden stretches only, and in the order they were ridden — `riddenStretches`
+ * is the one answer to "what was pedalled, and where did it stop" that the
+ * page, the share card and the archive all use, and this is not the place for a
+ * fourth. A leg taken by train is left out of the ends deliberately: it is not
+ * riding, and a day that ended on a platform ended where the pedalling did.
+ *
+ * The plan between those two points spans any such leg anyway — there is one
+ * file per day, and the route it was planned along ran through that ground even
+ * where the traveller was carried over it.
+ */
+async function ridingEnds(
+  trip: DbTrip,
+  day: number,
+): Promise<{ from: TrackPoint; to: TrackPoint } | null> {
+  const { data: row } = await supabase()
+    .from("days")
+    .select("track_segments(geojson, distance_m, sport, started_at)")
+    .eq("trip_id", trip.id)
+    .eq("day_number", day)
+    .maybeSingle();
+  if (!row) return null;
+
+  // In the order they were ridden, as everywhere else that groups a day: the
+  // first stretch's first point and the last stretch's last point are the ends,
+  // and that is only true of segments in sequence.
+  const segments = [...(row.track_segments as unknown as (StoredSegment & { started_at: string | null })[])]
+    .sort((a, b) => Date.parse(a.started_at ?? "0") - Date.parse(b.started_at ?? "0"));
+  // The line the page draws is enough to ask *where*: thinning moves a point by
+  // metres, and both ends are then projected onto the plan regardless.
+  const stretches = riddenStretches(segments);
+  const first = stretches[0]?.points[0];
+  const lastStretch = stretches[stretches.length - 1]?.points;
+  const last = lastStretch?.[lastStretch.length - 1];
+  return first && last ? { from: first, to: last } : null;
 }
 
 /** Days in order, geometry included — one day of them, or all of them. */

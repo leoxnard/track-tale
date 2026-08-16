@@ -25,7 +25,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   if (req.kind === "gpx" || req.kind === "plan") {
     const built =
       req.kind === "plan"
-        ? await buildPlanGpx(params.slug)
+        ? await buildPlanGpx(params.slug, req.day)
         : await buildDownloadGpx(params.slug, req.day);
     if (!built) throw data("Not found", { status: 404 });
     return new Response(built.gpx, {

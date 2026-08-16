@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { haversineM, type TrackPoint } from "./track";
-import { clampTargetKm, cutPlan, MAX_TARGET_KM, MIN_TARGET_KM } from "./route-cut";
+import {
+  clampTargetKm,
+  cutPlan,
+  cutPlanBetween,
+  MAX_TARGET_KM,
+  MIN_TARGET_KM,
+} from "./route-cut";
 
 /**
  * A straight plan due east along the equator-ish 50th parallel, one vertex
@@ -140,5 +146,59 @@ describe("clampTargetKm", () => {
     expect(clampTargetKm(0)).toBe(MIN_TARGET_KM);
     expect(clampTargetKm(9999)).toBe(MAX_TARGET_KM);
     expect(clampTargetKm(132.4)).toBe(132);
+  });
+});
+
+describe("cutPlanBetween", () => {
+  /** A place beside the plan's nth vertex, optionally a little off the line. */
+  const at = (vertex: number, offsetDeg = 0) => ({
+    lat: 50 + offsetDeg,
+    lng: 8 + vertex * STEP_DEG,
+  });
+  /** What one vertex of this fixture is actually worth — a whisker under 1 km. */
+  const STEP_M = haversineM(plan[0], plan[1]);
+
+  it("returns null without a plan", () => {
+    expect(cutPlanBetween([], at(0), at(40))).toBeNull();
+  });
+
+  it("hands back the plan between the two ends, and only that", () => {
+    const cut = cutPlanBetween(plan, at(20), at(60))!;
+    expect(cut.startM).toBeCloseTo(20 * STEP_M, -1);
+    expect(cut.endM).toBeCloseTo(60 * STEP_M, -1);
+    expect(length(cut.points)).toBeCloseTo(40 * STEP_M, -1);
+  });
+
+  it("starts on the line even when the day started beside it", () => {
+    // 500 m north of the route, as a campsite or a supermarket would be.
+    const cut = cutPlanBetween(plan, at(20, 0.0045), at(60))!;
+    // No join leg: unlike /route, both ends are places the rider actually was,
+    // so the file has no reason to open with a detour onto the plan.
+    expect(cut.points[0].lat).toBeCloseTo(50, 4);
+    expect(cut.startM).toBeCloseTo(20 * STEP_M, -1);
+  });
+
+  it("runs along the plan whichever end it was handed first", () => {
+    const forwards = cutPlanBetween(plan, at(20), at(60))!;
+    const backwards = cutPlanBetween(plan, at(60), at(20))!;
+    expect(backwards.points).toEqual(forwards.points);
+  });
+
+  it("keeps every vertex of the plan between the ends", () => {
+    const cut = cutPlanBetween(plan, at(20), at(30))!;
+    // Vertices 20 to 30 inclusive, and nothing invented in between.
+    expect(cut.points).toHaveLength(11);
+  });
+
+  it("carries no timestamps, so no tool reads it as a ride", () => {
+    const timed = plan.map((p, i) => ({ ...p, time: Date.parse("2026-06-01T06:00:00Z") + i * 1000 }));
+    const cut = cutPlanBetween(timed, at(20), at(60))!;
+    expect(cut.points.every((p) => p.time === undefined)).toBe(true);
+  });
+
+  it("answers a day that never moved with the place it stood", () => {
+    const cut = cutPlanBetween(plan, at(20), at(20))!;
+    expect(cut.points).toHaveLength(1);
+    expect(cut.startM).toBeCloseTo(cut.endM, 5);
   });
 });
