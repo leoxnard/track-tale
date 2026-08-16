@@ -50,6 +50,7 @@ import {
 import { Collapsible } from "../components/Collapsible";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ShareButton } from "../components/ShareButton";
+import { TripMenu } from "../components/TripMenu";
 import {
   formatDayDate,
   formatDuration,
@@ -1124,14 +1125,21 @@ export default function TripPage({ loaderData: trip, params, actionData }: Route
   useEffect(() => {
     saveRecentTrip(params.slug, trip.name);
   }, [params.slug, trip.name]);
-  return <TripView trip={trip} actionData={actionData} />;
+  return <TripView trip={trip} slug={params.slug} actionData={actionData} />;
 }
 
 export function TripView({
   trip,
+  slug,
   actionData,
 }: {
   trip: ViewerTrip;
+  /**
+   * Where the trip lives, for the pages hanging off it. `/preview` renders this
+   * view from a fixture and has no slug of its own — it gets no menu rather
+   * than a menu of links leading nowhere.
+   */
+  slug?: string;
   actionData?: CommentResult;
 }) {
   const locale = useLocale();
@@ -1341,6 +1349,7 @@ export function TripView({
               </a>
             )}
             <ShareButton title={trip.name} />
+            {slug && <TripMenu slug={slug} />}
           </div>
         </div>
         {progressPct !== null && (

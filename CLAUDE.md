@@ -44,6 +44,8 @@ app/routes.ts               route table (explicit, not file-system based)
 app/routes/
   home.tsx                  landing page
   t.$slug.tsx               the family page — the big one (~1.3k lines)
+  t.$slug.downloads.tsx     the download centre, first entry in the page's menu
+  t.$slug.download.$file.ts the files it links to — GPX and photo zips, built per request
   traveler.$slug.tsx        a traveller's permanent page across all trips
   preview.tsx               fixture-driven family page, dev only
   lang.ts                   language cookie switch
@@ -114,6 +116,11 @@ Messages are **edited in place** rather than re-sent — that is the established
   numbers that decide a stop — how far along, and how far off. Reuses `buildPlanIndex` from
   `plan-anchor.ts` rather than projecting onto a line a third time. The sample spacing is the
   search radius on purpose; the header says why.
+- `downloads.ts` / `downloads.server.ts` — the download centre. The pure half is the file
+  names, which *are* the request (`day-3-photos.zip`), parsed straight back out of the URL.
+  The server half builds a GPX (one `<trk>` per day, transit legs in tracks of their own) or
+  a zip of the stored photos, in memory, per request — hence the size ceiling and the 413 it
+  answers with, which points at the day files instead.
 - `day-stretches.ts` — one answer to "what was pedalled, and where did it stop", shared by
   the page, the share card and the archive. Don't re-derive it a fourth time.
 - `plan-anchor.ts` + `tour-layout.ts` — laying each ridden day over the stretch of the

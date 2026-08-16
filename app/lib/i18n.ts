@@ -107,6 +107,35 @@ const en = {
     label: "Share",
     copied: "Link copied",
   },
+  menu: {
+    /** Like the share button, a glyph on screen and the words only here. */
+    label: "Menu",
+    downloads: "Download centre",
+  },
+  downloads: {
+    title: "Download centre",
+    intro: "Take the trip with you — the tracks as GPX, the pictures as a zip.",
+    back: (name: string) => `← Back to ${name}`,
+    wholeTrip: "The whole trip",
+    perDay: "Day by day",
+    tracks: "Tracks (GPX)",
+    photos: "Photos (ZIP)",
+    daysWithTrack: (n: number) => `${n} ${n === 1 ? "day" : "days"} with a track`,
+    photoCount: (n: number) => `${n} ${n === 1 ? "photo" : "photos"}`,
+    noTrack: "no track",
+    noPhotos: "no photos",
+    empty: "There is nothing on this trip to download yet.",
+    /**
+     * Said plainly rather than left to be discovered: what is stored is a
+     * screen-sized copy of anything the bot had to compress, and no amount of
+     * downloading brings back a camera original that never reached us.
+     */
+    photoNote:
+      "Photos come as they are stored: the untouched file for anything sent as a document, a 2048 px copy for the rest. A Live Photo's motion travels beside its still.",
+    trackNote:
+      "Each day is its own track in the file, and a leg taken by train, ferry or bus is one of its own — so nothing counts kilometres nobody rode.",
+    tooLarge: "Too much to pack in one go — take the days one at a time instead.",
+  },
   error: {
     oops: "Oops!",
     generic: "Error",
@@ -314,6 +343,29 @@ const de: Messages = {
   share: {
     label: "Teilen",
     copied: "Link kopiert",
+  },
+  menu: {
+    label: "Menü",
+    downloads: "Download-Center",
+  },
+  downloads: {
+    title: "Download-Center",
+    intro: "Nimm die Reise mit — die Tracks als GPX, die Bilder als ZIP.",
+    back: (name: string) => `← Zurück zu ${name}`,
+    wholeTrip: "Die ganze Reise",
+    perDay: "Tag für Tag",
+    tracks: "Tracks (GPX)",
+    photos: "Fotos (ZIP)",
+    daysWithTrack: (n: number) => `${n} ${n === 1 ? "Tag" : "Tage"} mit Track`,
+    photoCount: (n: number) => `${n} ${n === 1 ? "Foto" : "Fotos"}`,
+    noTrack: "kein Track",
+    noPhotos: "keine Fotos",
+    empty: "Auf dieser Reise gibt es noch nichts zum Herunterladen.",
+    photoNote:
+      "Die Fotos kommen so, wie sie gespeichert sind: die unveränderte Datei bei allem, was als Datei geschickt wurde, sonst eine 2048-px-Kopie. Die Bewegung eines Live Photos liegt neben seinem Standbild.",
+    trackNote:
+      "Jeder Tag ist ein eigener Track in der Datei, und eine Etappe mit Zug, Fähre oder Bus noch einmal ein eigener — so zählt niemand Kilometer mit, die keiner gefahren ist.",
+    tooLarge: "Zu viel für ein Paket — lade die Tage einzeln herunter.",
   },
   error: {
     oops: "Hoppla!",

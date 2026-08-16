@@ -220,6 +220,17 @@ notes, stats and weather.
   route relations as transparent tiles. It sits under the day colours at half strength, so
   it reads as context rather than competing with the ride, and it is **off until asked for**:
   no tile is fetched from a third party while the button is untouched.
+- A **menu** beside the share button holds the things that are about the trip rather than
+  about one of its days. Its first entry is the **download centre**: the tracks as GPX and
+  the photos as a zip, for the whole trip or for a single day, each day listed with what it
+  actually has on it so nobody taps a day that holds nothing. Each day is its own `<trk>` in
+  the GPX and a leg taken by train, ferry or bus is a track of its own, so no mapping tool
+  totals up kilometres nobody rode. The pictures come as they are stored — the untouched
+  file for anything sent as a document, a 2048 px copy for the rest, a Live Photo's motion
+  beside its still — and the page says so, because the camera original never reached the bot
+  in the first place. Nothing is packed until a link is tapped, and nothing is cached: a
+  zip is built for that one request and handed straight to the browser. A trip too large to
+  pack in one go says so and points at the day-by-day files, which always work.
 
 ## Setup
 
@@ -358,3 +369,7 @@ inline SVG instead of tiles, elevation charts stay scrubbable via a small
 inlined script, photos are local files — a Live Photo's motion travels beside its still
 and plays on hover there too — and each day is written out as GPX.
 Drop the folder on any static host — including your own server — and it works.
+
+That is the traveller's copy of the whole trip, made from Telegram. The family's is the
+**download centre** in the page's own menu, which needs no bot and no command: single days,
+single kinds of file, built on request.
