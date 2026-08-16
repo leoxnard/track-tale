@@ -1322,8 +1322,10 @@ export function createBot(): Bot {
     const lines = [`🔄 ${stored} day(s) now kept as recorded.`];
     if (whole > 0) lines.push(`${whole} came in whole and needed nothing.`);
     if (unrecoverable > 0) {
+      // Phrased without a verb that has to agree with the number: the house
+      // style here is "day(s)", and "1 were uploaded" is what that costs.
       lines.push(
-        `${unrecoverable} were uploaded as a file and cannot be recovered — send the GPX or FIT again (delete the old track in /manage first) if you still have it.`,
+        `${unrecoverable} came from a GPX or FIT upload and cannot be recovered — send the file again (delete the old track in /manage first) if you still have it.`,
       );
     }
     if (failed > 0) lines.push(`${failed} could not be fetched; try again later.`);
