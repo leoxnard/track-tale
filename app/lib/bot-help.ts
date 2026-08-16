@@ -81,10 +81,13 @@ ${LIVE_HELP}*Plan*
 /compressphotos — shrink oversized photos uploaded before compression existed
 
 *Packing list*
-/pack Tent | Hilleberg Anjan 2 | https://… — one thing packed; the model and
-  the link are optional, so /pack Spare tube is a whole entry
-/pack — the whole list, with a bin beside every line. The family sees it in the
-  page's menu and can download it as a spreadsheet
+/pack — the list, and buttons to add, change or remove a line. Nothing to
+  remember: adding asks you for the name, the model, the link and the category
+  one message at a time, and anything but the name can be skipped
+• Categories are your own words — Camping, Bike, Kitchen — and the list is
+  grouped by them, on the page and in the file
+• The family sees the list in the page's menu and can download it as a
+  spreadsheet
 
 *Tools*
 /merge "Tour Name" url1 url2 ... — fetch Komoot tours, merge by time, send GPX

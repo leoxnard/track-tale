@@ -2,6 +2,7 @@ import { data, Link } from "react-router";
 import type { Route } from "./+types/t.$slug.packing";
 import { getTripBySlug } from "../lib/db.server";
 import { listPackItems } from "../lib/packing.server";
+import { groupByCategory } from "../lib/packing";
 import { downloadFileName } from "../lib/downloads";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { resolveLocale } from "../lib/i18n";
@@ -30,7 +31,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return {
     locale,
     name: trip.name,
-    items: items.map(({ id, title, model, url }) => ({ id, title, model, url })),
+    // Grouped here rather than in the component: the grouping is the same
+    // answer the bot and the CSV give, and it belongs where they get it from.
+    groups: groupByCategory(items).map((group) => ({
+      category: group.category,
+      items: group.items.map(({ id, title, model, url }) => ({ id, title, model, url })),
+    })),
+    total: items.length,
   };
 }
 
@@ -42,7 +49,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function PackingPage({ loaderData, params }: Route.ComponentProps) {
-  const { name, items } = loaderData;
+  const { name, groups, total } = loaderData;
   const m = useMessages();
 
   return (
@@ -60,38 +67,51 @@ export default function PackingPage({ loaderData, params }: Route.ComponentProps
         <p className="mt-2 text-faint">{m.packing.intro}</p>
       </header>
 
-      {items.length === 0 ? (
+      {total === 0 ? (
         <p className="mt-10 text-faint">{m.packing.empty}</p>
       ) : (
         <>
-          <p className="mt-8 text-sm text-faint">{m.packing.count(items.length)}</p>
-          <ul className="mt-3 grid gap-2">
-            {items.map((item) => (
-              <li
-                key={item.id}
-                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-trail px-4 py-3"
-              >
-                <span className="font-bold text-pine">{item.title}</span>
-                {item.model && <span className="text-sm text-faint">{item.model}</span>}
-                {item.url && (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer nofollow"
-                    className="w-full text-xs text-pine underline underline-offset-2 hover:text-pine-soft sm:w-auto"
+          <p className="mt-8 text-sm text-faint">{m.packing.count(total)}</p>
+
+          {groups.map((group) => (
+            <section key={group.category ?? "\u0000"} className="mt-6">
+              {/* A list nobody filed gets no heading at all: one heading reading
+                  "Everything else" over the whole page says nothing. */}
+              {(group.category !== null || groups.length > 1) && (
+                <h2 className="font-display text-xl font-semibold text-pine">
+                  {group.category ?? m.packing.other}
+                </h2>
+              )}
+              <ul className="mt-3 grid gap-2">
+                {group.items.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-trail px-4 py-3"
                   >
-                    {hostOf(item.url)}
-                  </a>
-                )}
-              </li>
-            ))}
-          </ul>
+                    <span className="font-bold text-pine">{item.title}</span>
+                    {item.model && <span className="text-sm text-faint">{item.model}</span>}
+                    {item.url && (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer nofollow"
+                        className="w-full text-xs text-pine underline underline-offset-2 hover:text-pine-soft sm:w-auto"
+                      >
+                        {hostOf(item.url)}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+
           <a
             href={`/t/${params.slug}/download/${downloadFileName({ kind: "packing", day: null })}`}
             // A plain document request, as in the download centre: a client-side
             // navigation would try to make a loader response out of a CSV.
             download
-            className="mt-6 inline-flex items-center gap-2 rounded-xl border border-trail px-4 py-3 text-sm text-pine transition hover:border-pine-soft hover:bg-trail/30 focus-visible:outline-2 focus-visible:outline-pine"
+            className="mt-8 inline-flex items-center gap-2 rounded-xl border border-trail px-4 py-3 text-sm text-pine transition hover:border-pine-soft hover:bg-trail/30 focus-visible:outline-2 focus-visible:outline-pine"
           >
             {m.packing.download}
           </a>

@@ -244,15 +244,18 @@ notes, stats and weather.
   zip is built for that one request and handed straight to the browser. A trip too large to
   pack in one go says so and points at the day-by-day files, which always work.
 - The menu's second entry, on a trip that has one, is the **packing list**: what went along,
-  each thing with an optional model and an optional link, in the order it was packed rather
-  than sorted — a list is written the way it is carried, and alphabetising it loses the
-  grouping the traveller had in their head. It is the one page here that is not about a day:
-  it exists before the first one does. Links leave with no referrer and say only which site
-  they go to, because half a product URL is tracking parameters and the row has to stay one
-  line on a phone. The whole list is downloadable as a **CSV** — three columns, the same
-  three fields — from the page itself and from the download centre, for the reader who is
-  planning the same trip. A trip with nothing packed gets no menu entry at all: the family
-  cannot add to the list, so an empty page would be an emptiness they can do nothing about.
+  each thing with an optional model and an optional link, grouped under the traveller's own
+  **categories** — Camping, Bike, Kitchen. Groups come out in the order they first appeared
+  rather than alphabetically, and within a group things stay in the order they were packed:
+  a list is written the way it is carried, and sorting it loses the grouping the traveller
+  had in their head. Whatever was never filed anywhere goes last. It is the one page here
+  that is not about a day: it exists before the first one does. Links leave with no referrer
+  and say only which site they go to, because half a product URL is tracking parameters and
+  the row has to stay one line on a phone. The whole list is downloadable as a **CSV** —
+  category, name, model, link — from the page itself and from the download centre, for the
+  reader who is planning the same trip. A trip with nothing packed gets no menu entry at all:
+  the family cannot add to the list, so an empty page would be an emptiness they can do
+  nothing about.
 
 ## Setup
 
@@ -320,8 +323,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/endtrip` | mark finished — pages stay, uploads stop |
 | `/deletetrip` | pick a trip and confirm; erases it and its photos, irreversibly |
 | `/note …` | journal entry (plain text works too) |
-| `/pack Tent \| Hilleberg Anjan 2 \| https://…` | one thing on the packing list; model and link optional |
-| `/pack` | the whole list, with a bin beside every line |
+| `/pack` | the packing list, and buttons to add, change or remove a line |
 | `/undo`, reply `/delete` | remove the last / a specific item |
 | `/manage` | browse the trip and delete anything on it — notes, photos, tracks, guestbook messages |
 | `/livephoto` | place a Live Photo's video by hand: pick the day, then the photo |
@@ -402,14 +404,28 @@ single kinds of file, built on request.
 
 ## Packing lists
 
-`/pack Tent | Hilleberg Anjan 2 | https://hilleberg.com/anjan` puts one thing on the trip's
-list. The model and the link are both optional and are told apart by their shape rather than
-by how many bars were typed, so `/pack Stove | https://trangia.se` needs no empty field held
-open in the middle for it and `/pack Spare tube` is a whole entry. A link has to start with
-`http://`, `https://` or `www.`; anything else is read as part of the model, which is text on
-a page and nothing more.
+`/pack` opens the list; everything else is a tap. **Add** asks four questions, one short
+message at a time — what is it, which one exactly, a link to it, and which category it
+belongs in — with a Skip button under everything but the name and a Cancel button under all
+of them. **Change** picks a line and then the field to rewrite. **Remove** picks a line and
+asks once more.
 
-`/pack` on its own shows the list as a screen — numbered lines, a bin beside each, paged like
-`/manage` — and the 🗑 button under each confirmation, `/undo` and a `/delete` reply all reach
-a line the usual way. The list belongs to the trip and not to a day, so it never touches
-`/day`: it is packed once, before the first day exists.
+There is deliberately no syntax. An earlier version took a whole entry on one line with bars
+between the fields, and `/pack Tent | Hilleberg Anjan 2 | https://…` typed on a phone, in a
+tent, is the kind of thing nobody does twice — a bar in the wrong place meant retyping the
+lot.
+
+**Categories** are free text and the traveller's own words: the question offers the ones
+already in use as buttons, and typing anything else starts a new one. A category exists
+exactly as long as something is filed under it. The list is grouped by them everywhere it
+appears — the chat screen, the family page and the CSV.
+
+While a question is open, a plain message in that chat is an **answer rather than a journal
+note**, which is the one thing this feature costs. Two things keep it from biting: every
+question carries a Cancel button, and an unanswered one lapses after half an hour, so an
+abandoned add cannot still be eating notes the next morning. A link sent as the link answer
+is that entry's link — the Komoot and LiveTrack handling steps aside while the question
+stands.
+
+The list belongs to the trip and not to a day: it is packed once, before the first day
+exists, so `/pack` never touches `/day`.

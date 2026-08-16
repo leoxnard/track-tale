@@ -118,6 +118,8 @@ const en = {
     intro: "What went along — and, where it matters, exactly which one.",
     back: (name: string) => `← Back to ${name}`,
     count: (n: number) => `${n} ${n === 1 ? "thing" : "things"}`,
+    /** The heading over the things that were never filed anywhere. */
+    other: "Everything else",
     download: "Download as CSV",
     empty: "Nothing has been packed on this trip yet.",
   },
@@ -378,6 +380,7 @@ const de: Messages = {
     intro: "Was mitgekommen ist — und, wo es darauf ankommt, genau welches.",
     back: (name: string) => `← Zurück zu ${name}`,
     count: (n: number) => `${n} ${n === 1 ? "Sache" : "Sachen"}`,
+    other: "Alles Übrige",
     download: "Als CSV herunterladen",
     empty: "Auf dieser Reise wurde noch nichts eingepackt.",
   },

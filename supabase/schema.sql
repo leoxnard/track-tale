@@ -129,8 +129,37 @@ create table if not exists pack_items (
   -- a link that says more than any model number would.
   model text,
   url text,
+  -- Camping, Bike, Kitchen… — the traveller's own words, free text rather than
+  -- a table of its own. A category has nothing to it but its name, and the set
+  -- of them is whatever the list happens to use; a lookup table would add a
+  -- join, a second delete path and a way for a category to outlive its things.
+  category text,
   author_telegram_id bigint,
   author_name text,
+  created_at timestamptz not null default now()
+);
+
+-- The half-finished packing list entry a chat is currently being asked about.
+--
+-- Adding something is a short conversation — name, model, link, category — and
+-- Telegram brings every answer in as its own unrelated update, so the question
+-- that is outstanding has to be written down somewhere. One row per chat, like
+-- pending_replacements: a chat is only ever being asked one thing at a time,
+-- and starting again replaces whatever was half-typed.
+create table if not exists pack_sessions (
+  chat_id bigint primary key references chats(chat_id) on delete cascade,
+  trip_id uuid not null references trips(id) on delete cascade,
+  -- What the next message in the chat will be taken to mean.
+  step text not null check (step in ('title', 'model', 'url', 'category', 'edit')),
+  -- The entry being built, as far as it has got.
+  title text,
+  model text,
+  url text,
+  category text,
+  -- Set instead of the draft when an existing entry is being changed: which
+  -- one, and which of its fields the answer belongs in.
+  item_id uuid references pack_items(id) on delete cascade,
+  field text check (field in ('title', 'model', 'url', 'category')),
   created_at timestamptz not null default now()
 );
 
@@ -239,6 +268,7 @@ alter table weather_cache enable row level security;
 alter table pending_replacements enable row level security;
 alter table pending_motions enable row level security;
 alter table pack_items enable row level security;
+alter table pack_sessions enable row level security;
 
 grant usage on schema public to service_role;
 grant all privileges on all tables in schema public to service_role;
@@ -301,6 +331,9 @@ alter table users add column if not exists traveler_slug text unique;
 -- A packing list entry is deletable like everything else the bot creates, so
 -- the record of which message made it has to be allowed to name one. Dropping
 -- and re-adding is the only way to widen a check constraint in place.
+-- Categories, and the questions the bot asks to fill an entry in, both came
+-- after the list itself.
+alter table pack_items add column if not exists category text;
 alter table bot_actions drop constraint if exists bot_actions_entity_type_check;
 alter table bot_actions add constraint bot_actions_entity_type_check check (
   entity_type in ('note', 'media', 'track_segment', 'plan_segment', 'comment', 'pack_item')

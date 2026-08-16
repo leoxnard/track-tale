@@ -83,7 +83,8 @@ does I/O and generally does not.
 | `bot-actions.server.ts` | trip lifecycle: create, switch, rename, dates, end, delete |
 | `bot-route.server.ts` | `/route` — where the traveller was last seen, and the cut GPX that goes back |
 | `shops.server.ts` | `/supermarkt` — the Overpass request for shops along the road ahead, and its message |
-| `packing.ts` / `packing.server.ts` | `/pack` — the trip's packing list: reading `Title \| Model \| Link` (pure, and matched by shape rather than by position), the rows, and the CSV the download centre hands out |
+| `bot-packing.server.ts` | `/pack` — the list screen in its three modes, and the questions that fill an entry in: name, model, link, category, one message at a time |
+| `packing.ts` / `packing.server.ts` | the packing list itself: what counts as a link, grouping by category, the CSV (pure), and the rows plus the one-per-chat record of which question is open (server) |
 | `originals.server.ts` | keeping a line as it was imported — the plan for `/route` to cut from, a ridden day for the download centre to hand back |
 | `bot-chrome.server.ts` | plumbing only — send/edit a view, record what a message made, download a file, keep the webhook subscribed |
 | `screens.server.ts` | the tappable screens (trip status, day picker, confirmations) |

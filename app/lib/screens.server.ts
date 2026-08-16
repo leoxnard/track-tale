@@ -2,12 +2,10 @@ import { InlineKeyboard } from "grammy";
 import { supabase } from "./supabase.server";
 import { env } from "./env.server";
 import { escapeMd } from "./telegram-md";
-import { countSummary, encodeAction, paginate, PAGE_SIZE, type DayPickerMode } from "./manage";
+import { countSummary, encodeAction, type DayPickerMode } from "./manage";
 import { dayTally, loadDays, tallyTotal, type DayTally, type View } from "./manage.server";
 import { tripDayCount, type DbTrip } from "./db.server";
 import { isTransit } from "./transport";
-import { getPackItem, listPackItems } from "./packing.server";
-import { deleteEntity } from "./entities.server";
 
 /**
  * The screens that turn a command you have to remember the syntax of into a
@@ -287,7 +285,7 @@ export async function tripStatusView(trip: DbTrip): Promise<View> {
     .text("🔄 Swap a photo", encodeAction({ type: "replaceHome" }))
     .text("🗑️ Empty a day", encodeAction({ type: "days", page: 0, mode: "clear" }))
     .row()
-    .text("🎒 Packing list", encodeAction({ type: "packHome", page: 0 }))
+    .text("🎒 Packing list", encodeAction({ type: "packList", mode: "view", page: 0 }))
     .row()
     .text("🔗 New family link", encodeAction({ type: "relink", confirmed: false }))
     .text("🏁 End trip", encodeAction({ type: "endtrip", confirmed: false }));
@@ -414,92 +412,3 @@ export function relinkConfirmView(trip: DbTrip): View {
   };
 }
 
-/**
- * The packing list, as a screen.
- *
- * One message that lists everything packed and carries a bin per line, paged
- * the way `/manage` pages a day — a list long enough to be worth writing down
- * is long enough that a keyboard of forty buttons would be a wall to scroll
- * past on a phone.
- *
- * The list itself is numbered in the text and the buttons repeat the numbers
- * rather than the titles: a button label is one short line, and "🗑 7" beside
- * "7. Sleeping bag · Cumulus Panyam 450" says which line it takes off far
- * better than the first twenty characters of that line would.
- */
-export async function packListView(trip: DbTrip, page = 0): Promise<View> {
-  const items = await listPackItems(trip.id);
-  if (items.length === 0) {
-    return {
-      text:
-        `🎒 *${escapeMd(trip.name)}* — nothing on the packing list yet.\n\n` +
-        `Add something with\n\`/pack Tent | Hilleberg Anjan 2 | https://…\`\n\n` +
-        `_The model and the link are optional — "/pack Spare tube" is a whole entry._`,
-      keyboard: backToStatus(),
-      markdown: true,
-    };
-  }
-
-  const paged = paginate(items, page);
-  const offset = paged.page * PAGE_SIZE;
-  const lines = paged.items.map((item, i) => {
-    const number = offset + i + 1;
-    const rest = [item.model, item.url]
-      .filter((part): part is string => Boolean(part))
-      .map(escapeMd)
-      .join(" · ");
-    return `${number}. *${escapeMd(item.title)}*${rest ? ` — ${rest}` : ""}`;
-  });
-
-  const keyboard = new InlineKeyboard();
-  paged.items.forEach((item, i) => {
-    keyboard.text(`🗑 ${offset + i + 1}`, encodeAction({ type: "packAsk", id: item.id }));
-    // Four bins to a row: they are the width of their own label and a row of
-    // twelve would be unreadable.
-    if ((i + 1) % 4 === 0) keyboard.row();
-  });
-  keyboard.row();
-  if (paged.page > 0) {
-    keyboard.text("‹ Previous", encodeAction({ type: "packHome", page: paged.page - 1 }));
-  }
-  if (paged.page < paged.pageCount - 1) {
-    keyboard.text("Next ›", encodeAction({ type: "packHome", page: paged.page + 1 }));
-  }
-  keyboard.row().text("🎒 Trip", encodeAction({ type: "status" }));
-
-  return {
-    text:
-      `🎒 *${escapeMd(trip.name)}* — packing list (${items.length})\n\n` +
-      `${lines.join("\n")}\n\n` +
-      `_${tripLink(trip)}/packing — the family sees the same list, and can download it._`,
-    keyboard,
-    markdown: true,
-  };
-}
-
-/** The second tap: what is about to go, quoted back. */
-export async function packConfirmView(trip: DbTrip, id: string): Promise<View | null> {
-  const item = await getPackItem(trip.id, id);
-  // Gone already, or from another trip's list — the payload is a button that
-  // may be days old, so neither is an error worth reporting.
-  if (!item) return null;
-  return {
-    text: `🗑️ Take *${escapeMd(item.title)}* off the packing list?${
-      item.model || item.url ? `\n${escapeMd([item.model, item.url].filter(Boolean).join(" · "))}` : ""
-    }`,
-    keyboard: new InlineKeyboard()
-      .text("🗑 Yes, remove it", encodeAction({ type: "packDel", id }))
-      .row()
-      .text("Cancel", encodeAction({ type: "packHome", page: 0 })),
-    markdown: true,
-  };
-}
-
-/** Removed, and the list again underneath it. */
-export async function packDeleteView(trip: DbTrip, id: string): Promise<View | null> {
-  const item = await getPackItem(trip.id, id);
-  if (!item) return null;
-  await deleteEntity("pack_item", id);
-  const view = await packListView(trip, 0);
-  return { ...view, text: `🗑️ *${escapeMd(item.title)}* removed.\n\n${view.text}` };
-}

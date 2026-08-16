@@ -62,9 +62,6 @@ import {
   endTripConfirmView,
   km,
   myPageConfirmView,
-  packConfirmView,
-  packDeleteView,
-  packListView,
   pageOfDay,
   relinkConfirmView,
   tripFinishedView,
@@ -88,8 +85,17 @@ import {
   type BotState,
 } from "./bot-access.server";
 import { helpText, LIVE_OFF_NOTICE } from "./bot-help";
-import { packItemLine, parsePackItem } from "./packing";
-import { addPackItem } from "./packing.server";
+import {
+  packAnswer,
+  packCancelView,
+  packConfirmView,
+  packDeleteView,
+  packFieldsView,
+  packListView,
+  packQuestionOpen,
+  startPackAdd,
+  startPackEdit,
+} from "./bot-packing.server";
 import { cutForTrip, lastKnownPosition, loadPlan, type Position } from "./bot-route.server";
 import { DEFAULT_TARGET_KM } from "./route-cut";
 import { shopsAhead, shopsKeyboard, shopsMessage } from "./shops.server";
@@ -122,6 +128,11 @@ import {
   switchToTrip,
   tripSwitchedView,
 } from "./bot-actions.server";
+
+/** Who an entry is credited to, in the shape the packing list stores it. */
+function author(ctx: Context): { id: number; name: string } {
+  return { id: ctx.state.senderId, name: ctx.state.senderName };
+}
 
 export function createBot(): Bot {
   const bot = new Bot(env.telegramBotToken);
@@ -301,46 +312,18 @@ export function createBot(): Bot {
   });
 
   /**
-   * The packing list: `/pack Tent | Hilleberg Anjan 2 | https://…` adds a line,
-   * `/pack` on its own shows the list with a bin beside every entry.
+   * The packing list. `/pack` opens it and everything else is a tap: add,
+   * change, remove. There is no syntax — the bot asks for the name, the model,
+   * the link and the category one message at a time, so nothing has to be
+   * remembered and nothing has to be retyped when one field comes out wrong.
    *
-   * It belongs to the trip and not to the current day — a list is packed once,
-   * before the first day exists — so unlike a note this never touches /day.
+   * It belongs to the trip and not to a day — a list is packed once, before the
+   * first day exists — so unlike a note this never touches /day.
    */
   bot.command("pack", async (ctx) => {
     const trip = await requireTrip(ctx);
     if (!trip) return;
-
-    const text = (ctx.match as string).trim();
-    if (!text) {
-      await sendView(ctx, await packListView(trip, 0));
-      return;
-    }
-
-    const parsed = parsePackItem(text);
-    if (!parsed.ok) {
-      await ctx.reply(
-        parsed.reason === "bad-url"
-          ? "That link isn't one I can put on the page — it needs to start with http:// or https://."
-          : "Usage: /pack Tent | Hilleberg Anjan 2 | https://…\n\n" +
-              "The model and the link are optional, but the name isn't — " +
-              "/pack Spare tube is a whole entry.",
-      );
-      return;
-    }
-
-    const { senderId, senderName } = ctx.state;
-    const id = await addPackItem(trip.id, parsed.fields, { id: senderId, name: senderName });
-    const sent = await ctx
-      .reply(`🎒 Packed: ${packItemLine(parsed.fields)}`, {
-        // The whole list is one tap away, and that is also where the bins are.
-        reply_markup: new InlineKeyboard()
-          .text("🗑 Remove this", encodeAction({ type: "packAsk", id }))
-          .text("🎒 Packing list", encodeAction({ type: "packHome", page: 0 })),
-        link_preview_options: { is_disabled: true },
-      })
-      .catch(() => undefined);
-    await recordAction(ctx, sent, "pack_item", id);
+    await sendView(ctx, await packListView(trip, "view", 0));
   });
 
   bot.command("delete", async (ctx) => {
@@ -785,14 +768,40 @@ export function createBot(): Bot {
           await clearReplacement(ctx.chat!.id);
           view = await replaceDayView(trip, action.dayNumber, 0);
           break;
-        case "packHome":
-          view = await packListView(trip, action.page);
+        case "packList":
+          view = await packListView(trip, action.mode, action.page);
+          break;
+        case "packAdd":
+          view = await startPackAdd(ctx.chat!.id, trip);
+          break;
+        case "packPick":
+          view = await packFieldsView(trip, action.id);
+          break;
+        case "packField":
+          view = await startPackEdit(ctx.chat!.id, trip, action.field, action.id);
           break;
         case "packAsk":
           view = await packConfirmView(trip, action.id);
           break;
         case "packDel":
           view = await packDeleteView(trip, action.id);
+          break;
+        case "packSkip":
+          view = await packAnswer(ctx.chat!.id, trip, { kind: "skip" }, author(ctx));
+          break;
+        case "packCat":
+          view = await packAnswer(
+            ctx.chat!.id,
+            trip,
+            { kind: "category", index: action.index },
+            author(ctx),
+          );
+          break;
+        case "packCatNone":
+          view = await packAnswer(ctx.chat!.id, trip, { kind: "no-category" }, author(ctx));
+          break;
+        case "packCancel":
+          view = await packCancelView(ctx.chat!.id, trip);
           break;
         case "motionHome":
           view = await motionOverview(trip, action.code);
@@ -857,8 +866,13 @@ export function createBot(): Bot {
         // /replace into the delete screen would be a bad place to put them by
         // accident, of all the screens to land on — and the packing list is
         // not on a day at all, so it has nowhere else to come back to.
-        if (action.type === "packAsk" || action.type === "packDel") {
-          view = await packListView(trip, 0);
+        if (
+          action.type === "packAsk" ||
+          action.type === "packDel" ||
+          action.type === "packPick" ||
+          action.type === "packField"
+        ) {
+          view = await packListView(trip, "view", 0);
         } else {
           view =
             action.type === "replacePick"
@@ -1697,6 +1711,18 @@ export function createBot(): Bot {
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (text.startsWith("/")) return; // unknown command, stay quiet
+
+    // An open packing question comes first, before anything about what the
+    // text looks like: a link sent as an answer is that entry's link, not a
+    // route to import, and "Tent" is a name rather than a journal note. The
+    // question expires on its own, so a chat is never stuck in this branch.
+    if (await packQuestionOpen(ctx.chat!.id)) {
+      const trip = await requireTrip(ctx);
+      if (trip) {
+        await sendView(ctx, await packAnswer(ctx.chat!.id, trip, { kind: "text", text }, author(ctx)));
+        return;
+      }
+    }
 
     const liveUrl = findLiveTrackUrl(text);
     const komootUrl = findKomootUrl(text);

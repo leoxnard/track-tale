@@ -125,14 +125,32 @@ export type ManageAction =
   /** The same position again, asking what is on the road ahead of it. */
   | { type: "shops"; km: number; lat: number; lng: number }
   /**
-   * The packing list: the whole list, then the two taps it takes to remove a
-   * line from it. It hangs off the trip rather than off a day, so it needs
+   * The packing list. It hangs off the trip rather than off a day, so it needs
    * screens of its own rather than a fifth `ItemKind` — every day-shaped
    * payload above carries a day number this has no answer for.
+   *
+   * One list screen in three modes: reading it, picking a line to change, and
+   * picking one to delete. The modes share a screen because they are the same
+   * list — only what a tap means differs.
    */
-  | { type: "packHome"; page: number }
+  | { type: "packList"; mode: PackMode; page: number }
+  /** Start the questions that build a new entry. */
+  | { type: "packAdd" }
+  /** Picked a line to change; next comes the field. */
+  | { type: "packPick"; id: string }
+  | { type: "packField"; field: PackField; id: string }
+  /** Deleting, which alone of the three keeps its second tap. */
   | { type: "packAsk"; id: string }
   | { type: "packDel"; id: string }
+  /**
+   * The answers that are a tap rather than a message: no model, no link, one
+   * of the categories already in use, or none at all. The session knows which
+   * question is open, so none of these has to say.
+   */
+  | { type: "packSkip" }
+  | { type: "packCat"; index: number }
+  | { type: "packCatNone" }
+  | { type: "packCancel" }
   | { type: "motionHome"; code: string }
   | { type: "motionDay"; code: string; dayNumber: number; page: number }
   | { type: "motionPick"; code: string; id: string };
@@ -159,6 +177,30 @@ const PREFIX = "mg";
 
 const MODE_CODE: Record<DayPickerMode, string> = { set: "s", clear: "c" };
 const CODE_MODE: Record<string, DayPickerMode> = { s: "set", c: "clear" };
+
+/**
+ * What tapping a line on the packing list means: nothing, change it, remove it.
+ */
+export type PackMode = "view" | "edit" | "del";
+
+/** Which field of an entry an answer is for. Mirrors `PackField` in packing.server. */
+export type PackField = "title" | "model" | "url" | "category";
+
+const PACK_MODE_CODE: Record<PackMode, string> = { view: "v", edit: "e", del: "d" };
+const PACK_CODE_MODE: Record<string, PackMode> = { v: "view", e: "edit", d: "del" };
+
+const PACK_FIELD_CODE: Record<PackField, string> = {
+  title: "t",
+  model: "m",
+  url: "u",
+  category: "c",
+};
+const PACK_CODE_FIELD: Record<string, PackField> = {
+  t: "title",
+  m: "model",
+  u: "url",
+  c: "category",
+};
 
 /** "1" or "0" — a confirmed second tap, or the question that precedes it. */
 function flag(on: boolean): string {
@@ -225,8 +267,22 @@ export function encodeAction(action: ManageAction): string {
       return `${PREFIX}:rc:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
     case "shops":
       return `${PREFIX}:sh:${action.km}:${action.lat.toFixed(5)}:${action.lng.toFixed(5)}`;
-    case "packHome":
-      return `${PREFIX}:pk:${action.page}`;
+    case "packList":
+      return `${PREFIX}:pk:${PACK_MODE_CODE[action.mode]}:${action.page}`;
+    case "packAdd":
+      return `${PREFIX}:pnew`;
+    case "packPick":
+      return `${PREFIX}:ped:${action.id}`;
+    case "packField":
+      return `${PREFIX}:pfd:${PACK_FIELD_CODE[action.field]}:${action.id}`;
+    case "packSkip":
+      return `${PREFIX}:pskip`;
+    case "packCat":
+      return `${PREFIX}:pcat:${action.index}`;
+    case "packCatNone":
+      return `${PREFIX}:pnone`;
+    case "packCancel":
+      return `${PREFIX}:pcx`;
     case "packAsk":
       return `${PREFIX}:pa:${action.id}`;
     case "packDel":
@@ -355,10 +411,36 @@ export function parseAction(data: string): ManageAction | null {
       return { type: parts[1] === "rc" ? "cut" : "shops", km, lat, lng };
     }
     case "pk": {
-      const page = Number(parts[2]);
-      if (!Number.isInteger(page) || page < 0) return null;
-      return { type: "packHome", page };
+      const mode = PACK_CODE_MODE[parts[2]];
+      const page = Number(parts[3]);
+      if (!mode || !Number.isInteger(page) || page < 0) return null;
+      return { type: "packList", mode, page };
     }
+    case "pnew":
+      return { type: "packAdd" };
+    case "ped": {
+      const id = parts.slice(2).join(":");
+      return id.length > 0 ? { type: "packPick", id } : null;
+    }
+    case "pfd": {
+      const field = PACK_CODE_FIELD[parts[2]];
+      const id = parts.slice(3).join(":");
+      if (!field || id.length === 0) return null;
+      return { type: "packField", field, id };
+    }
+    case "pskip":
+      return { type: "packSkip" };
+    case "pcat": {
+      const index = Number(parts[2]);
+      // An index the list no longer has is caught where it is read; a value
+      // that is not an index at all stops here.
+      if (!Number.isInteger(index) || index < 0) return null;
+      return { type: "packCat", index };
+    }
+    case "pnone":
+      return { type: "packCatNone" };
+    case "pcx":
+      return { type: "packCancel" };
     case "pa":
     case "py": {
       const id = parts.slice(2).join(":");
