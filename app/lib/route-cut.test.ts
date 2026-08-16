@@ -91,6 +91,22 @@ describe("cutPlan", () => {
     expect(haversineM(cut.points[0], cut.points[1])).toBeGreaterThan(5);
   });
 
+  it("copies a dense plan out vertex for vertex", () => {
+    // A route fetched at full resolution has points a few metres apart through
+    // a bend. Thinning them here would undo the reason for fetching it: the
+    // file has to describe the road closely enough for an importer to match it.
+    const dense: TrackPoint[] = Array.from({ length: 400 }, (_, i) => ({
+      lat: 50 + Math.sin(i / 20) * 0.00005,
+      lng: 8 + i * 0.00004, // ≈ 3 m apart
+    }));
+    const cut = cutPlan(dense, { lat: dense[0].lat, lng: dense[0].lng }, 100_000)!;
+
+    expect(cut.reachedEnd).toBe(true);
+    // Every vertex, plus nothing: the position coincides with the first one.
+    expect(cut.points).toHaveLength(dense.length);
+    expect(cut.points[200].lat).toBeCloseTo(dense[200].lat, 9);
+  });
+
   it("handles a one-point plan without inventing a ride", () => {
     const cut = cutPlan([{ lat: 50, lng: 8 }], { lat: 50.01, lng: 8 }, 130_000)!;
     expect(cut.cutM).toBe(0);

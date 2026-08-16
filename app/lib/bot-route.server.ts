@@ -6,9 +6,12 @@ import {
   computeStats,
   formatDistanceM,
   fromGeoJson,
+  haversineM,
   type TrackGeoJson,
   type TrackPoint,
 } from "./track";
+import { buildPlanIndex } from "./plan-anchor";
+import { fetchKomootTour, parseKomootUrl } from "./komoot";
 import { toGpx } from "./gpx-export";
 import {
   cutPlan,
@@ -106,15 +109,165 @@ export async function lastKnownPosition(tripId: string): Promise<Position | null
   return best;
 }
 
-/** The trip's plan, every segment laid end to end in the order it was added. */
-export async function loadPlan(tripId: string): Promise<TrackPoint[]> {
+interface PlanPiece {
+  points: TrackPoint[];
+  /** The Komoot tour this piece was imported from, where there was one. */
+  sourceUrl: string | null;
+}
+
+/** The trip's plan as stored, one entry per imported segment, in order. */
+async function loadPlanPieces(tripId: string): Promise<PlanPiece[]> {
   const { data: rows } = await supabase()
     .from("plan_segments")
-    .select("geojson")
+    .select("geojson, source_url")
     .eq("trip_id", tripId)
     .order("sort_order");
 
-  return (rows ?? []).flatMap((row) => fromGeoJson(row.geojson as TrackGeoJson));
+  return (rows ?? []).map((row) => ({
+    points: fromGeoJson(row.geojson as TrackGeoJson),
+    sourceUrl: (row.source_url as string | null) ?? null,
+  }));
+}
+
+/** The trip's plan, every segment laid end to end in the order it was added. */
+export async function loadPlan(tripId: string): Promise<TrackPoint[]> {
+  return (await loadPlanPieces(tripId)).flatMap((piece) => piece.points);
+}
+
+/**
+ * How long /route will wait for Komoot before cutting from the stored plan.
+ *
+ * Short on purpose. The stored line is a perfectly good answer; the original is
+ * a better one, and it is not worth more than a few seconds of a traveller
+ * standing in a car park with a phone.
+ */
+const SOURCE_FETCH_TIMEOUT_MS = 7_000;
+
+export interface PlanForCut {
+  points: TrackPoint[];
+  /** Segments the cut crosses that were re-fetched at full resolution. */
+  fromSource: number;
+  /** Segments that had an original to fetch, where the fetch failed. */
+  degraded: number;
+}
+
+/**
+ * The plan to cut from — at the resolution it was drawn at, where that can be
+ * had.
+ *
+ * This exists because of what the stored plan is: a *thinned* copy. The page
+ * draws the whole tour on every visit, so what goes in the database is reduced
+ * to a budget — and a line that is thinned enough to draw cheaply is not the
+ * line a navigation device wants. Cut a day out of it and every bend it
+ * smoothed is a stretch the importer cannot match to a road: Komoot marks those
+ * off-grid, which is precisely what cutting the tour by hand in gpx.studio
+ * never did, because that worked from the original export.
+ *
+ * So the original is fetched back — but only for the segments the day actually
+ * crosses, worked out first from the stored copy, which is accurate enough to
+ * answer *which* segment while being wrong about its corners. A day is normally
+ * one segment, so this is normally one request.
+ *
+ * Komoot stays a preference and never a dependency: anything that fails or is
+ * slow leaves that segment as stored, and the caller says so in the message.
+ * A plan uploaded as GPX has no original to go back to at all — for those the
+ * stored line is the best there is, which is the other half of why it is now
+ * thinned by shape rather than by counting.
+ */
+export async function planForCut(
+  tripId: string,
+  from: { lat: number; lng: number },
+  targetM: number,
+): Promise<PlanForCut> {
+  const pieces = await loadPlanPieces(tripId);
+  if (pieces.length === 0) return { points: [], fromSource: 0, degraded: 0 };
+
+  const spanned = piecesSpannedBy(pieces, from, targetM);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SOURCE_FETCH_TIMEOUT_MS);
+
+  let fromSource = 0;
+  let degraded = 0;
+  try {
+    const fetched = await Promise.all(
+      pieces.map(async (piece, i) => {
+        const ref = spanned.has(i) ? parseKomootUrl(piece.sourceUrl ?? "") : null;
+        if (!ref) return null;
+        try {
+          return await fetchKomootTour(ref, controller.signal);
+        } catch {
+          return "failed" as const;
+        }
+      }),
+    );
+
+    const points: TrackPoint[] = [];
+    // Appended one by one rather than spread in: an original fetched at full
+    // resolution can be hundreds of thousands of points, and `push(...points)`
+    // passes every one of them as an argument — which is a stack overflow, not
+    // a route, somewhere north of a hundred thousand.
+    const append = (from: TrackPoint[]) => {
+      for (const point of from) points.push(point);
+    };
+    fetched.forEach((result, i) => {
+      if (result === "failed") {
+        degraded++;
+        append(pieces[i].points);
+      } else if (result) {
+        fromSource++;
+        append(result.points);
+      } else {
+        append(pieces[i].points);
+      }
+    });
+    return { points, fromSource, degraded };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Which stored segments a cut of `targetM` starting at `from` runs through.
+ *
+ * Answered on the stored geometry, and that is sound even though the stored
+ * geometry is what this is all working around: thinning moves a line by metres,
+ * and this question is decided by kilometres. One segment further than needed
+ * costs one request; one too few would leave the far end of the day cut from
+ * the thinned copy, so the walk deliberately keeps going while any of the
+ * target is unaccounted for.
+ */
+function piecesSpannedBy(
+  pieces: PlanPiece[],
+  from: { lat: number; lng: number },
+  targetM: number,
+): Set<number> {
+  let startAt = 0;
+  let startD = 0;
+  let bestGap = Infinity;
+  pieces.forEach((piece, i) => {
+    const anchor = buildPlanIndex(piece.points).anchor(from);
+    if (anchor && anchor.gap < bestGap) {
+      bestGap = anchor.gap;
+      startAt = i;
+      startD = anchor.d;
+    }
+  });
+
+  const spanned = new Set<number>([startAt]);
+  let left = targetM - (pieceLength(pieces[startAt]) - startD);
+  for (let i = startAt + 1; i < pieces.length && left > 0; i++) {
+    spanned.add(i);
+    left -= pieceLength(pieces[i]);
+  }
+  return spanned;
+}
+
+function pieceLength(piece: PlanPiece): number {
+  let sum = 0;
+  for (let i = 1; i < piece.points.length; i++) {
+    sum += haversineM(piece.points[i - 1], piece.points[i]);
+  }
+  return sum;
 }
 
 export interface CutRoute {
@@ -129,7 +282,13 @@ export interface CutRoute {
  * Everything a `/route` reply is made of: the file, what to call it, what to
  * say about it, and the lengths that are one tap away.
  */
-export function buildCutRoute(trip: DbTrip, position: Position, targetKm: number, cut: PlanCut): CutRoute {
+export function buildCutRoute(
+  trip: DbTrip,
+  position: Position,
+  targetKm: number,
+  cut: PlanCut,
+  degraded = 0,
+): CutRoute {
   const km = clampTargetKm(targetKm);
   const stats = computeStats(cut.points);
   // Named for what was actually cut rather than what was asked for: the last
@@ -151,6 +310,15 @@ export function buildCutRoute(trip: DbTrip, position: Position, targetKm: number
   if (cut.joinM > 50) {
     lines.push(
       `↩️ ${formatDistanceM(cut.joinM)} back to the plan first — the file starts where you are.`,
+    );
+  }
+  // Worth saying out loud, because the file is the thing that will be judged:
+  // a stored plan is thinned, and an importer may not match every bend of it to
+  // a road. Silence here would look like the route itself being wrong.
+  if (degraded > 0) {
+    lines.push(
+      `⚠️ Komoot didn't answer, so this is cut from the stored plan — a few bends ` +
+        `may be smoothed. /route again in a minute for the original line.`,
     );
   }
   if (cut.reachedEnd) {
@@ -216,8 +384,11 @@ export async function cutForTrip(
   position: Position | null,
   targetKm: number,
 ): Promise<CutRoute | { error: string }> {
-  const plan = await loadPlan(trip.id);
-  if (plan.length === 0) {
+  const km = clampTargetKm(targetKm);
+  const plan = position
+    ? await planForCut(trip.id, position, km * 1000)
+    : { points: await loadPlan(trip.id), fromSource: 0, degraded: 0 };
+  if (plan.points.length === 0) {
     return {
       error:
         "No plan on this trip yet, so there is nothing to cut from. Send the planned " +
@@ -232,10 +403,9 @@ export async function cutForTrip(
     };
   }
 
-  const km = clampTargetKm(targetKm);
-  const cut = cutPlan(plan, position, km * 1000);
+  const cut = cutPlan(plan.points, position, km * 1000);
   if (!cut) return { error: "The plan on this trip has no coordinates in it." };
-  return buildCutRoute(trip, position, km, cut);
+  return buildCutRoute(trip, position, km, cut, plan.degraded);
 }
 
 /** " (2 h ago)" — silent when the position came with no clock on it. */

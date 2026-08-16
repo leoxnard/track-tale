@@ -132,10 +132,10 @@ const HEADERS = {
   "User-Agent": "Mozilla/5.0 (TrackTale private trip journal)",
 };
 
-async function apiGet(path: string, shareToken?: string): Promise<unknown> {
+async function apiGet(path: string, shareToken?: string, signal?: AbortSignal): Promise<unknown> {
   const url = new URL(`${API_BASE}${path}`);
   if (shareToken) url.searchParams.set("share_token", shareToken);
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await fetch(url, { headers: HEADERS, signal });
   if (!res.ok) {
     throw new Error(`Komoot API ${res.status} for ${path}`);
   }
@@ -145,9 +145,15 @@ async function apiGet(path: string, shareToken?: string): Promise<unknown> {
 /**
  * Fetch a full tour via Komoot's internal API using the share token.
  * Unofficial endpoint — callers must always offer GPX upload as fallback.
+ *
+ * The optional signal is for callers with somebody waiting on them: /route
+ * fetches a tour while a traveller watches the chat, and would rather cut from
+ * the stored plan than hold the reply open for an API that has stopped
+ * answering. Nothing here writes anything, so an abandoned request costs only
+ * itself.
  */
-export async function fetchKomootTour(ref: KomootRef): Promise<KomootTour> {
-  const tour = (await apiGet(`/tours/${ref.tourId}`, ref.shareToken)) as {
+export async function fetchKomootTour(ref: KomootRef, signal?: AbortSignal): Promise<KomootTour> {
+  const tour = (await apiGet(`/tours/${ref.tourId}`, ref.shareToken, signal)) as {
     name?: string;
     sport?: string;
     type?: string;
@@ -162,6 +168,7 @@ export async function fetchKomootTour(ref: KomootRef): Promise<KomootTour> {
   const coords = (await apiGet(
     `/tours/${ref.tourId}/coordinates`,
     ref.shareToken,
+    signal,
   )) as { items?: { lat: number; lng: number; alt?: number; t?: number }[] };
 
   const baseTime = tour.date ? Date.parse(tour.date) : undefined;

@@ -152,7 +152,16 @@ export function fromGeoJson(geojson: TrackGeoJson): TrackPoint[] {
   }));
 }
 
-/** Reduce point count for rendering payloads (Douglas-Peucker light: every-nth + endpoints). */
+/**
+ * Reduce point count for rendering payloads by keeping every nth point.
+ *
+ * Not Douglas-Peucker, whatever this comment used to claim: the stride is on
+ * the *index*, so which points survive has nothing to do with where the line
+ * bends. On a ride drawn at map scale that is fine and cheap. On anything that
+ * has to keep its shape — a plan that will be cut into a route file and handed
+ * to a navigation device — it is not: a hairpin whose apex falls between two
+ * kept indices becomes a chord straight across the bend. Use `thinPlan` there.
+ */
 export function decimate(points: TrackPoint[], maxPoints = 2000): TrackPoint[] {
   if (points.length <= maxPoints) return points;
   const step = Math.ceil(points.length / maxPoints);
@@ -192,6 +201,109 @@ export const PLAN_POINTS_PER_KM = 10;
  */
 const PLAN_MIN_POINTS = 500;
 const PLAN_MAX_POINTS = 20_000;
+
+/**
+ * Thin a line without changing its shape more than `toleranceM`.
+ *
+ * Douglas-Peucker, properly: the point furthest from the chord between two ends
+ * is kept if it is further than the tolerance, and the two halves are then
+ * simplified in turn. What comes out is guaranteed to sit within the tolerance
+ * of the original everywhere — so a straight kilometre costs two points and a
+ * hairpin keeps every point it needs to still be a hairpin.
+ *
+ * Iterative rather than recursive: a Komoot export of a long tour arrives with
+ * hundreds of thousands of points, and the recursion depth on a near-straight
+ * stretch of those is a stack overflow rather than a route.
+ */
+export function simplify(points: TrackPoint[], toleranceM: number): TrackPoint[] {
+  if (points.length <= 2 || toleranceM <= 0) return points;
+
+  // One local equirectangular frame for the whole line, as everywhere else in
+  // the app: at these scales the distortion is far below the tolerances anyone
+  // is setting here, and it turns the perpendicular distance into arithmetic.
+  const lats = points.map((p) => p.lat);
+  const k = Math.cos((((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI) / 180);
+  const M_PER_DEG = (Math.PI / 180) * EARTH_RADIUS_M;
+  const xs = points.map((p) => p.lng * k * M_PER_DEG);
+  const ys = points.map((p) => p.lat * M_PER_DEG);
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  const stack: [number, number][] = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [first, last] = stack.pop()!;
+    if (last - first < 2) continue;
+
+    const dx = xs[last] - xs[first];
+    const dy = ys[last] - ys[first];
+    const len2 = dx * dx + dy * dy;
+
+    let worst = 0;
+    let worstAt = -1;
+    for (let i = first + 1; i < last; i++) {
+      // Distance to the segment, not to the infinite line: where the two ends
+      // coincide — a loop that returns to its own start — the "line" has no
+      // direction and every point would measure as zero away from it.
+      const t = len2 > 0 ? clampUnit(((xs[i] - xs[first]) * dx + (ys[i] - ys[first]) * dy) / len2) : 0;
+      const gap = Math.hypot(xs[i] - (xs[first] + t * dx), ys[i] - (ys[first] + t * dy));
+      if (gap > worst) {
+        worst = gap;
+        worstAt = i;
+      }
+    }
+
+    if (worstAt >= 0 && worst > toleranceM) {
+      keep[worstAt] = 1;
+      stack.push([first, worstAt], [worstAt, last]);
+    }
+  }
+
+  return points.filter((_, i) => keep[i] === 1);
+}
+
+function clampUnit(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+/**
+ * The tolerances tried when thinning a plan to fit its budget, in metres.
+ *
+ * It starts at a metre because that is already below what a GPS fix or a
+ * drawn route is worth arguing about, and stops at eight because a plan whose
+ * line has been moved further than that is one a routing engine may no longer
+ * recognise as being on the road — which is exactly the failure this exists to
+ * avoid. Past the last of them the every-nth fallback takes over, and only a
+ * plan of several thousand kilometres in one segment ever gets that far.
+ */
+const PLAN_TOLERANCES_M = [1, 2, 3, 5, 8];
+
+/**
+ * Thin a planned route to its budget while keeping its shape.
+ *
+ * The budget exists for the page — a plan is drawn on every visit — but the
+ * same stored line is what `/route` cuts a day's GPX out of, and a device is
+ * far less forgiving than a map: where every-nth thinning cut a corner, the
+ * road the file describes leaves the road that exists, and an importer flags
+ * the stretch as off-grid because it cannot match it to a way.
+ *
+ * So the thinning is by *shape error* rather than by count: the smallest
+ * tolerance that fits the budget wins, and the line that comes out is within
+ * that many metres of the original everywhere. A tour with long straight
+ * stretches keeps its full detail through the bends and pays nothing for the
+ * straights, which is the opposite of what a stride does.
+ */
+export function thinPlan(points: TrackPoint[], maxPoints: number): TrackPoint[] {
+  if (points.length <= maxPoints) return points;
+  for (const tolerance of PLAN_TOLERANCES_M) {
+    const thinned = simplify(points, tolerance);
+    if (thinned.length <= maxPoints) return thinned;
+  }
+  // Nothing left but to drop points on count. Simplifying first still helps:
+  // the stride then falls on a line whose redundant points are already gone.
+  return decimate(simplify(points, PLAN_TOLERANCES_M[PLAN_TOLERANCES_M.length - 1]), maxPoints);
+}
 
 export function planPointBudget(distanceM: number): number {
   const km = Number.isFinite(distanceM) && distanceM > 0 ? distanceM / 1000 : 0;

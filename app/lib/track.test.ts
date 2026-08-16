@@ -10,6 +10,8 @@ import {
   haversineM,
   layEndToEnd,
   planPointBudget,
+  simplify,
+  thinPlan,
   sortSegmentsByStart,
   toGeoJson,
   type TrackPoint,
@@ -287,3 +289,101 @@ describe("dayColor", () => {
     expect(dayColor(DAY_COLORS.length + 1)).toBe(DAY_COLORS[0]);
   });
 });
+
+describe("simplify", () => {
+  /** A hairpin: out along a parallel, back a few metres to the north. */
+  const hairpin: TrackPoint[] = [
+    ...Array.from({ length: 40 }, (_, i) => ({ lat: 50, lng: 8 + i * 0.0001 })),
+    ...Array.from({ length: 40 }, (_, i) => ({ lat: 50.00005, lng: 8 + (39 - i) * 0.0001 })),
+  ];
+
+  it("keeps the ends and drops what sits on the line between them", () => {
+    const straight: TrackPoint[] = Array.from({ length: 50 }, (_, i) => ({
+      lat: 50,
+      lng: 8 + i * 0.0001,
+    }));
+    const thinned = simplify(straight, 1);
+    expect(thinned).toEqual([straight[0], straight[straight.length - 1]]);
+  });
+
+  it("never moves the line further than the tolerance", () => {
+    // The property the whole thing exists for: a plan thinned to within a metre
+    // is a plan a routing engine still recognises as being on the road.
+    const bends: TrackPoint[] = Array.from({ length: 400 }, (_, i) => ({
+      lat: 50 + Math.sin(i / 9) * 0.0009,
+      lng: 8 + i * 0.0002,
+    }));
+    const thinned = simplify(bends, 2);
+
+    expect(thinned.length).toBeLessThan(bends.length);
+    for (const point of bends) {
+      let nearest = Infinity;
+      for (let i = 1; i < thinned.length; i++) {
+        nearest = Math.min(nearest, distanceToSegmentM(point, thinned[i - 1], thinned[i]));
+      }
+      expect(nearest).toBeLessThanOrEqual(2.5);
+    }
+  });
+
+  it("keeps the apex of a hairpin, which an every-nth stride cuts straight off", () => {
+    // Identity, not coordinates: the return leg runs back over the same
+    // longitudes, so "a point at the apex's longitude" is satisfied by a point
+    // on the other side of the turn.
+    expect(simplify(hairpin, 1)).toContain(hairpin[39]);
+    // The stride keeps whichever points the index lands on. With 80 points
+    // thinned to 8 it lands either side of the turn and the apex is lost.
+    expect(decimate(hairpin, 8)).not.toContain(hairpin[39]);
+  });
+
+  it("leaves a line that is already short enough alone", () => {
+    expect(simplify(hairpin.slice(0, 2), 5)).toHaveLength(2);
+    expect(simplify([], 5)).toEqual([]);
+    expect(simplify(hairpin, 0)).toEqual(hairpin);
+  });
+});
+
+describe("thinPlan", () => {
+  const windy: TrackPoint[] = Array.from({ length: 5000 }, (_, i) => ({
+    lat: 50 + Math.sin(i / 40) * 0.002,
+    lng: 8 + i * 0.00005,
+  }));
+
+  it("fits the budget", () => {
+    expect(thinPlan(windy, 500).length).toBeLessThanOrEqual(500);
+  });
+
+  it("spends its points on the bends rather than on the straights", () => {
+    // Half a plan windy, half of it dead straight. A stride splits the budget
+    // evenly between the two; thinning by shape gives it to the half that
+    // needs it.
+    const half: TrackPoint[] = [
+      ...Array.from({ length: 2000 }, (_, i) => ({
+        lat: 50 + Math.sin(i / 30) * 0.002,
+        lng: 8 + i * 0.00005,
+      })),
+      ...Array.from({ length: 2000 }, (_, i) => ({ lat: 50, lng: 8.1 + i * 0.00005 })),
+    ];
+    const thinned = thinPlan(half, 600);
+    const inStraightHalf = thinned.filter((p) => p.lng >= 8.1).length;
+    expect(inStraightHalf).toBeLessThan(thinned.length / 4);
+  });
+
+  it("hands back a plan already inside its budget untouched", () => {
+    expect(thinPlan(windy.slice(0, 100), 500)).toHaveLength(100);
+  });
+});
+
+/** Metres from a point to a segment, for the tolerance property above. */
+function distanceToSegmentM(p: TrackPoint, a: TrackPoint, b: TrackPoint): number {
+  const k = Math.cos((p.lat * Math.PI) / 180);
+  const mPerDeg = (Math.PI / 180) * 6371000;
+  const px = p.lng * k * mPerDeg;
+  const py = p.lat * mPerDeg;
+  const ax = a.lng * k * mPerDeg;
+  const ay = a.lat * mPerDeg;
+  const dx = b.lng * k * mPerDeg - ax;
+  const dy = b.lat * mPerDeg - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}

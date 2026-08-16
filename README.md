@@ -61,6 +61,19 @@ notes, stats and weather.
   route is extra rather than counted against the 130, because the kilometres you did not
   choose should not shorten the day, and it is reported so a stale position that lands twenty
   kilometres out is visible rather than silent.
+- The cut is taken from **the tour as it was drawn**, not from the copy on the page. What
+  the database holds is thinned to a budget, because the family page redraws the whole plan
+  on every visit — and a line thinned for drawing is not one a navigation device wants: every
+  smoothed bend is a stretch an importer cannot match to a road, which is what shows up in
+  Komoot as an off-grid segment. So `/route` fetches the original back from Komoot for the
+  one or two plan segments the day actually crosses, worked out first from the stored copy,
+  which is wrong about corners but perfectly good at answering *which segment*. Komoot stays
+  a preference and never a dependency: a fetch that fails or is slow leaves the cut on the
+  stored line and the message says so. Plans uploaded as GPX have no original to go back to,
+  which is why the stored line is now thinned **by shape** — Douglas-Peucker to within a
+  metre or so — instead of by keeping every nth point, a stride that on a 135 km route with
+  hairpins moved the line up to 100 m off the road. `/refreshplan` re-imports Komoot plans at
+  the better resolution; the nightly cron does it by itself.
 - `/supermarkt` (or `/supermarket`) lists **the shops the route passes** — supermarkets and
   corner shops within 300 m of the planned line over the next 50 km, in the order you reach
   them, each with how far along the ride it is, how far off the route it sits, and what

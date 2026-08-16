@@ -76,9 +76,15 @@ export interface PlanCut {
 const M_PER_DEG = (Math.PI / 180) * 6371000;
 
 /**
- * Two points this close together are the same place as far as a route file is
- * concerned, and repeating one only gives a device a zero-length leg to think
- * about.
+ * How close the position and the point where it joins the plan may be before
+ * they are the same place, and repeating one only gives a device a zero-length
+ * leg to think about.
+ *
+ * It applies to those two points only. It used to be applied to every vertex
+ * copied out of the plan as well, which was harmless while plans were stored a
+ * hundred metres apart and quietly destructive the moment they were not: a
+ * route fetched at full resolution has points a few metres apart on a tight
+ * bend, and dropping them is re-thinning the very detail the cut went to get.
  */
 const SAME_PLACE_M = 5;
 
@@ -121,13 +127,15 @@ export function cutPlan(
       // vertex happens to follow it: a plan thinned to a vertex every two
       // kilometres would otherwise overshoot by up to that much.
       const t = step > 0 ? (targetM - walked) / step : 0;
-      pushUnlessSamePlace(points, lerpPoint(previous, plan[i], t));
+      points.push(lerpPoint(previous, plan[i], t));
       walked = targetM;
       reachedEnd = false;
       break;
     }
     walked += step;
-    pushUnlessSamePlace(points, stripTime(plan[i]));
+    // Every vertex of the plan, exactly as the plan has it. The cut decides
+    // where a route starts and stops, never what it looks like in between.
+    if (haversineM(points[points.length - 1], plan[i]) > 0) points.push(stripTime(plan[i]));
     previous = plan[i];
   }
 
@@ -203,12 +211,6 @@ function cumulative(plan: TrackPoint[]): number[] {
 /** Metres from the vertex before `index` to a fraction `t` into that segment. */
 function segmentSpan(plan: TrackPoint[], index: number, t: number): number {
   return haversineM(plan[index - 1], plan[index]) * t;
-}
-
-function pushUnlessSamePlace(points: TrackPoint[], point: TrackPoint) {
-  const last = points[points.length - 1];
-  if (last && haversineM(last, point) <= SAME_PLACE_M) return;
-  points.push(point);
 }
 
 function lerpPoint(a: TrackPoint, b: TrackPoint, t: number): TrackPoint {

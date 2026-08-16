@@ -2,7 +2,7 @@ import type { Context } from "grammy";
 import { supabase } from "./supabase.server";
 import type { DbTrip } from "./db.server";
 import { fetchKomootTour, parseKomootUrl } from "./komoot";
-import { decimate, planPointBudget, toGeoJson, type NormalizedTrack } from "./track";
+import { decimate, planPointBudget, thinPlan, toGeoJson, type NormalizedTrack } from "./track";
 import { cacheDayWeather } from "./day-weather.server";
 import { renderOgCard } from "./og.server";
 import { escapeErr, escapeMd } from "./telegram-md";
@@ -99,7 +99,9 @@ export async function savePlanSegment(ctx: Context, trip: DbTrip, track: Normali
     trip_id: trip.id,
     source_url: sourceUrl ?? null,
     name: track.name ?? null,
-    geojson: toGeoJson(decimate(track.points, planPointBudget(track.stats.distanceM))),
+    // `thinPlan`, not `decimate`: this line is what /route cuts a rideable GPX
+    // out of, and a stride would cut the corners off every bend on the way.
+    geojson: toGeoJson(thinPlan(track.points, planPointBudget(track.stats.distanceM))),
     distance_m: track.stats.distanceM,
     elevation_up: track.stats.elevationUp,
     sort_order: count ?? 0,
@@ -184,7 +186,7 @@ export async function refreshPlan(tripId: string): Promise<number> {
         .from("plan_segments")
         .update({
           name: tour.name ?? null,
-          geojson: toGeoJson(decimate(tour.points, planPointBudget(tour.stats.distanceM))),
+          geojson: toGeoJson(thinPlan(tour.points, planPointBudget(tour.stats.distanceM))),
           distance_m: tour.stats.distanceM,
           elevation_up: tour.stats.elevationUp,
         })

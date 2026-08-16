@@ -97,6 +97,11 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `transport.ts` — a leg travelled rather than ridden (train/ferry/bus). The mode lives in
   the segment's existing `sport` column, deliberately, so it needs no migration. Transit
   kilometres are drawn but **excluded** from distance, climb and the progress bar.
+- `track.ts`'s `thinPlan`/`simplify` vs `decimate` — a plan is stored *thinned*, and how it
+  is thinned is load-bearing: `decimate` keeps every nth point, which cuts the corner off any
+  bend whose apex falls between two kept indices, and the resulting line is what `/route`
+  hands to a device. Plans go through `thinPlan` (Douglas-Peucker, bounded shape error);
+  rides still use `decimate`, where the stride is only ever drawn.
 - `route-cut.ts` — `/route`, the pure half: the next N kilometres of the plan, cut from
   wherever the traveller is. Read the header before changing what the target counts — the
   leg back onto the plan is deliberately *not* counted against it, and the position is
@@ -204,6 +209,9 @@ Messages are **edited in place** rather than re-sent — that is the established
 - **Live tracking is off by default** (`LIVE_TRACKING=0`) because the page fetched Garmin on
   every render. The code, columns and translations all remain — every entrance is shut, not
   removed. Keep it that way when touching that path.
+- **The stored plan is a thinned copy, and `/route` fetches the original back.** Anything
+  that cuts a file for a device rather than drawing a line on a page must go through
+  `planForCut`, not `loadPlan` — and must survive Komoot not answering.
 - **Komoot ingestion uses an unofficial internal API.** It can break at any time; GPX upload
   is the always-works fallback, by design. Don't make Komoot a hard dependency of anything.
 - **Callback payloads are capped at 64 bytes** by Telegram — that constraint is why
