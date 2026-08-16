@@ -97,6 +97,7 @@ import {
 import { cacheDayWeather, cacheDayWeatherFromPhotos } from "./day-weather.server";
 import {
   ingestKomootUrl,
+  backfillRideOriginals,
   refreshPlan,
   saveNote,
   savePlanSegment,
@@ -1302,6 +1303,31 @@ export function createBot(): Bot {
         ? `🔄 Refreshed ${updated} plan segment(s) from Komoot.`
         : "No linked plan segments to refresh.",
     );
+  });
+
+  // A ride is kept as it was recorded from the day that started happening. The
+  // days imported before then can still be filled in where they came from
+  // Komoot, which is what this does — and it says plainly how many days nothing
+  // can be done for, since a GPX or FIT upload was never stored anywhere.
+  bot.command("refreshtracks", async (ctx) => {
+    const trip = await requireTrip(ctx);
+    if (!trip) return;
+    await ctx.reply("⏳ Fetching the days back from Komoot — this can take a moment…").catch(() => {});
+
+    const { stored, whole, unrecoverable, failed } = await backfillRideOriginals(trip.id);
+    if (stored + whole + unrecoverable + failed === 0) {
+      await ctx.reply("Every day on this trip is already kept as it was recorded.");
+      return;
+    }
+    const lines = [`🔄 ${stored} day(s) now kept as recorded.`];
+    if (whole > 0) lines.push(`${whole} came in whole and needed nothing.`);
+    if (unrecoverable > 0) {
+      lines.push(
+        `${unrecoverable} were uploaded as a file and cannot be recovered — send the GPX or FIT again (delete the old track in /manage first) if you still have it.`,
+      );
+    }
+    if (failed > 0) lines.push(`${failed} could not be fetched; try again later.`);
+    await ctx.reply(lines.join("\n"));
   });
 
   // Weather is normally cached the moment a track lands. A day imported long

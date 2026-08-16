@@ -16,6 +16,16 @@ import { transitMode, type TransitMode } from "./transport";
 const MODE_ICON: Record<TransitMode, string> = { train: "🚆", ferry: "⛴️", bus: "🚌" };
 
 /**
+ * How many points of a ridden day the row keeps.
+ *
+ * A day is a day, so this is flat where a plan's budget scales with distance.
+ * Anything that arrives under it is stored whole and needs no original kept
+ * beside it; anything over it is cut, and the cut is what the original exists
+ * to undo.
+ */
+export const RIDE_POINT_BUDGET = 4000;
+
+/**
  * Taking in what a day is made of — a ridden track, the planned route it was
  * measured against, the weather over it, and the evening's note.
  */
@@ -30,7 +40,7 @@ export async function saveTrackSegment(
   const day = await requireDay(ctx, trip);
   if (!day) return;
 
-  const points = decimate(track.points, 4000);
+  const points = decimate(track.points, RIDE_POINT_BUDGET);
   const { data: inserted, error } = await supabase().from("track_segments").insert({
     day_id: day.id,
     geojson: toGeoJson(points),
@@ -201,6 +211,69 @@ export async function saveNote(ctx: Context, text: string) {
     })
     .catch(() => undefined);
   await recordAction(ctx, sent, "note", inserted.id);
+}
+
+/**
+ * Fill in the kept original for rides imported before there was one.
+ *
+ * Only Komoot days can be answered here, and only because Komoot still has the
+ * tour: a day that arrived as an uploaded GPX or FIT has no source to go back
+ * to — the file was never stored and Telegram's handle on it is not on the row
+ * — so the honest thing is to count those and say so rather than to appear to
+ * have done something about them.
+ *
+ * The row itself is left exactly as it is. A plan is a living document and
+ * `refreshPlan` rewrites it from Komoot; a ride is what happened, and re-fetching
+ * it must not become a way for an edit in Komoot to rewrite a day already
+ * ridden. Only `source_path` is filled in.
+ */
+export interface RideBackfill {
+  /** Days whose recording is now kept. */
+  stored: number;
+  /** Days that arrived under the budget — the row is already the whole line. */
+  whole: number;
+  /** Days uploaded as a file, which nothing can recover. */
+  unrecoverable: number;
+  /** Komoot days the fetch could not answer for, worth trying again later. */
+  failed: number;
+}
+
+export async function backfillRideOriginals(tripId: string): Promise<RideBackfill> {
+  const { data: rows } = await supabase()
+    .from("track_segments")
+    .select("id, source, source_url, days!inner(trip_id)")
+    .eq("days.trip_id", tripId)
+    .is("source_path", null);
+
+  const result: RideBackfill = { stored: 0, whole: 0, unrecoverable: 0, failed: 0 };
+
+  for (const row of rows ?? []) {
+    const ref = row.source === "komoot" ? parseKomootUrl((row.source_url as string) ?? "") : null;
+    if (!ref) {
+      result.unrecoverable++;
+      continue;
+    }
+    try {
+      const tour = await fetchKomootTour(ref);
+      // Nothing was lost on the way in, so there is nothing to keep: the line
+      // on the row is the tour. Counted apart from a failure, because "already
+      // complete" and "could not be had" are different answers.
+      if (tour.points.length <= RIDE_POINT_BUDGET) {
+        result.whole++;
+        continue;
+      }
+      const path = await storeRideOriginal(tripId, row.id as string, tour.points);
+      if (!path) {
+        result.failed++;
+        continue;
+      }
+      await supabase().from("track_segments").update({ source_path: path }).eq("id", row.id);
+      result.stored++;
+    } catch {
+      result.failed++;
+    }
+  }
+  return result;
 }
 
 /** Re-fetch every plan segment that has a Komoot source link. Returns count updated. */

@@ -75,7 +75,7 @@ does I/O and generally does not.
 | Module | Owns |
 |---|---|
 | `bot-access.server.ts` | allowlist, invites, `requireTrip`/`requireDay`/`requireTripManager` |
-| `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh |
+| `bot-ingest.server.ts` | Komoot / GPX / FIT → `track_segments`, plan refresh, `/refreshtracks` backfill |
 | `day-weather.server.ts` | filling `weather_cache` for a day — from its route, or from its photos when it has none |
 | `bot-photos.server.ts` | photo + document upload, EXIF, compression, twin detection |
 | `bot-motion.server.ts` | the video half of a Live Photo: matching it to its still by sight, or parking it until one arrives |

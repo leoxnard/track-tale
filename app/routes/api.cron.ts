@@ -1,14 +1,15 @@
 import { Bot } from "grammy";
 import { env } from "../lib/env.server";
 import { supabase } from "../lib/supabase.server";
-import { refreshPlan } from "../lib/bot-ingest.server";
+import { backfillRideOriginals, refreshPlan } from "../lib/bot-ingest.server";
 import { ensureTapsDelivered } from "../lib/bot-chrome.server";
 import { sweepParkedMotions } from "../lib/bot-motion.server";
 
 /**
  * Daily maintenance, triggered by Vercel Cron (schedule in vercel.json).
  * 1. Reminder: if the previous trip-local day has no track, silently ping the owner.
- * 2. Re-fetch Komoot-linked plan segments so edits propagate.
+ * 2. Re-fetch Komoot-linked plan segments so edits propagate, and fill in the
+ *    kept recording for Komoot days imported before those were kept.
  * 3. Expire stale live links.
  *
  * Nobody reads the response body, so anything that goes wrong is both logged and
@@ -73,6 +74,11 @@ export async function loader({ request }: { request: Request }) {
 
       const refreshed = await refreshPlan(trip.id);
       if (refreshed > 0) report.push(`refreshed ${refreshed} plan segments for ${trip.name}`);
+
+      // Empties itself out: once a day has its recording kept, it is no longer
+      // selected, so this costs one query a night for a trip that is done.
+      const { stored } = await backfillRideOriginals(trip.id);
+      if (stored > 0) report.push(`kept ${stored} recorded days for ${trip.name}`);
     } catch (err) {
       failures.push(`${trip.name}: ${message(err)}`);
     }

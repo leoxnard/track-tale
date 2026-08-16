@@ -75,6 +75,7 @@ ${LIVE_HELP}*Plan*
   /supermarkt 25 looks 25 km ahead; the 🛒 button under a /route file does the
   same from the position that file was cut from
 /refreshplan — re-sync plan links after editing in Komoot
+/refreshtracks — keep older Komoot days as they were recorded
 /refreshweather — fill in weather for older days
 /refreshphotos — put photos on the map that arrived before their track
 /compressphotos — shrink oversized photos uploaded before compression existed

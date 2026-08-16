@@ -230,8 +230,11 @@ notes, stats and weather.
   whose recording the budget cut into is kept whole in a private `tracks` bucket, and the
   **planned route** — offered as its own file — comes from the copy `/route` cuts from. A
   FIT file recorded at a point a second is the case that matters: nothing on the internet
-  has a copy of it, so what is not kept at import is gone. Days uploaded before this existed
-  come as the map draws them. The pictures come as they are stored — the untouched
+  has a copy of it, so what is not kept at import is gone. Days imported before this existed
+  come as the map draws them until `/refreshtracks` (or the nightly job) fetches them back
+  from Komoot — which it can only do for days that came from Komoot in the first place. A
+  day uploaded as a GPX or FIT file was never stored anywhere and cannot be recovered; the
+  command counts those and says so instead of pretending otherwise. The pictures come as they are stored — the untouched
   file for anything sent as a document, a 2048 px copy for the rest, a Live Photo's motion
   beside its still — and the page says so, because the camera original never reached the bot
   in the first place. Nothing is packed until a link is tapped, and nothing is cached: a
@@ -315,6 +318,7 @@ GitHub Actions runs typecheck, tests and a production build on every push and PR
 | `/route`, `/route 150` | cut the next 130 km (or 150) of plan from where you are and send it as a GPX |
 | `/supermarkt`, `/supermarkt 25` | shops on the next 50 km (or 25) of route, nearest first |
 | `/refreshplan` | re-sync planned Komoot routes |
+| `/refreshtracks` | keep older Komoot days as they were recorded, for the download centre |
 | `/refreshphotos` | pin photos that arrived before their day's track |
 | `/refreshweather` | fill in weather and wind for older days, from the historical archive — including days with no route, from where their photos were taken |
 | `/compressphotos` | shrink photos stored at full camera resolution |
