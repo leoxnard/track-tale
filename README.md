@@ -439,7 +439,11 @@ branding the reader did not ask for.
 
 The logo is **made from the trip's name**, without a model, a bucket or a column. The name
 is hashed; the hash picks one of ten deep, unsaturated grounds and draws a faint route line
-across it, and the trip's initials go in the middle in the page's own paper colour. Two
+across it, and the trip's initials go in the middle in the page's own paper colour. A
+capital letter counts as a new word wherever it falls, so "HighlandKinder" is **HK** and
+not HI — a name written as one word is still written as two. A single word with no capital
+inside it gives its first two letters instead, and anything the tile has no glyph for —
+punctuation, emoji — separates words rather than being drawn. Two
 trips added side by side are two different tiles, which is the whole point — "Nordkap Tour"
 and "Alpencross" on the same home screen have to be told apart at 60 pixels, with the name
 under them cropped to nothing.

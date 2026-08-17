@@ -20,9 +20,20 @@ describe("logoInitials", () => {
     expect(logoInitials("Rheinradweg")).toBe("RH");
   });
 
-  it("ignores punctuation and emoji, which the tile has no glyph for", () => {
+  it("reads a capital inside a word as the next word starting", () => {
+    expect(logoInitials("HighlandKinder")).toBe("HK");
+    expect(logoInitials("AlpenCross")).toBe("AC");
+  });
+
+  it("keeps a run of capitals together", () => {
+    expect(logoInitials("NORDKAP")).toBe("NO");
+    expect(logoInitials("GPXTour")).toBe("GT");
+  });
+
+  it("treats punctuation and emoji as a space, glyph or no glyph", () => {
     expect(logoInitials("🚲 Rund um den Bodensee")).toBe("RU");
-    expect(logoInitials("Nord–Süd")).toBe("NO");
+    expect(logoInitials("Nord–Süd")).toBe("NS");
+    expect(logoInitials("nordkap-tour")).toBe("NT");
   });
 
   it("falls back rather than drawing an empty tile", () => {
@@ -41,8 +52,14 @@ describe("logoVersion", () => {
     expect(logoVersion("Nordkap Tour")).toBe(logoVersion("Nordkap Tour"));
   });
 
-  it("ignores case and stray whitespace", () => {
-    expect(logoVersion("  nordkap   tour ")).toBe(logoVersion("Nordkap Tour"));
+  it("ignores stray whitespace", () => {
+    expect(logoVersion("  Nordkap   Tour ")).toBe(logoVersion("Nordkap Tour"));
+  });
+
+  it("follows case, because the letters on the tile do", () => {
+    // HighlandKinder draws HK and highlandkinder draws HI, so the two cannot
+    // share a URL a phone caches forever.
+    expect(logoVersion("HighlandKinder")).not.toBe(logoVersion("highlandkinder"));
   });
 
   it("changes when the trip is renamed, which is what busts the cache", () => {
@@ -65,7 +82,7 @@ describe("tripLogoSvg", () => {
     // initials, and what does is escaped anyway.
     const svg = tripLogoSvg("<script>alert(1)</script> & co", 180);
     expect(svg).not.toContain("<script>");
-    expect(/>SC</.test(svg)).toBe(true);
+    expect(/>SA</.test(svg)).toBe(true);
   });
 
   it("carries the asked-for size and a fixed unit box", () => {

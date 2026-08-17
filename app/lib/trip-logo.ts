@@ -61,9 +61,13 @@ function hash32(s: string): number {
   return h >>> 0;
 }
 
-/** Case and spacing are not part of a trip's identity; the letters are. */
+/**
+ * Stray spacing is not part of a trip's identity, but **case is**: a capital in
+ * the middle of a word is where "HighlandKinder" says its second word starts,
+ * and lowercasing here would leave the tile reading HI.
+ */
 function normalise(name: string): string {
-  return name.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+  return name.normalize("NFC").trim().replace(/\s+/g, " ");
 }
 
 /** mulberry32 — a handful of numbers from one seed, deterministically. */
@@ -87,24 +91,37 @@ export function logoVersion(name: string): string {
 }
 
 /**
+ * The words of a name, as a reader sees them rather than as the spaces have it.
+ *
+ * A space is one way to write two words and a capital letter is another:
+ * "HighlandKinder" is two, and treating it as one gives a tile reading HI. So
+ * anything that is not a letter or a digit separates, and inside what is left a
+ * capital following a lower-case letter starts the next word.
+ *
+ * The three alternatives are, in order: a word with at most one capital at the
+ * front ("Highland"), a run of capitals not followed by a lower-case letter
+ * ("GPX", and the "AC" of "ACRoute"), and a run of digits. Anything the fonts
+ * have no glyph for — punctuation, emoji — is separator and never a letter.
+ */
+function wordsOf(name: string): string[] {
+  return normalise(name)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .flatMap((w) => w.match(/\p{Lu}?\p{Ll}+|\p{Lu}+(?!\p{Ll})|\p{N}+/gu) ?? []);
+}
+
+/**
  * Up to two letters: the initials of the first two words, or the first two
- * letters of a single word. Punctuation and emoji are skipped rather than
- * drawn — the fonts the card is rendered with have no glyph for them, and a
- * tile with a blank box in it looks broken rather than plain.
+ * letters of a single word.
  *
  * `Array.from` because a name may open with a character outside the BMP; a
- * `[0]` there would cut a surrogate pair in half.
+ * `slice(0, 2)` there would cut a surrogate pair in half.
  */
 export function logoInitials(name: string): string {
-  const words = normalise(name)
-    .split(" ")
-    .map((w) => Array.from(w).filter((c) => /\p{L}|\p{N}/u.test(c)))
-    .filter((w) => w.length > 0);
-
+  const words = wordsOf(name);
   if (words.length === 0) return "TT";
-  const first = words[0];
-  if (words.length === 1) return Array.from(first.slice(0, 2)).join("").toUpperCase();
-  return (first[0] + words[1][0]).toUpperCase();
+  if (words.length === 1) return Array.from(words[0]).slice(0, 2).join("").toUpperCase();
+  return (Array.from(words[0])[0] + Array.from(words[1])[0]).toUpperCase();
 }
 
 /**
