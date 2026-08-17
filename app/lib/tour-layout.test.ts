@@ -233,6 +233,25 @@ describe("layDays", () => {
     expect(reachedAlongPlan(route(2000, 11.0, 11.6), planLengthM, [])).toBe(0);
   });
 
+  it("never reports the traveller further along the plan than its end", () => {
+    // A finished tour: the last day rides the route to its end, then wanders
+    // over the final stretch of it — the ride round a harbour to the hotel. The
+    // fit takes its scale from the straight part, so those extra ridden metres
+    // are extrapolated onto the plan at full rate and put the day's end past
+    // the end of the route. The chart wants that overhang; the progress figure
+    // must not have it, or a finished tour reads "1102 of 1101 kilometres".
+    const straight = route(220, 11.4, 11.55);
+    const last = [...straight, ...wobble(route(80, 11.55, 11.6), 0.01)];
+    const finished = [
+      ...thirds.slice(0, 2).map(([a, b], i) => day(i + 1, route(300, a, b), dayLengthM)),
+      day(3, last, measure(last)),
+    ];
+    const plan = route(2000, 11.0, 11.6);
+
+    expect(layDays(plan, planLengthM, finished).reachedM).toBeGreaterThan(planLengthM);
+    expect(reachedAlongPlan(plan, planLengthM, finished)).toBe(planLengthM);
+  });
+
   it("hands the hole to whatever carried the traveller over it", () => {
     const before = route(300, 11.0, 11.1);
     const after = route(300, 11.5, 11.6);

@@ -90,13 +90,24 @@ export interface TourLayout {
  * the way there" is a question about position, so it is answered by where the
  * riding actually landed on the plan — the same figure the whole-tour chart
  * marks with its line.
+ *
+ * Capped at the plan's own length, which `layDays` deliberately does not do.
+ * A stretch is laid down by a fitted line whose anchors stop at 95% of it (see
+ * `ANCHOR_FRACTIONS`), so its far end is extrapolated, and the last stretch of
+ * a finished tour therefore lands tens of metres past the end of the route.
+ * The chart wants that overhang — it draws the day where the fit says it goes.
+ * A position does not: "1102 of 1101 kilometres" is the extrapolation talking,
+ * and rounding turns thirty metres into a whole kilometre because the two
+ * figures round in opposite directions. Nobody gets further along a route than
+ * its end.
  */
 export function reachedAlongPlan(
   planPoints: TrackPoint[],
   planM: number,
   days: TourDayInput[],
 ): number {
-  return layDays(planPoints, planM, days).reachedM;
+  const reached = layDays(planPoints, planM, days).reachedM;
+  return planM > 0 ? Math.min(reached, planM) : reached;
 }
 
 /** A gap in a day's line, and what carried the traveller across it. */

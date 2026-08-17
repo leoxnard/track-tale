@@ -251,7 +251,8 @@ function buildHtml(opts: {
 
   // Position along the route rather than distance ridden: a wandering day
   // advances less route than it rides, and a train advances it without riding.
-  const pct = opts.planKm > 0 ? Math.round((opts.reachedKm / opts.planKm) * 100) : null;
+  const pct =
+    opts.planKm > 0 ? Math.min(100, Math.round((opts.reachedKm / opts.planKm) * 100)) : null;
 
   const elevationSpan = Math.max(
     20,
