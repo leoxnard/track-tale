@@ -1340,22 +1340,38 @@ export function TripView({
       <div className="safe-area-blocker fixed inset-x-0 top-0 z-20 bg-paper" />
 
       <header className="border-b border-trail bg-paper">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-4">
-          <h1 className="font-display text-2xl font-semibold text-pine sm:text-3xl">{trip.name}</h1>
-          <p className="text-sm text-faint">
-            {trip.endDate
-              ? `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`
-              : m.trip.since(formatDate(trip.startDate))}
-          </p>
-          {/* Pushed to the right edge of the title row, live badge included, so
-              the two never fight over who gets the `ml-auto`. */}
-          <div className="ml-auto flex items-center gap-2 self-center">
+        {/* The dates sit under the name rather than beside it, and the buttons
+            get a column of their own that never shrinks. Sharing the one row
+            with the title meant the row's wrapping decided where the share
+            button and the menu ended up: a long trip name pushed the dates
+            over, the dates pushed the buttons onto a line of their own, and on
+            a narrow phone they landed somewhere down the left-hand side
+            instead of the top right corner where they are reached for.
+            `min-w-0` is what lets the title column give way — without it a
+            flex item refuses to shrink below its content and pushes the
+            buttons off the edge instead.
+
+            The live badge goes under the title too, for the same reason at a
+            larger size: it is as wide as a sentence, and holding it in the
+            button column left a 360px phone about fifty pixels of title, one
+            letter to a line. Only the two round buttons are narrow enough to
+            keep that corner permanently. */}
+        <div className="mx-auto flex max-w-5xl items-start justify-between gap-x-4 px-4 py-4">
+          <div className="min-w-0">
+            <h1 className="font-display text-2xl font-semibold text-pine break-words sm:text-3xl">
+              {trip.name}
+            </h1>
+            <p className="mt-0.5 text-sm text-faint">
+              {trip.endDate
+                ? `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`
+                : m.trip.since(formatDate(trip.startDate))}
+            </p>
             {trip.liveUrl && (
               <a
                 href={trip.liveUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full bg-live px-4 py-1.5 text-sm font-bold text-white"
+                className="mt-2 inline-flex items-center gap-2 rounded-full bg-live px-4 py-1.5 text-sm font-bold text-white"
               >
                 <span className="relative flex h-2.5 w-2.5">
                   <span className="absolute h-full w-full animate-ping rounded-full bg-white/70" />
@@ -1369,6 +1385,8 @@ export function TripView({
                   : m.trip.liveFollow}
               </a>
             )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             <ShareButton title={trip.name} />
             {slug && <TripMenu slug={slug} hasPacking={trip.hasPacking} />}
           </div>
