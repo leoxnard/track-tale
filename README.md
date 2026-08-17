@@ -429,3 +429,28 @@ stands.
 
 The list belongs to the trip and not to a day: it is packed once, before the first day
 exists, so `/pack` never touches `/day`.
+
+## The home-screen icon
+
+Every trip has its own logo, and it appears in exactly one place: the tile a phone puts on
+its home screen when the family adds the page there. It is nowhere on the page itself —
+the journey's own map is the picture at the top, and a second mark above it would only be
+branding the reader did not ask for.
+
+The logo is **made from the trip's name**, without a model, a bucket or a column. The name
+is hashed; the hash picks one of ten deep, unsaturated grounds and draws a faint route line
+across it, and the trip's initials go in the middle in the page's own paper colour. Two
+trips added side by side are two different tiles, which is the whole point — "Nordkap Tour"
+and "Alpencross" on the same home screen have to be told apart at 60 pixels, with the name
+under them cropped to nothing.
+
+Because the name *is* the seed, there is nothing to generate when a trip is created and
+nothing to keep in step afterwards: renaming a trip changes its tile, deleting one leaves
+no file behind, and the same name always draws the same picture. The icon URL carries a
+hash of the name (`/t/<slug>/icon/icon-180.png?v=…`), so a phone may cache it forever and
+still notice a rename. Only 180, 192 and 512 pixels can be asked for — the size is in a
+public URL, and an open-ended one would be a rasteriser anybody could point at.
+
+`/t/<slug>/manifest.webmanifest` carries the rest: the trip's name under the tile, the
+page as the app's start URL, and the icon marked as safe to crop to a circle. iOS reads
+the `apple-touch-icon` link instead, so the page writes both.

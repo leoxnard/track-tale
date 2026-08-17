@@ -1,8 +1,5 @@
 import { Resvg } from "@resvg/resvg-js";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { ATKINSON_BOLD_B64, ATKINSON_REGULAR_B64 } from "./fonts";
+import { resvgFont } from "./fonts.server";
 import { supabase } from "./supabase.server";
 import { makeMercatorLayout, polylinePoints as polyline } from "./geo-project";
 import { basemapSvg, BASEMAP_ATTRIBUTION, BASEMAP_TILE_PX } from "./basemap.server";
@@ -21,27 +18,6 @@ const PINE = "#1e3a2f";
 const TRAIL = "#c9d2cc";
 /** The plain-paper plan colour vanishes into a basemap; this one holds up. */
 const PLAN_ON_MAP = "#5a6b62";
-
-/**
- * resvg loads fonts from disk only, so the embedded fonts are materialised into
- * a temp directory once per process. This keeps cards identical on Vercel, on a
- * self-hosted box, and locally, without depending on what the bundler ships.
- */
-let fontFiles: string[] | undefined;
-function fonts(): string[] {
-  if (fontFiles && fontFiles.every(existsSync)) return fontFiles;
-  const dir = mkdtempSync(join(tmpdir(), "tracktale-fonts-"));
-  const write = (name: string, b64: string) => {
-    const path = join(dir, name);
-    writeFileSync(path, Buffer.from(b64, "base64"));
-    return path;
-  };
-  fontFiles = [
-    write("atkinson-regular.ttf", ATKINSON_REGULAR_B64),
-    write("atkinson-bold.ttf", ATKINSON_BOLD_B64),
-  ];
-  return fontFiles;
-}
 
 function escapeXml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -248,7 +224,7 @@ export async function renderOgCard(tripId: string): Promise<string | null> {
   });
 
   const png = new Resvg(svg, {
-    font: { loadSystemFonts: false, fontFiles: fonts(), defaultFontFamily: "Atkinson Hyperlegible" },
+    font: resvgFont(),
     fitTo: { mode: "width", value: WIDTH },
   })
     .render()

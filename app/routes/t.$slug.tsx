@@ -33,6 +33,7 @@ import {
   type RidingWeather,
 } from "../lib/riding-weather";
 import { byPhotoTime } from "../lib/photo-order";
+import { APPLE_ICON_SIZE, iconHref } from "../lib/trip-logo";
 import { env } from "../lib/env.server";
 import { fetchLiveSession } from "../lib/livetrack.server";
 import { isSettled } from "../lib/livetrack";
@@ -342,7 +343,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   };
 }
 
-export function meta({ loaderData: trip }: Route.MetaArgs) {
+export function meta({ loaderData: trip, params }: Route.MetaArgs) {
   if (!trip) return [{ title: "TrackTale" }, { name: "robots", content: "noindex, nofollow" }];
 
   const m = messages(trip.locale);
@@ -356,6 +357,19 @@ export function meta({ loaderData: trip }: Route.MetaArgs) {
     { title: `${trip.name} — TrackTale` },
     { name: "robots", content: "noindex, nofollow" },
     { name: "description", content: summary },
+    // The trip's own logo, and the only place it appears: the tile a phone
+    // shows once the family adds this page to a home screen. Nothing here draws
+    // it into the page — see `trip-logo.ts` for why it is not stored anywhere.
+    {
+      tagName: "link",
+      rel: "apple-touch-icon",
+      sizes: `${APPLE_ICON_SIZE}x${APPLE_ICON_SIZE}`,
+      href: iconHref(params.slug, APPLE_ICON_SIZE, trip.name),
+    },
+    { tagName: "link", rel: "manifest", href: `/t/${params.slug}/manifest.webmanifest` },
+    // What iOS writes under the tile; without it the page title goes there,
+    // "— TrackTale" and all, cropped to about a dozen characters.
+    { name: "apple-mobile-web-app-title", content: trip.name },
     { property: "og:type", content: "website" },
     { property: "og:title", content: trip.name },
     { property: "og:description", content: summary },

@@ -47,6 +47,8 @@ app/routes/
   t.$slug.downloads.tsx     the download centre, first entry in the page's menu
   t.$slug.packing.tsx       the packing list, second entry — trip-level, not a day's
   t.$slug.download.$file.ts the files it links to — GPX and photo zips, built per request
+  t.$slug.icon.$file.ts     the trip's home-screen tile, drawn per request from its name
+  t.$slug.manifest.ts       the web app manifest that names and sizes that tile
   traveler.$slug.tsx        a traveller's permanent page across all trips
   preview.tsx               fixture-driven family page, dev only
   lang.ts                   language cookie switch
@@ -182,7 +184,14 @@ Messages are **edited in place** rather than re-sent — that is the established
 - `phash.ts` / `photo-match.ts` / `photo-order.ts` — recognising an edited re-upload as the
   same shot, pinning a photo to the route by time, and ordering by capture time.
 - `og.server.ts`, `basemap.server.ts`, `archive.server.ts` — server-rendered SVG for the
-  share card and the self-contained zip. No browser, no tiles at render time.
+  share card and the self-contained zip. No browser, no tiles at render time. `fonts.server.ts`
+  materialises the embedded fonts on disk, which is the only way resvg will load them.
+- `trip-logo.ts` / `trip-logo.server.ts` — the trip's home-screen tile, drawn from a hash of
+  its name: ground, route squiggle and initials, all deterministic. Nothing is stored and
+  nothing is made at trip creation — the name is the seed, so a rename simply draws a
+  different tile and the `?v=` hash in the URL is what lets a phone cache it forever. It is
+  linked from `t.$slug.tsx`'s `meta` only (`apple-touch-icon` + manifest); it deliberately
+  never appears in the page.
 - `i18n.ts` — English + German, plain objects, no dependency. Anything with a number in it
   is a function so plurals and word order stay in the translation.
 
