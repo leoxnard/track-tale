@@ -18,6 +18,8 @@ React Router v8 in **Framework mode** (SSR) + React 19 + Tailwind v4, TypeScript
 Vite 8, Vitest 4. Data in **Supabase** (Postgres + Storage, service-role key, no RLS
 reliance). Bot on **grammy**. Maps with **maplibre-gl** client-side, hand-rolled SVG
 server-side. Deployed to **Vercel** (a `Dockerfile` exists as an alternative target).
+Visits are counted, when it is configured, by a self-hosted **Umami** — one script tag, no
+cookies, and nothing at all when the vars are unset.
 
 `.agents/skills/react-router/` holds the React Router reference — consult
 `references/framework-mode.md` before touching routing, loaders or actions.
@@ -224,6 +226,14 @@ Messages are **edited in place** rather than re-sent — that is the established
 
 ## Things that will bite you
 
+- **Anything the browser must read is a `VITE_` var, and it is baked in at build time.**
+  `env.server.ts` is server-only; the analytics vars in `app/lib/analytics.ts` go through
+  `import.meta.env` instead, which Vite replaces with the literal value while building. A
+  restart therefore never picks up a change — it takes a rebuild — and behind the
+  `Dockerfile` each one also needs an `ARG` in the *build* stage, because Docker drops a
+  build arg nothing declares and says so only in a warning nobody reads. The `ARG`+`ENV`
+  pair is for public values only: `ENV` writes into an image layer forever, so a secret
+  stays a runtime variable.
 - **A schema change means editing `supabase/schema.sql` and telling the user to run it.**
   There is no migration runner. Prefer reusing an existing column (see `transport.ts`) over
   adding one.
@@ -265,5 +275,8 @@ Messages are **edited in place** rather than re-sent — that is the established
 `SUPABASE_SERVICE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
 `TELEGRAM_OWNER_ID`, `CRON_SECRET`, `APP_ORIGIN`. Optional: `LIVE_TRACKING`,
 `RESEND_API_KEY`, `RESEND_INBOUND_SECRET`, `MAPTILER_KEY`, `MAPTILER_STYLE`, `OVERPASS_URL`.
+Analytics is off unless `VITE_UMAMI_SRC` *and* `VITE_UMAMI_WEBSITE_ID` are set (plus the
+optional `VITE_UMAMI_DOMAINS` host allow-list); those three are read at build time, not
+through `env.server.ts`.
 Storage buckets: `photos` and `archives` are public; `plans` and `tracks` are private and
 hold the lines as they were imported — planned and ridden.

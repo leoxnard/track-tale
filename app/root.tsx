@@ -10,7 +10,12 @@ import {
 import type { Route } from "./+types/root";
 import { resolveLocale } from "./lib/i18n";
 import { useLocale, useMessages } from "./lib/locale";
-import { Analytics } from "@vercel/analytics/react";
+import {
+  UMAMI_DOMAINS,
+  UMAMI_SRC,
+  UMAMI_WEBSITE_ID,
+  isAnalyticsEnabled,
+} from "./lib/analytics";
 import "./app.css";
 
 /** Every page hangs its language off this — see app/lib/locale.ts. */
@@ -45,12 +50,25 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#fbfaf7" />
         <Meta />
         <Links />
+        {/* Umami, rendered into the document rather than injected on the client:
+            the tag is then in the HTML the server sends, so it is there before
+            hydration and a `curl | grep data-website-id` can confirm a build
+            actually got the vars. Both values are compile-time constants, so
+            server and client agree and hydration has nothing to reconcile.
+            See app/lib/analytics.ts. */}
+        {isAnalyticsEnabled && (
+          <script
+            defer
+            src={UMAMI_SRC}
+            data-website-id={UMAMI_WEBSITE_ID}
+            data-domains={UMAMI_DOMAINS}
+          />
+        )}
       </head>
       <body>
         {children}
         <ScrollRestoration />
         <Scripts />
-        <Analytics />
       </body>
     </html>
   );

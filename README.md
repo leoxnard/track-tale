@@ -285,8 +285,24 @@ notes, stats and weather.
    what it is delivering and re-registers with the list above if button taps are missing,
    telling the owner in the chat when it did. `/diag` reports the same thing on demand,
    and `/diag fix` forces the re-registration.
-5. **Vercel**: deploy; set the env vars; `vercel.json` schedules the daily cron (01:00 UTC —
-   the reminder + plan refresh + live-link expiry).
+5. **Deploy**: on Vercel, `vercel.json` schedules the daily cron (01:00 UTC — the reminder
+   + plan refresh + live-link expiry). Self-hosted from the `Dockerfile` there is no
+   platform scheduler, so something else has to call `POST /api/cron` once a day with
+   `Authorization: Bearer $CRON_SECRET`; nothing else about the deploy changes.
+6. **Analytics** (optional): a self-hosted [Umami](https://umami.is). Add the site in
+   Umami → Settings → Websites, then set `VITE_UMAMI_SRC` and `VITE_UMAMI_WEBSITE_ID`
+   (and `VITE_UMAMI_DOMAINS`, the host allow-list) — leave them unset and the page carries
+   no analytics at all: no script tag, no third-party request, nothing to consent to.
+
+   These three are **build-time** values: Vite compiles them into the browser bundle, so
+   changing them needs a rebuild, not a restart. Building from the `Dockerfile` they must
+   be passed as build args — they are declared as `ARG` in the build stage for exactly that
+   reason, and Docker silently discards a build arg no `ARG` names.
+
+   Umami counts pageviews itself, including client-side navigation. `track()` in
+   [app/lib/analytics.ts](app/lib/analytics.ts) is there for named events, and does nothing
+   when analytics are off, so call sites need no guard. Nothing that identifies a person or
+   a trip goes into an event: a slug is what authorises a page, so it is a secret.
 
 ## Development
 
