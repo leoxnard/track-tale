@@ -10,7 +10,7 @@ import {
 import type { Route } from "./+types/root";
 import { resolveLocale } from "./lib/i18n";
 import { useLocale, useMessages } from "./lib/locale";
-import { Analytics } from "@vercel/analytics/react";
+import { Analytics } from "./components/Analytics";
 import "./app.css";
 
 /** Every page hangs its language off this — see app/lib/locale.ts. */

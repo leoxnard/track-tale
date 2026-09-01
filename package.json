@@ -16,7 +16,6 @@
     "@resvg/resvg-js": "^2.6.2",
     "@supabase/supabase-js": "^2.110.7",
     "@tmcw/togeojson": "^7.1.2",
-    "@vercel/analytics": "^2.0.1",
     "@xmldom/xmldom": "^0.9.10",
     "fflate": "^0.8.3",
     "fit-file-parser": "^3.0.2",
