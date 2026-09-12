@@ -25,6 +25,7 @@ import { wholePlanAtSource } from "./bot-route.server";
 import { loadRideOriginal } from "./originals.server";
 import { cutPlanBetween } from "./route-cut";
 import { riddenStretches, type StoredSegment } from "./day-stretches";
+import { mergeStretches } from "./downloads";
 import { packListCsv } from "./packing";
 import { listPackItems } from "./packing.server";
 
@@ -281,6 +282,25 @@ async function gpxTracksFor(tripName: string, row: TrackDayRow): Promise<GpxTrac
   return tracks;
 }
 
+/**
+ * Every ridden stretch of the trip, in order, as the one track that comes first.
+ *
+ * The days follow it individually — this does not replace them, it saves the
+ * reader joining them. Built from the same `segmentsOf` the day tracks are, so
+ * it is the recordings at full resolution and not a second, thinner answer to
+ * the same question.
+ */
+async function wholeRouteTrack(tripName: string, rows: TrackDayRow[]): Promise<GpxTrack | null> {
+  const stretches: TrackPoint[][] = [];
+  for (const row of rows) {
+    for (const seg of await segmentsOf(row)) {
+      if (seg.mode === null) stretches.push(seg.points);
+    }
+  }
+  const points = mergeStretches(stretches);
+  return points.length > 1 ? { name: `${tripName} — whole route`, segments: [points] } : null;
+}
+
 /** The GPX for one day or the whole trip, or null if there is no line in it. */
 export async function buildDownloadGpx(
   slug: string,
@@ -291,6 +311,9 @@ export async function buildDownloadGpx(
 
   const rows = await daysWithTracks(trip, day);
   const tracks = (await Promise.all(rows.map((row) => gpxTracksFor(trip.name, row)))).flat();
+  // Only for the whole trip: a single day's file is already one route.
+  const whole = day === null ? await wholeRouteTrack(trip.name, rows) : null;
+  if (whole) tracks.unshift(whole);
   if (tracks.length === 0) return null;
   return { trip, gpx: toGpxTracks(tracks) };
 }

@@ -12,6 +12,8 @@
  * — it wants the trip's name on it.
  */
 
+import type { TrackPoint } from "./track";
+
 /**
  * What the reader asked for.
  *
@@ -86,4 +88,34 @@ export function attachmentName(tripName: string, req: DownloadRequest): string {
   const part = req.day === null ? "" : `-day-${req.day}`;
   if (req.kind === "plan") return `${base}${part}-plan.gpx`;
   return req.kind === "gpx" ? `${base}${part}.gpx` : `${base}${part}-photos.zip`;
+}
+
+/**
+ * Every ridden stretch of a trip end to end, as one line.
+ *
+ * The trip GPX keeps a track per day because that is what makes a file
+ * readable in a mapping tool — but a reader who wants *the route*, to send to a
+ * device or to lay over a map in one piece, was left to join twenty tracks by
+ * hand. So the whole thing goes in first, once, as a single track: the days in
+ * order, each stretch appended to the last.
+ *
+ * Legs taken by train, ferry or bus stay out of it, the same as everywhere
+ * else — a merged line that a tool measures must not claim kilometres nobody
+ * pedalled, and the jump it leaves is the same jump the day tracks already
+ * leave. The transit legs are still in the file, in tracks of their own.
+ *
+ * A point identical to the one before it is dropped at the joins: two days that
+ * start where the last ended would otherwise put a zero-length step in the line,
+ * which some tools read as a stop.
+ */
+export function mergeStretches(stretches: TrackPoint[][]): TrackPoint[] {
+  const merged: TrackPoint[] = [];
+  for (const stretch of stretches) {
+    for (const p of stretch) {
+      const prev = merged[merged.length - 1];
+      if (prev && prev.lat === p.lat && prev.lng === p.lng) continue;
+      merged.push(p);
+    }
+  }
+  return merged;
 }

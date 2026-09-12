@@ -223,9 +223,10 @@ notes, stats and weather.
 - A **menu** beside the share button holds the things that are about the trip rather than
   about one of its days. Its first entry is the **download centre**: the tracks as GPX and
   the photos as a zip, for the whole trip or for a single day, each day listed with what it
-  actually has on it so nobody taps a day that holds nothing. Each day is its own `<trk>` in
-  the GPX and a leg taken by train, ferry or bus is a track of its own, so no mapping tool
-  totals up kilometres nobody rode. Both kinds of line come **as they arrived**, not as the
+  actually has on it so nobody taps a day that holds nothing. The whole trip's GPX opens with
+  the **entire ride merged into one long route**, so a device or a mapping tool has the tour
+  in one piece; after it each day is its own `<trk>` and a leg taken by train, ferry or bus is
+  a track of its own, so no mapping tool totals up kilometres nobody rode. Both kinds of line come **as they arrived**, not as the
   page draws them: what the database holds is reduced to a drawing budget, so every ride
   whose recording the budget cut into is kept whole in a private `tracks` bucket, and the
   **planned route** — offered as its own file, for the whole tour and for each day — comes

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachmentName,
   downloadFileName,
+  mergeStretches,
   parseDownloadFile,
   slugifyName,
   type DownloadRequest,
@@ -90,5 +91,31 @@ describe("slugifyName", () => {
 
   it("collapses punctuation and trims the edges", () => {
     expect(slugifyName("  Trip — 2026!  ")).toBe("trip-2026");
+  });
+});
+
+describe("mergeStretches", () => {
+  const pt = (lat: number, lng: number) => ({ lat, lng });
+
+  it("joins the stretches into one line, in the order given", () => {
+    expect(mergeStretches([[pt(0, 0), pt(0, 1)], [pt(1, 0), pt(1, 1)]])).toEqual([
+      pt(0, 0),
+      pt(0, 1),
+      pt(1, 0),
+      pt(1, 1),
+    ]);
+  });
+
+  it("drops the repeat where one stretch starts where the last ended", () => {
+    expect(mergeStretches([[pt(0, 0), pt(0, 1)], [pt(0, 1), pt(0, 2)]])).toEqual([
+      pt(0, 0),
+      pt(0, 1),
+      pt(0, 2),
+    ]);
+  });
+
+  it("has nothing to say about nothing", () => {
+    expect(mergeStretches([])).toEqual([]);
+    expect(mergeStretches([[], []])).toEqual([]);
   });
 });
