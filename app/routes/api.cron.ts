@@ -6,7 +6,8 @@ import { ensureTapsDelivered } from "../lib/bot-chrome.server";
 import { sweepParkedMotions } from "../lib/bot-motion.server";
 
 /**
- * Daily maintenance, triggered by Vercel Cron (schedule in vercel.json).
+ * Daily maintenance, called at 01:00 UTC by a scheduled task on the host (see the
+ * README, "Deploy") with the CRON_SECRET bearer token.
  * 1. Reminder: if the previous trip-local day has no track, silently ping the owner.
  * 2. Re-fetch Komoot-linked plan segments so edits propagate, and fill in the
  *    kept recording for Komoot days imported before those were kept.

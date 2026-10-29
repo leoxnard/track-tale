@@ -286,8 +286,13 @@ notes, stats and weather.
    what it is delivering and re-registers with the list above if button taps are missing,
    telling the owner in the chat when it did. `/diag` reports the same thing on demand,
    and `/diag fix` forces the re-registration.
-5. **Vercel**: deploy; set the env vars; `vercel.json` schedules the daily cron (01:00 UTC —
-   the reminder + plan refresh + live-link expiry).
+5. **Deploy**: any host that runs the `Dockerfile` (this one runs on Coolify); set the env
+   vars. Then schedule the daily cron (01:00 UTC — the reminder + plan refresh + live-link
+   expiry) to call the app from inside its container, for example as a Coolify scheduled
+   task:
+   ```sh
+   wget -qO- --header="Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
+   ```
 
 ## Development
 

@@ -17,7 +17,8 @@ behaviour in detail, and it is kept current. This file covers how the code is ar
 React Router v8 in **Framework mode** (SSR) + React 19 + Tailwind v4, TypeScript strict,
 Vite 8, Vitest 4. Data in **Supabase** (Postgres + Storage, service-role key, no RLS
 reliance). Bot on **grammy**. Maps with **maplibre-gl** client-side, hand-rolled SVG
-server-side. Deployed to **Vercel** (a `Dockerfile` exists as an alternative target).
+server-side. Self-hosted on **Coolify** (leosrv), built from the `Dockerfile`; a push to
+`main` deploys. The daily `/api/cron` call is a Coolify scheduled task, not part of the repo.
 
 `.agents/skills/react-router/` holds the React Router reference — consult
 `references/framework-mode.md` before touching routing, loaders or actions.
